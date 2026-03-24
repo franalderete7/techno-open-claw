@@ -271,10 +271,19 @@ function settingValueToText(value: unknown): string {
   return "";
 }
 
+function parsePositiveId(value: unknown) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
   app.post("/rpc/upsert_customer", async (request, reply) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
-    const manychatId = String(body.p_manychat_id ?? body.manychat_id ?? "").trim();
+    const manychatId = String(body.p_manychat_id ?? body.manychat_id ?? body.subscriber_id ?? body.id ?? "").trim();
 
     if (!manychatId) {
       return reply.code(400).send({ error: "Missing p_manychat_id" });
@@ -354,7 +363,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: "Missing manychat_id" });
     }
 
-    const customerId = Number(body.customer_id);
+    const customerId = parsePositiveId(body.customer_id);
     const conversationKey = `manychat:${manychatId}`;
     const channel = String(body.channel ?? "manychat").trim() || "manychat";
     const title = String(body.phone ?? body.whatsapp_phone_number_id ?? `ManyChat ${manychatId}`).trim();
@@ -378,7 +387,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           updated_at = now()
         returning id
       `,
-      [Number.isFinite(customerId) ? customerId : null, channel, conversationKey, title || null]
+      [customerId, channel, conversationKey, title || null]
     );
 
     const conversationId = conversationRows[0].id;

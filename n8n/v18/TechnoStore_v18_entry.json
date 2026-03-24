@@ -182,8 +182,8 @@
         660,
         280
       ],
-      "continueOnFail": true,
-      "alwaysOutputData": true
+      "continueOnFail": false,
+      "alwaysOutputData": false
     },
     {
       "parameters": {
@@ -234,8 +234,8 @@
         1220,
         280
       ],
-      "continueOnFail": true,
-      "alwaysOutputData": true
+      "continueOnFail": false,
+      "alwaysOutputData": false
     },
     {
       "parameters": {
@@ -295,8 +295,8 @@
         2060,
         280
       ],
-      "continueOnFail": true,
-      "alwaysOutputData": true
+      "continueOnFail": false,
+      "alwaysOutputData": false
     },
     {
       "parameters": {

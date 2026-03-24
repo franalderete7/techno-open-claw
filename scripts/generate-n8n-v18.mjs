@@ -116,6 +116,15 @@ function updateNodeJsonBody(workflow, nodeName, jsonBody) {
   node.parameters.jsonBody = jsonBody;
 }
 
+function updateNodeExecutionFlags(workflow, nodeName, flags) {
+  const node = (workflow.nodes ?? []).find((entry) => entry?.name === nodeName);
+  if (!node) {
+    return;
+  }
+
+  Object.assign(node, flags);
+}
+
 function patchEntryWorkflow(workflow, outputFile) {
   if (outputFile !== "TechnoStore_v18_entry.json") {
     return;
@@ -253,6 +262,13 @@ return [{
     "Save Incoming Message",
     `={{ JSON.stringify({ manychat_id: String($json.subscriber_id), customer_id: Number($json.customer_id) > 0 ? Number($json.customer_id) : null, role: "user", message: $json.user_message || "(vacío)", message_type: $json.was_audio ? "audio" : "text", was_audio: $json.was_audio || false, audio_transcription: $json.was_audio ? $json.user_message : null, intent_detected: null, products_mentioned: [], triggered_human: false, channel: "manychat", external_message_id: null, whatsapp_phone_number_id: null }) }}`
   );
+
+  for (const nodeName of ["Upsert Customer", "Save Incoming Message", "Check Is Latest (RPC)"]) {
+    updateNodeExecutionFlags(workflow, nodeName, {
+      continueOnFail: false,
+      alwaysOutputData: false,
+    });
+  }
 }
 
 mkdirSync(outputDir, { recursive: true });
