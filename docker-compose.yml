@@ -52,6 +52,7 @@ services:
     environment:
       INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL}
       INTERNAL_API_BEARER_TOKEN: ${INTERNAL_API_BEARER_TOKEN}
+      STOREFRONT_BASE_URL: ${STOREFRONT_BASE_URL:-https://technostoresalta.com}
       PORT: ${WEB_PORT:-3000}
       NEXT_TELEMETRY_DISABLED: 1
     ports:
