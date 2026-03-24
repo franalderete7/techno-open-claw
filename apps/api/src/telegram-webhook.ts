@@ -23,6 +23,7 @@ import {
 import { streamTelegramResponse, sendThinkingMessage } from "./telegram-streaming.js";
 import { pool } from "./db.js";
 import { transcribeAudio } from "./sales-agent.js";
+import { parseCommand, executeCommand } from "./telegram-tools.js";
 
 export async function handleTelegramWebhook(request: FastifyRequest, reply: FastifyReply) {
   if (!config.TELEGRAM_BOT_TOKEN) {
@@ -94,6 +95,28 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
         transcript = undefined;
       }
     }
+  }
+
+  // Check for commands first
+  const command = parseCommand(userMessage);
+  
+  if (command) {
+    // Execute command directly (no streaming needed for data queries)
+    const result = await executeCommand(command);
+    
+    await sendTelegramTextMessage({
+      botToken: config.TELEGRAM_BOT_TOKEN,
+      chatId: message.chat.id,
+      text: result,
+      replyToMessageId: message.message_id,
+    });
+    
+    return {
+      ok: true,
+      replied: true,
+      commandExecuted: command,
+      result,
+    };
   }
 
   // Send thinking message first
