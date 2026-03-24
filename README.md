@@ -88,6 +88,8 @@ curl http://127.0.0.1:4000/health
 
 The repo now includes shell wrappers for the API in `scripts/api/` and a usage guide in [`docs/OPERATOR_PLAYBOOK.md`](./docs/OPERATOR_PLAYBOOK.md). These are the simplest stable surface for OpenClaw to use when operating products, stock, orders, and conversations.
 
+For project history, current VPS status, and next migration steps, see [`docs/MIGRATION_HANDOFF.md`](./docs/MIGRATION_HANDOFF.md).
+
 ## Next build steps
 
 1. OpenClaw config and workspace instructions
