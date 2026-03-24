@@ -51,6 +51,20 @@ Import all of these:
 - `TechnoStore_v18_state_update.json`
 - `TechnoStore_v18_entry.json`
 
+## CLI import from the VPS host
+
+If n8n runs in Docker on the VPS, use:
+
+```bash
+./scripts/import-n8n-v18.sh
+```
+
+Optional override if the container name is not auto-detected:
+
+```bash
+N8N_CONTAINER_NAME=n8n-n8n-1 ./scripts/import-n8n-v18.sh
+```
+
 ## After import
 
 Relink the child workflows inside the entry workflow if n8n does not resolve them automatically.

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { Instrument_Sans, Newsreader } from "next/font/google";
 import type { ReactNode } from "react";
@@ -32,9 +33,22 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className={`${sans.variable} ${serif.variable}`}>
         <main>
           <header className="masthead">
-            <div>
-              <span className="eyebrow">Open Claw</span>
-              <h1 className="wordmark">TechnoStore Ops</h1>
+            <div className="masthead-brand">
+              <div className="brand-badge" aria-hidden="true">
+                <Image
+                  src="/brand/logo-negro-salta.png"
+                  alt="TechnoStore Salta"
+                  width={716}
+                  height={190}
+                  className="brand-badge-image"
+                  priority
+                />
+              </div>
+
+              <div className="brand-copy">
+                <span className="eyebrow">Open Claw</span>
+                <h1 className="wordmark">TechnoStore Ops</h1>
+              </div>
             </div>
             <p className="masthead-meta">Catalog, stock, customers, orders, workflows.</p>
           </header>
