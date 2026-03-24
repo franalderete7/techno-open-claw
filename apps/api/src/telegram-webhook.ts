@@ -1,8 +1,8 @@
 /**
- * Telegram Webhook Handler - Sales Agent Integration
+ * Telegram Webhook Handler - Operator Assistant
  *
- * This replaces the inline webhook handler with a modular approach
- * that uses the sales-agent module for turn processing.
+ * This is for YOU (the developer/operator) to control the app via Telegram.
+ * NOT for customer sales - that's ManyChat/WhatsApp.
  */
 
 import { FastifyRequest, FastifyReply } from "fastify";
@@ -20,7 +20,8 @@ import {
   getTelegramFileUrl,
   sendTelegramTextMessage,
 } from "./telegram.js";
-import { processTurn, saveInboundMessage, transcribeAudio } from "./sales-agent.js";
+import { streamTelegramResponse, sendThinkingMessage } from "./telegram-streaming.js";
+import { pool } from "./db.js";
 
 export async function handleTelegramWebhook(request: FastifyRequest, reply: FastifyReply) {
   if (!config.TELEGRAM_BOT_TOKEN) {
@@ -94,77 +95,83 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
     }
   }
 
-  // Process the turn through the sales agent
-  const turnResult = await processTurn({
-    channel: "telegram",
-    channel_thread_key: conversationKey,
-    user_message: userMessage,
-    raw_message: textBody || mediaUrl || "(media)",
-    is_audio: isAudio,
-    subscriber_id: String(message.chat.id),
-    phone: undefined,
-    message_date: messageAt.toISOString(),
-  });
+  // Send thinking message first
+  const thinkingMsgId = await sendThinkingMessage(
+    message.chat.id,
+    config.TELEGRAM_BOT_TOKEN,
+    message.message_id
+  );
 
-  // Save the inbound message (now we have the conversation_id from turn processing)
-  if (turnResult.conversation_id) {
-    await saveInboundMessage({
-      conversation_id: turnResult.conversation_id,
-      direction: "inbound",
-      sender_kind: "customer",
-      message_type: messageType,
-      text_body: textBody,
-      media_url: mediaUrl,
-      transcript: transcript,
-      payload: update as Record<string, unknown>,
-    });
+  // Build system prompt - respond in USER's language, not forced Spanish
+  const systemPrompt = `You are the personal assistant of the TechnoStore developer.
+Respond in the SAME LANGUAGE the user writes to you.
+- If they write in Spanish → respond in Spanish
+- If they write in English → respond in English
+- If they write in Russian → respond in Russian
+- etc.
+
+Be natural, direct, and technical when needed. Like a teammate, not corporate.
+You can help with:
+- Database queries
+- System status
+- App commands
+- Products, customers, sales info
+- Debugging and logs
+
+If you don't understand, ask. If you don't have the info, say so.`;
+
+  // Handle images with vision model (download and convert to base64)
+  let imageBase64: string | undefined = undefined;
+  if (messageType === "image" && message.photo && message.photo.length > 0) {
+    const photo = message.photo[message.photo.length - 1];
+    try {
+      const fileUrl = await getTelegramFileUrl(photo.file_id, config.TELEGRAM_BOT_TOKEN);
+      const imageResponse = await fetch(fileUrl);
+      const arrayBuffer = await imageResponse.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      imageBase64 = `data:image/jpeg;base64,${base64}`;
+    } catch (err) {
+      request.log.warn({ err }, "Failed to download image for vision model");
+    }
   }
 
-  // Send reply if needed (with streaming for internal dev chat)
-  if (turnResult.should_reply && turnResult.reply_text && config.TELEGRAM_BOT_TOKEN) {
-    try {
-      const sent = await sendTelegramTextMessage({
-        botToken: config.TELEGRAM_BOT_TOKEN,
-        chatId: message.chat.id,
-        text: turnResult.reply_text,
-        replyToMessageId: message.message_id,
-      });
+  // Stream the response
+  const prompt = `User message: "${userMessage}"
+${visionContext}
 
-      request.log.info(
-        {
-          chatId: message.chat.id,
-          outboundMessageId: sent.message_id,
-          conversationId: turnResult.conversation_id,
-        },
-        "Sent Telegram reply"
-      );
-    } catch (error) {
-      request.log.error(
-        {
-          error,
-          chatId: message.chat.id,
-          conversationId: turnResult.conversation_id,
-        },
-        "Failed to send Telegram reply"
-      );
-    }
-  } else {
-    request.log.info(
-      {
-        chatId: message.chat.id,
-        conversationId: turnResult.conversation_id,
-        shouldReply: turnResult.should_reply,
-      },
-      "Telegram turn completed without outbound reply"
+Context: You are the developer's assistant for TechnoStore. Help them with what they need.`;
+
+  const responseText = await streamTelegramResponse({
+    chatId: message.chat.id,
+    messageId: thinkingMsgId || message.message_id,
+    botToken: config.TELEGRAM_BOT_TOKEN,
+    prompt: prompt,
+    systemPrompt: systemPrompt,
+    imageUrl: imageBase64,
+  });
+
+  // Save message to DB (optional, for history)
+  try {
+    await pool.query(
+      `INSERT INTO messages (conversation_id, direction, sender_kind, message_type, text_body, created_at)
+       VALUES (
+         (SELECT id FROM conversations WHERE channel_thread_key = $1 LIMIT 1),
+         'inbound',
+         'customer',
+         $2,
+         $3,
+         NOW()
+       )
+       ON CONFLICT DO NOTHING`,
+      [conversationKey, messageType, textBody || mediaUrl]
     );
+  } catch (err) {
+    request.log.warn({ err }, "Failed to save inbound message");
   }
 
   return {
     ok: true,
-    conversationId: turnResult.conversation_id,
-    customerId: turnResult.customer_id,
-    messageType,
-    turnProcessed: turnResult.state_applied,
-    replied: turnResult.should_reply,
+    replied: true,
+    responseText,
   };
 }

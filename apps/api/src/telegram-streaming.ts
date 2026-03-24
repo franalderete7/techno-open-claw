@@ -14,6 +14,7 @@ export interface StreamOptions {
   botToken: string;
   prompt: string;
   systemPrompt?: string;
+  imageUrl?: string; // Optional: for vision models
 }
 
 /**
@@ -30,7 +31,7 @@ function escapeTelegramMarkdown(text: string): string {
 }
 
 export async function streamTelegramResponse(options: StreamOptions): Promise<string> {
-  const { chatId, messageId, botToken, prompt, systemPrompt } = options;
+  const { chatId, messageId, botToken, prompt, systemPrompt, imageUrl } = options;
   
   const model = config.OLLAMA_MODEL || "qwen3.5:cloud";
   const baseUrl = config.OLLAMA_BASE_URL || "http://172.17.0.1:11434";
@@ -44,18 +45,29 @@ export async function streamTelegramResponse(options: StreamOptions): Promise<st
   let throttleCounter = 0;
   
   try {
+    // Check if we have an image (vision model)
+    const requestBody: any = {
+      model: model,
+      stream: true,
+      options: {
+        temperature: 0.7,
+        top_p: 0.9,
+      },
+    };
+    
+    if (imageUrl) {
+      // Use vision model with image
+      requestBody.prompt = fullPrompt;
+      requestBody.images = [imageUrl.split(',').pop()]; // Extract base64 from data URL
+    } else {
+      // Standard text-only
+      requestBody.prompt = fullPrompt;
+    }
+    
     const response = await fetch(`${baseUrl}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: model,
-        prompt: fullPrompt,
-        stream: true,
-        options: {
-          temperature: 0.7,
-          top_p: 0.9,
-        },
-      }),
+      body: JSON.stringify(requestBody),
     });
     
     if (!response.ok) {
