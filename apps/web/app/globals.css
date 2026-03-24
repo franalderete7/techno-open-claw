@@ -548,6 +548,7 @@ nav a:hover {
 .settings-layout {
   display: grid;
   gap: 14px;
+  align-items: start;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
 
@@ -663,6 +664,11 @@ nav a:hover {
   gap: 6px;
   padding-top: 10px;
   border-top: 0.5px solid var(--line);
+}
+
+.setting-row:first-child {
+  padding-top: 0;
+  border-top: none;
 }
 
 .setting-term {

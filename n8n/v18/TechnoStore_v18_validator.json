@@ -1,0 +1,47 @@
+{
+  "name": "TechnoStore - v18 Validator",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "c3934351-8272-53a3-9761-0b39f1d452d6",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json || {};\nconst context = data.context || {};\nconst router = data.router_output || {};\nconst responder = data.responder_output || {};\n\nconst candidateProducts = Array.isArray(context.candidate_products) ? context.candidate_products : [];\nconst candidateMap = new Map(candidateProducts.map((product) => [product.product_key, product]));\nconst website = String(context.store?.store_website_url || 'https://puntotechno.com').trim();\n\nconst unique = (values) => [...new Set(values.filter(Boolean))];\nconst allowedActions = new Set([\n  'attach_store_url',\n  'attach_product_images',\n  'share_store_location',\n  'no_reply',\n]);\n\nconst stripUnexpectedUrls = (text, allowedUrl) =>\n  String(text || '')\n    .replace(/https?:\\/\\/\\S+/gi, (url) => {\n      if (!allowedUrl) return '';\n      return url.includes(allowedUrl.replace(/^https?:\\/\\//, '')) ? url : '';\n    })\n    .replace(/\\s+/g, ' ')\n    .trim();\n\nlet selectedProductKeys = unique(Array.isArray(responder.selected_product_keys) ? responder.selected_product_keys : []).filter((key) => candidateMap.has(key));\nif (router.route_key === 'exact_product_quote' && selectedProductKeys.length === 0 && candidateProducts[0]?.product_key) {\n  selectedProductKeys = [candidateProducts[0].product_key];\n}\n\nconst actionList = unique(Array.isArray(responder.actions) ? responder.actions : []).filter((action) => allowedActions.has(action));\nconst defaultIntentByRoute = {\n  storefront_order: 'storefront_order',\n  exact_product_quote: 'price_inquiry',\n  brand_catalog: 'catalog_browse',\n  generic_sales: 'greeting',\n  store_info: 'store_info',\n};\n\nconst defaultStageByRoute = {\n  storefront_order: 'closing',\n  exact_product_quote: 'interested',\n  brand_catalog: 'browsing',\n  generic_sales: 'browsing',\n  store_info: 'browsing',\n};\n\nconst stateDelta = responder.state_delta && typeof responder.state_delta === 'object' ? responder.state_delta : {};\nconst finalStateDelta = {\n  intent_key: String(stateDelta.intent_key || defaultIntentByRoute[router.route_key] || 'unknown'),\n  funnel_stage: String(stateDelta.funnel_stage || defaultStageByRoute[router.route_key] || 'browsing'),\n  lead_score_delta: Number.isFinite(Number(stateDelta.lead_score_delta)) ? Number(stateDelta.lead_score_delta) : 0,\n  share_store_location: stateDelta.share_store_location === true,\n  selected_product_keys: unique(Array.isArray(stateDelta.selected_product_keys) ? stateDelta.selected_product_keys : []).filter((key) => candidateMap.has(key)),\n  tags_to_add: unique(Array.isArray(stateDelta.tags_to_add) ? stateDelta.tags_to_add : []),\n  tags_to_remove: unique(Array.isArray(stateDelta.tags_to_remove) ? stateDelta.tags_to_remove : []),\n  payment_method_key: stateDelta.payment_method_key ?? null,\n  summary: String(stateDelta.summary || router.rationale || 'Turno procesado').slice(0, 240),\n};\n\nif (selectedProductKeys.length > 0 && finalStateDelta.selected_product_keys.length === 0) {\n  finalStateDelta.selected_product_keys = [...selectedProductKeys];\n}\n\nconst allowStoreUrlInReply = ['brand_catalog', 'generic_sales', 'store_info'].includes(router.route_key);\nlet replyText = stripUnexpectedUrls(responder.reply_text || '', allowStoreUrlInReply ? website : '');\nconst validationErrors = [];\nconst validationWarnings = [];\n\nif (!replyText) {\n  validationWarnings.push({\n    code: 'empty_reply_text',\n    message: 'La respuesta del responder llegó vacía y se aplicó un fallback.',\n    field: 'reply_text',\n  });\n\n  if (router.route_key === 'exact_product_quote' && candidateProducts[0]) {\n    const product = candidateProducts[0];\n    const priceArs = product.promo_price_ars || product.price_ars;\n    replyText = 'Sí, tengo ' + product.product_name + '. Queda en ARS ' + priceArs + '. Si querés, te confirmo disponibilidad y vemos cuál te conviene más.';\n  } else if (router.route_key === 'store_info') {\n    replyText = 'Sí, te ayudo por acá. Si querés mirar todo el catálogo, lo tenés en ' + website + '. ¿Qué modelo buscás?';\n  } else {\n    replyText = 'Sí, te ayudo por acá. Contame qué modelo o presupuesto tenés en mente y lo vemos juntos.';\n  }\n}\n\nconst shouldOfferStoreUrl = router.should_offer_store_url === true && ['brand_catalog', 'generic_sales', 'store_info'].includes(router.route_key);\nif (shouldOfferStoreUrl && !/puntotechno\\.com/i.test(replyText)) {\n  const appendText = router.route_key === 'generic_sales'\n    ? ' Si querés mirar todo el catálogo, también lo tenés en ' + website + '.'\n    : ' También podés ver todo el catálogo en ' + website + '.';\n  replyText = (replyText + appendText).replace(/\\s+/g, ' ').trim();\n}\n\nif (router.route_key === 'exact_product_quote') {\n  replyText = replyText\n    .replace(/(?:si queres|si querés)?\\s*tambien pod[eé]s ver todo el cat[aá]logo en\\s*https?:\\/\\/[^\\s]+\\.?/gi, '')\n    .replace(/(?:si queres|si querés)?\\s*pod[eé]s mirar todo el cat[aá]logo en\\s*https?:\\/\\/[^\\s]+\\.?/gi, '')\n    .replace(/https?:\\/\\/[^\\s]+/gi, '')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nreplyText = replyText.slice(0, 1100).trim();\n\nconst replyMessages = [{ type: 'text', text: replyText }];\nconst shouldSend = !actionList.includes('no_reply');\n\nreturn [{\n  json: {\n    ...data,\n    bot_message_text: replyText,\n    should_send: shouldSend,\n    wa_messages: replyMessages,\n    validator_output: {\n      approved: validationErrors.length === 0,\n      reply_messages: replyMessages,\n      selected_product_keys: selectedProductKeys,\n      actions: actionList,\n      final_state_delta: finalStateDelta,\n      validation_errors: validationErrors,\n      validation_warnings: validationWarnings,\n      fallback_reason: validationWarnings.length > 0 ? validationWarnings[0].code : null,\n    },\n  }\n}];"
+      },
+      "id": "c9411f09-00ba-ba6d-025f-b53020ad3bfa",
+      "name": "Validate Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Validate Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

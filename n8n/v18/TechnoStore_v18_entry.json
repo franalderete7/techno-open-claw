@@ -1,0 +1,1415 @@
+{
+  "name": "TechnoStore - AI Sales Agent v18",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "techno-sales-v18",
+        "options": {}
+      },
+      "id": "66c0c28b-4c66-fc57-4243-1c05723d4e15",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        280
+      ],
+      "webhookId": "techno-sales-v18"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw || {};\n\nconst toBool = (value) => {\n  if (typeof value === 'boolean') return value;\n  const normalized = String(value ?? '').trim().toLowerCase();\n  return ['true', '1', 'yes', 'si', 'sí', 'y'].includes(normalized);\n};\n\nconst getCustomField = (fields, key) => {\n  if (Array.isArray(fields)) {\n    const hit = fields.find((item) => item?.name === key || item?.key === key || item?.field_name === key);\n    return hit?.value ?? '';\n  }\n  if (fields && typeof fields === 'object') {\n    return fields[key] ?? '';\n  }\n  return '';\n};\n\nconst subscriberId = String(body.subscriber_id || body.id || '');\nconst message = String(body.message || body.last_input_text || '').trim();\nconst customFields = body.custom_fields || {};\nconst storefrontOrderMatch = message.match(/pedido\\s+web\\s*#?\\s*(\\d+)[^\\n]*?\\btoken\\b\\s*([a-z0-9_-]{8,64})/i) || message.match(/#(\\d+)[^\\n]*?\\btoken\\b\\s*([a-z0-9_-]{8,64})/i);\nconst storefrontOrderId = storefrontOrderMatch ? Number(storefrontOrderMatch[1]) : null;\nconst storefrontOrderToken = storefrontOrderMatch ? String(storefrontOrderMatch[2] || '').trim().toLowerCase() : '';\n\nreturn [{\n  json: {\n    subscriber_id: subscriberId,\n    first_name: body.first_name || 'amigo',\n    last_name: body.last_name || '',\n    phone: body.whatsapp_phone || body.phone || '',\n    timezone: body.timezone || '',\n    channel: 'manychat',\n    city: getCustomField(customFields, 'city'),\n    funnel_stage: getCustomField(customFields, 'funnel_stage'),\n    interested_product: getCustomField(customFields, 'interested_product'),\n    is_human_active: toBool(getCustomField(customFields, 'is_human_active')),\n    raw_message: message,\n    is_audio: message.startsWith('https://') && (message.includes('fbsbx.com') || message.includes('fbcdn.net') || message.includes('manybot-files.s3')),\n    is_empty: !message,\n    storefront_order_id: Number.isFinite(storefrontOrderId) ? storefrontOrderId : null,\n    storefront_order_token: storefrontOrderToken || '',\n  }\n}];"
+      },
+      "id": "7cea7c3c-8429-9390-ea63-1b88db75ca10",
+      "name": "Parse Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9d344106-acfc-86c5-646a-ed97086d72b5",
+              "leftValue": "={{ $json.is_audio }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0cf5b8a1-2edb-b060-57f7-9d265a6bf2c7",
+      "name": "Is Audio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -380,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.raw_message }}",
+        "options": {
+          "response": {
+            "responseFormat": "file",
+            "outputPropertyName": "data"
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "800afdf8-861a-b5f7-f7fc-d43be81ac055",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -120,
+        120
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3-turbo"
+            },
+            {
+              "name": "language",
+              "value": "es"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "96c44e0c-80a1-200a-4fe9-f63f08dbe876",
+      "name": "Groq Whisper Transcribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        120
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mw4ftZwdAxSdWFjU",
+          "name": "Groq Whisper"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const parsed = $('Parse Input').first().json;\nlet userMessage = String(parsed.raw_message || '');\nlet wasAudio = false;\n\ntry {\n  const whisper = $('Groq Whisper Transcribe').first().json;\n  if (whisper && typeof whisper === 'object' && whisper.text) {\n    userMessage = String(whisper.text).trim();\n    wasAudio = true;\n  }\n} catch (error) {\n  wasAudio = false;\n}\n\nreturn [{\n  json: {\n    ...parsed,\n    user_message: userMessage.trim() || '(vacío)',\n    was_audio: wasAudio,\n  }\n}];"
+      },
+      "id": "0d4ee406-22bf-e238-5092-2b3657970dcd",
+      "name": "Merge Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/rpc/upsert_customer",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_manychat_id: String($json.subscriber_id || \"\"), p_phone: String($json.phone || \"\"), p_whatsapp_phone: String($json.phone || \"\"), p_first_name: String($json.first_name || \"\"), p_last_name: String($json.last_name || \"\"), p_timezone: String($json.timezone || \"\") }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "37e349bc-1fd2-f6aa-930b-cdc432eae4c2",
+      "name": "Upsert Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        280
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Merge Input').first().json || {};\nconst raw = $input.first().json;\n\nconst rows = Array.isArray(raw) ? raw : [raw];\nconst first = rows[0] || {};\nconst rawId = first.upsert_customer ?? first.customer_id ?? first.id ?? raw?.upsert_customer ?? raw?.customer_id ?? raw?.id ?? null;\nconst customerId = Number(rawId);\n\nreturn [{\n  json: {\n    ...base,\n    customer_id: Number.isFinite(customerId) ? customerId : null,\n  }\n}];"
+      },
+      "id": "f8770212-f8bd-85a4-6c66-8e49a1f6f456",
+      "name": "Attach Customer Id",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ manychat_id: String($json.subscriber_id), customer_id: $json.customer_id || null, role: \"user\", message: $json.user_message || \"(vacío)\", message_type: $json.was_audio ? \"audio\" : \"text\", was_audio: $json.was_audio || false, audio_transcription: $json.was_audio ? $json.user_message : null, intent_detected: null, products_mentioned: [], triggered_human: false, channel: \"manychat\", external_message_id: null, whatsapp_phone_number_id: null }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "423a5e24-c219-9f5a-1230-9f2351f461dc",
+      "name": "Save Incoming Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        280
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Attach Customer Id').first().json || {};\nconst raw = $input.first().json;\n\nlet savedMessageId = null;\nif (Array.isArray(raw) && raw[0]?.id != null) savedMessageId = raw[0].id;\nif (!savedMessageId && raw && typeof raw === 'object' && raw.id != null) savedMessageId = raw.id;\n\nreturn [{\n  json: {\n    ...base,\n    saved_message_id: savedMessageId,\n  }\n}];"
+      },
+      "id": "84747db0-83b1-5e97-a206-0ffd7af995cc",
+      "name": "Attach Saved Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nawait new Promise((resolve) => setTimeout(resolve, 8000));\nreturn [{ json: item }];"
+      },
+      "id": "cceff924-4747-7c16-7814-9c84014ae163",
+      "name": "Wait 8s Debounce",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/rpc/check_is_latest_message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_manychat_id: $json.subscriber_id, p_message_id: $json.saved_message_id || 0 }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "c142544a-56a1-87e5-2edd-c9642018b4f8",
+      "name": "Check Is Latest (RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2060,
+        280
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Wait 8s Debounce').first().json || {};\nconst rpcResult = $input.first().json;\n\nlet isLatest = false;\nif (typeof rpcResult === 'boolean') {\n  isLatest = rpcResult;\n} else if (Array.isArray(rpcResult) && rpcResult.length > 0) {\n  isLatest = rpcResult[0] === true || rpcResult[0]?.check_is_latest_message === true;\n} else if (rpcResult && typeof rpcResult === 'object') {\n  isLatest = rpcResult.check_is_latest_message === true || rpcResult.result === true;\n}\n\nreturn [{\n  json: {\n    ...base,\n    should_continue: isLatest === true && !base.is_empty,\n  }\n}];"
+      },
+      "id": "0d5668c3-640f-a39d-a2ab-62cdabe0f06c",
+      "name": "Debounce Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b067d32a-122a-932e-d98b-a8f2f5ca5ec0",
+              "leftValue": "={{ $json.should_continue }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3c06a2f9-26a6-c4df-db4c-979553d1906d",
+      "name": "Is Latest?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2600,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RELINK_CONTEXT_BUILDER",
+          "mode": "list",
+          "cachedResultName": "TechnoStore - v18 Context Builder"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subscriber_id": "={{ $json.subscriber_id }}",
+            "customer_id": "={{ $json.customer_id }}",
+            "first_name": "={{ $json.first_name }}",
+            "last_name": "={{ $json.last_name }}",
+            "phone": "={{ $json.phone }}",
+            "timezone": "={{ $json.timezone }}",
+            "channel": "={{ $json.channel }}",
+            "user_message": "={{ $json.user_message }}",
+            "raw_message": "={{ $json.raw_message }}",
+            "was_audio": "={{ $json.was_audio }}",
+            "storefront_order_id": "={{ $json.storefront_order_id }}",
+            "storefront_order_token": "={{ $json.storefront_order_token }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "subscriber_id",
+              "displayName": "subscriber_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "first_name",
+              "displayName": "first_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "last_name",
+              "displayName": "last_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "timezone",
+              "displayName": "timezone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "user_message",
+              "displayName": "user_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "raw_message",
+              "displayName": "raw_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "was_audio",
+              "displayName": "was_audio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean"
+            },
+            {
+              "id": "storefront_order_id",
+              "displayName": "storefront_order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "storefront_order_token",
+              "displayName": "storefront_order_token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "5f99c258-675e-ac4e-a03f-ce80cad11c71",
+      "name": "Execute Context Builder",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2900,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RELINK_ROUTER",
+          "mode": "list",
+          "cachedResultName": "TechnoStore - v18 Router"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subscriber_id": "={{ $json.subscriber_id }}",
+            "customer_id": "={{ $json.customer_id }}",
+            "user_message": "={{ $json.user_message }}",
+            "context": "={{ $json.context }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "subscriber_id",
+              "displayName": "subscriber_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "user_message",
+              "displayName": "user_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "1ad33986-ca5b-ed03-60aa-7338eb42f58b",
+      "name": "Execute Router",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3200,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ab7aa919-5929-ce4a-2163-0403909fe7c4",
+              "leftValue": "={{ $json.use_info_responder }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e2d77495-9004-d8a0-2460-699e757a3ca7",
+      "name": "Use Info Responder?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3480,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RELINK_INFO_RESPONDER",
+          "mode": "list",
+          "cachedResultName": "TechnoStore - v18 Info Responder"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subscriber_id": "={{ $json.subscriber_id }}",
+            "customer_id": "={{ $json.customer_id }}",
+            "user_message": "={{ $json.user_message }}",
+            "context": "={{ $json.context }}",
+            "router_output": "={{ $json.router_output }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "subscriber_id",
+              "displayName": "subscriber_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "user_message",
+              "displayName": "user_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "router_output",
+              "displayName": "router_output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "5f737926-b320-ca2a-2d10-a5acc306396a",
+      "name": "Execute Info Responder",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3780,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RELINK_SALES_RESPONDER",
+          "mode": "list",
+          "cachedResultName": "TechnoStore - v18 Sales Responder"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subscriber_id": "={{ $json.subscriber_id }}",
+            "customer_id": "={{ $json.customer_id }}",
+            "user_message": "={{ $json.user_message }}",
+            "context": "={{ $json.context }}",
+            "router_output": "={{ $json.router_output }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "subscriber_id",
+              "displayName": "subscriber_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "user_message",
+              "displayName": "user_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "router_output",
+              "displayName": "router_output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "cf985a2c-e4ae-28cd-4a81-801f5161096d",
+      "name": "Execute Sales Responder",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3780,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RELINK_VALIDATOR",
+          "mode": "list",
+          "cachedResultName": "TechnoStore - v18 Validator"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subscriber_id": "={{ $json.subscriber_id }}",
+            "customer_id": "={{ $json.customer_id }}",
+            "user_message": "={{ $json.user_message }}",
+            "context": "={{ $json.context }}",
+            "router_output": "={{ $json.router_output }}",
+            "responder_output": "={{ $json.responder_output }}",
+            "responder_provider_name": "={{ $json.responder_provider_name }}",
+            "responder_model_name": "={{ $json.responder_model_name }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "subscriber_id",
+              "displayName": "subscriber_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "user_message",
+              "displayName": "user_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "router_output",
+              "displayName": "router_output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "responder_output",
+              "displayName": "responder_output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "responder_provider_name",
+              "displayName": "responder_provider_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "responder_model_name",
+              "displayName": "responder_model_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "db3193e9-ad3d-ed47-1841-5be0b498a447",
+      "name": "Execute Validator",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        4080,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e2e02bda-d3cb-7d20-6ad4-263aaf50d340",
+              "leftValue": "={{ $json.should_send }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "19026629-b46b-29d2-79ea-174770ef73ab",
+      "name": "Should Send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4360,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Execute Validator').first().json || {};\nconst messages = Array.isArray(data.wa_messages) ? data.wa_messages : [{ type: 'text', text: data.bot_message_text || '' }];\nconst waMessages = messages.map((message) => {\n  if (message.type === 'image') {\n    return {\n      type: 'image',\n      url: message.image_url || message.url,\n      image_url: message.image_url || message.url,\n    };\n  }\n  return {\n    type: 'text',\n    text: String(message.text || '').trim(),\n  };\n}).filter((message) => (message.type === 'text' ? message.text : message.url));\n\nreturn [{\n  json: {\n    ...data,\n    payload: {\n      subscriber_id: data.subscriber_id,\n      data: {\n        version: 'v2',\n        content: {\n          type: 'whatsapp',\n          messages: waMessages,\n        },\n      },\n    },\n  }\n}];"
+      },
+      "id": "f7d29cf5-7424-c1e0-f0f4-9d5545832747",
+      "name": "Prepare WhatsApp Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4640,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "cc66d689-68f4-72b2-6601-2e05a08b0e2e",
+      "name": "Send to WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4920,
+        120
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dTDdJWgAz1yrPfPe",
+          "name": "ManyChat API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Prepare WhatsApp Payload').first().json || {};\nconst sendResponse = $input.first().json || {};\n\nreturn [{\n  json: {\n    ...data,\n    send_result: {\n      attempted: true,\n      response: sendResponse,\n      sent_at: new Date().toISOString(),\n    },\n  }\n}];"
+      },
+      "id": "5693bd1e-4191-8385-d87c-7cab24fdd736",
+      "name": "Build Sent State Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5200,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Execute Validator').first().json || {};\n\nreturn [{\n  json: {\n    ...data,\n    send_result: {\n      attempted: false,\n      skipped: true,\n      sent_at: new Date().toISOString(),\n    },\n  }\n}];"
+      },
+      "id": "ad4b75ec-a816-a308-cf46-ea237509ab77",
+      "name": "Build Skipped State Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4640,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RELINK_STATE_UPDATE",
+          "mode": "list",
+          "cachedResultName": "TechnoStore - v18 State Update"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subscriber_id": "={{ $json.subscriber_id }}",
+            "customer_id": "={{ $json.customer_id }}",
+            "user_message": "={{ $json.user_message }}",
+            "context": "={{ $json.context }}",
+            "router_output": "={{ $json.router_output }}",
+            "responder_output": "={{ $json.responder_output }}",
+            "responder_provider_name": "={{ $json.responder_provider_name }}",
+            "responder_model_name": "={{ $json.responder_model_name }}",
+            "validator_output": "={{ $json.validator_output }}",
+            "should_send": "={{ $json.should_send }}",
+            "bot_message_text": "={{ $json.bot_message_text }}",
+            "send_result": "={{ $json.send_result }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "subscriber_id",
+              "displayName": "subscriber_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "user_message",
+              "displayName": "user_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "router_output",
+              "displayName": "router_output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "responder_output",
+              "displayName": "responder_output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "responder_provider_name",
+              "displayName": "responder_provider_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "responder_model_name",
+              "displayName": "responder_model_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "validator_output",
+              "displayName": "validator_output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "should_send",
+              "displayName": "should_send",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean"
+            },
+            {
+              "id": "bot_message_text",
+              "displayName": "bot_message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "send_result",
+              "displayName": "send_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "b06a3f38-49be-aeb3-555a-e2f111e23f07",
+      "name": "Execute State Update",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        5480,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Input": {
+      "main": [
+        [
+          {
+            "node": "Is Audio?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Audio?": {
+      "main": [
+        [
+          {
+            "node": "Download Audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio": {
+      "main": [
+        [
+          {
+            "node": "Groq Whisper Transcribe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Whisper Transcribe": {
+      "main": [
+        [
+          {
+            "node": "Merge Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Input": {
+      "main": [
+        [
+          {
+            "node": "Upsert Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Customer": {
+      "main": [
+        [
+          {
+            "node": "Attach Customer Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Customer Id": {
+      "main": [
+        [
+          {
+            "node": "Save Incoming Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Incoming Message": {
+      "main": [
+        [
+          {
+            "node": "Attach Saved Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Saved Message": {
+      "main": [
+        [
+          {
+            "node": "Wait 8s Debounce",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 8s Debounce": {
+      "main": [
+        [
+          {
+            "node": "Check Is Latest (RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Is Latest (RPC)": {
+      "main": [
+        [
+          {
+            "node": "Debounce Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Debounce Check": {
+      "main": [
+        [
+          {
+            "node": "Is Latest?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Latest?": {
+      "main": [
+        [
+          {
+            "node": "Execute Context Builder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Execute Context Builder": {
+      "main": [
+        [
+          {
+            "node": "Execute Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Router": {
+      "main": [
+        [
+          {
+            "node": "Use Info Responder?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Info Responder?": {
+      "main": [
+        [
+          {
+            "node": "Execute Info Responder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Sales Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Info Responder": {
+      "main": [
+        [
+          {
+            "node": "Execute Validator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sales Responder": {
+      "main": [
+        [
+          {
+            "node": "Execute Validator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Validator": {
+      "main": [
+        [
+          {
+            "node": "Should Send?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Send?": {
+      "main": [
+        [
+          {
+            "node": "Prepare WhatsApp Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Skipped State Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare WhatsApp Payload": {
+      "main": [
+        [
+          {
+            "node": "Send to WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Build Sent State Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Sent State Input": {
+      "main": [
+        [
+          {
+            "node": "Execute State Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Skipped State Input": {
+      "main": [
+        [
+          {
+            "node": "Execute State Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

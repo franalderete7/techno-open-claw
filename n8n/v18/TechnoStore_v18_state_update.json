@@ -1,0 +1,235 @@
+{
+  "name": "TechnoStore - v18 State Update",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "5af033b1-5cfe-10c8-cea6-4a02ab28f7cd",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json || {};\nconst context = data.context || {};\nconst router = data.router_output || {};\nconst validator = data.validator_output || {};\nconst state = validator.final_state_delta || {};\n\nconst now = new Date().toISOString();\nconst currentTags = Array.isArray(context.customer?.tags) ? context.customer.tags : [];\nconst unique = (values) => [...new Set(values.filter(Boolean))];\nconst mergedTags = unique([\n  ...currentTags,\n  ...(Array.isArray(state.tags_to_add) ? state.tags_to_add : []),\n]).filter((tag) => !(Array.isArray(state.tags_to_remove) ? state.tags_to_remove : []).includes(tag));\n\nconst currentLeadScore = Number(context.customer?.lead_score || 0);\nconst nextLeadScore = Math.max(0, Math.min(100, currentLeadScore + Number(state.lead_score_delta || 0)));\nconst selectedProductKeys = Array.isArray(validator.selected_product_keys) ? validator.selected_product_keys : [];\n\nconst updates = {\n  last_bot_interaction: now,\n  updated_at: now,\n  last_intent: state.intent_key || null,\n  funnel_stage: state.funnel_stage || null,\n  lead_score: nextLeadScore,\n  tags: mergedTags,\n};\n\nif (selectedProductKeys[0]) {\n  updates.interested_product = selectedProductKeys[0];\n}\n\nif (state.payment_method_key) {\n  updates.payment_method_last = state.payment_method_key;\n}\n\nconst brandList = unique(selectedProductKeys\n  .map((key) => {\n    const product = (Array.isArray(context.candidate_products) ? context.candidate_products : []).find((item) => item.product_key === key);\n    return product?.brand_key || null;\n  })\n  .filter(Boolean));\n\nif (brandList.length > 0) {\n  const currentBrands = Array.isArray(context.customer?.brands_mentioned) ? context.customer.brands_mentioned : [];\n  updates.brands_mentioned = unique([...brandList, ...currentBrands]).slice(0, 10);\n}\n\nconst conversationSummary = String(state.summary || router.rationale || 'Turno procesado').slice(0, 220);\nconst conversationInsights = unique([\n  'Ruta ' + String(router.route_key || 'unknown'),\n  ...selectedProductKeys.slice(0, 3).map((key) => 'Producto ' + key),\n]).slice(0, 8);\n\nconst botMessageRow = data.should_send === true ? {\n  manychat_id: data.subscriber_id,\n  customer_id: context.customer?.customer_id || null,\n  role: 'bot',\n  message: data.bot_message_text || '',\n  message_type: 'text',\n  intent_detected: state.intent_key || null,\n  products_mentioned: selectedProductKeys,\n  triggered_human: false,\n  was_audio: false,\n  channel: 'manychat',\n  external_message_id: null,\n  whatsapp_phone_number_id: null,\n  applied_tags: Array.isArray(state.tags_to_add) ? state.tags_to_add : [],\n  payment_methods_detected: state.payment_method_key ? [state.payment_method_key] : [],\n  brands_detected: brandList,\n  topics_detected: [String(router.route_key || 'generic_sales')],\n  funnel_stage_after: state.funnel_stage || null,\n  conversation_summary: conversationSummary,\n  conversation_insights: conversationInsights,\n  lead_score_after: nextLeadScore,\n} : null;\n\nconst turnRow = {\n  workflow_version: 'v18',\n  provider_name: data.responder_provider_name || 'deterministic',\n  model_name: data.responder_model_name || 'deterministic',\n  manychat_id: data.subscriber_id,\n  customer_id: context.customer?.customer_id || null,\n  route_key: router.route_key || 'generic_sales',\n  user_message: data.user_message || '',\n  context_payload: context,\n  router_payload: router,\n  responder_payload: data.responder_output || {},\n  validator_payload: validator,\n  state_delta: state,\n  selected_product_keys: selectedProductKeys,\n  validation_errors: Array.isArray(validator.validation_errors) ? validator.validation_errors.map((item) => item.code || item.message).filter(Boolean) : [],\n  success: data.should_send !== false,\n  failure_reason: null,\n};\n\nreturn [{\n  json: {\n    ...data,\n    customer_updates: updates,\n    bot_message_row: botMessageRow,\n    ai_turn_row: turnRow,\n  }\n}];"
+      },
+      "id": "a89e3665-0387-8f75-d4e3-eb0b25cbc679",
+      "name": "Build Update Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/customers?manychat_id=eq.{{ $(\"Build Update Payload\").first().json.subscriber_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($(\"Build Update Payload\").first().json.customer_updates) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "64a83df7-9b4b-91f7-512f-c1c8bc748e59",
+      "name": "Update Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        160
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($(\"Build Update Payload\").first().json.bot_message_row || {}) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "f8654a9f-a7f8-d01c-e2de-3bb39c7b3fe1",
+      "name": "Save Bot Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        320
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/ai_workflow_turns",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($(\"Build Update Payload\").first().json.ai_turn_row) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "c0ae83cf-0f36-d400-a761-317154bad8c6",
+      "name": "Log AI Turn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        480
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Build Update Payload').first().json || {};\n\nreturn [{\n  json: {\n    ...base,\n    state_update_status: 'ok',\n  }\n}];"
+      },
+      "id": "be512cdd-72e1-62a3-cb2f-f303ec5d165d",
+      "name": "Return Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Build Update Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Update Payload": {
+      "main": [
+        [
+          {
+            "node": "Update Customer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Bot Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log AI Turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Customer": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Bot Message": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log AI Turn": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
