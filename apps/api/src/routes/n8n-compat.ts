@@ -458,14 +458,20 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         from public.messages m
         join public.conversations c on c.id = m.conversation_id
         where c.channel_thread_key = $1
+          and m.direction = 'inbound'
+          and m.sender_kind = 'customer'
         order by m.created_at desc, m.id desc
         limit 1
       `,
       [`manychat:${manychatId}`]
     );
 
+    const latestMessageId = rows[0]?.id ?? null;
+
     return reply.send({
-      check_is_latest_message: rows.length === 0 ? true : rows[0].id === messageId,
+      check_is_latest_message: latestMessageId == null ? true : latestMessageId === messageId,
+      latest_message_id: latestMessageId,
+      checked_message_id: messageId,
     });
   });
 
