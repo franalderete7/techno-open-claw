@@ -91,7 +91,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
       } catch (error) {
         console.error("Audio transcription failed:", error);
         userMessage = "(audio - transcription failed)";
-        transcript = null;
+        transcript = undefined;
       }
     }
   }
