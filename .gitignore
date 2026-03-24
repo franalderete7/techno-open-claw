@@ -1,0 +1,7 @@
+.env
+apps/api/node_modules
+apps/api/dist
+.DS_Store
+apps/web/node_modules
+apps/web/.next
+apps/web/out
