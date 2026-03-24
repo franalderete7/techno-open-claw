@@ -84,10 +84,14 @@ curl http://127.0.0.1:4000/health
 - `apps/api`: backend and tool surface
 - `apps/web`: read-only Next.js viewer
 
+## Operator layer
+
+The repo now includes shell wrappers for the API in `scripts/api/` and a usage guide in [`docs/OPERATOR_PLAYBOOK.md`](./docs/OPERATOR_PLAYBOOK.md). These are the simplest stable surface for OpenClaw to use when operating products, stock, orders, and conversations.
+
 ## Next build steps
 
-1. Telegram webhook and operator flow
-2. OpenClaw tool bridge
-3. Product and stock updates via chat
-4. Order operations via chat
+1. OpenClaw config and workspace instructions
+2. Product and stock updates via chat
+3. Order operations via chat
+4. Outbound Telegram replies from backend flows
 5. Meta Ads tool layer
