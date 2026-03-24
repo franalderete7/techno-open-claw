@@ -1,5 +1,5 @@
 import { getConversations, getDashboard, getProducts, getSettings } from "../lib/api";
-import { SettingView } from "../../components/setting-view";
+import { SettingView } from "../components/setting-view";
 
 function formatDate(value: string | null) {
   if (!value) return "No activity yet";

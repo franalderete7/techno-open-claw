@@ -1,5 +1,5 @@
 import { getSettings } from "../../lib/api";
-import { SettingView } from "../../../components/setting-view";
+import { SettingView } from "../components/setting-view";
 
 function labelize(value: string) {
   return value.replace(/[_-]+/g, " ");
