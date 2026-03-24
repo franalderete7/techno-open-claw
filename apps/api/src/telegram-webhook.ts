@@ -22,6 +22,7 @@ import {
 } from "./telegram.js";
 import { streamTelegramResponse, sendThinkingMessage } from "./telegram-streaming.js";
 import { pool } from "./db.js";
+import { transcribeAudio } from "./sales-agent.js";
 
 export async function handleTelegramWebhook(request: FastifyRequest, reply: FastifyReply) {
   if (!config.TELEGRAM_BOT_TOKEN) {
@@ -74,7 +75,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
 
   // Extract user message (transcript for audio, text for text)
   let userMessage = textBody || "";
-  let transcript: string | null = null;
+  let transcript: string | undefined = undefined;
   let isAudio = false;
 
   // Handle audio transcription
@@ -137,7 +138,7 @@ If you don't understand, ask. If you don't have the info, say so.`;
 
   // Stream the response
   const prompt = `User message: "${userMessage}"
-${visionContext}
+${imageBase64 ? '[User sent an image - describe it if relevant]' : ''}
 
 Context: You are the developer's assistant for TechnoStore. Help them with what they need.`;
 
