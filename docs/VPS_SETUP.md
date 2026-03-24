@@ -78,6 +78,20 @@ When Telegram is wired in, you will need:
 - optionally `TELEGRAM_WEBHOOK_SECRET`
 - optionally `TELEGRAM_WEBHOOK_BASE_URL`
 
+After the API is running, verify and register the webhook:
+
+```bash
+./scripts/api/telegram-status.sh
+./scripts/api/telegram-webhook-sync.sh
+./scripts/api/telegram-status.sh
+```
+
+The expected target is:
+
+```txt
+${TELEGRAM_WEBHOOK_BASE_URL}/webhooks/telegram
+```
+
 ## Cloudflare Tunnel
 
 If you want clean exposure through `aldegol.com`, prepare:

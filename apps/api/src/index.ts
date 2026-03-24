@@ -7,6 +7,13 @@ import { pool, query } from "./db.js";
 import { requireBearerToken } from "./auth.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { n8nCompatRoutes } from "./routes/n8n-compat.js";
+import {
+  buildTelegramWebhookTargetUrl,
+  deleteTelegramWebhook,
+  getTelegramBotProfile,
+  getTelegramWebhookInfo,
+  setTelegramWebhook,
+} from "./telegram.js";
 
 const app = Fastify({
   logger: true,
@@ -171,6 +178,82 @@ app.post("/webhooks/telegram", handleTelegramWebhook);
 app.register(async (protectedApp) => {
   protectedApp.addHook("preHandler", requireBearerToken);
   protectedApp.register(n8nCompatRoutes, { prefix: "/rest/v1" });
+
+  protectedApp.get("/v1/telegram/status", async () => {
+    const targetUrl = config.TELEGRAM_WEBHOOK_BASE_URL
+      ? buildTelegramWebhookTargetUrl(config.TELEGRAM_WEBHOOK_BASE_URL)
+      : null;
+
+    const status = {
+      configured: {
+        botToken: Boolean(config.TELEGRAM_BOT_TOKEN),
+        webhookBaseUrl: Boolean(config.TELEGRAM_WEBHOOK_BASE_URL),
+        webhookSecret: Boolean(config.TELEGRAM_WEBHOOK_SECRET),
+        allowedChatIds: config.TELEGRAM_ALLOWED_CHAT_IDS,
+      },
+      targetUrl,
+      bot: null as Awaited<ReturnType<typeof getTelegramBotProfile>> | null,
+      webhook: null as Awaited<ReturnType<typeof getTelegramWebhookInfo>> | null,
+      botError: null as string | null,
+      webhookError: null as string | null,
+    };
+
+    if (!config.TELEGRAM_BOT_TOKEN) {
+      return status;
+    }
+
+    try {
+      status.bot = await getTelegramBotProfile(config.TELEGRAM_BOT_TOKEN);
+    } catch (error) {
+      status.botError = error instanceof Error ? error.message : "Failed to fetch Telegram bot profile";
+    }
+
+    try {
+      status.webhook = await getTelegramWebhookInfo(config.TELEGRAM_BOT_TOKEN);
+    } catch (error) {
+      status.webhookError = error instanceof Error ? error.message : "Failed to fetch Telegram webhook info";
+    }
+
+    return status;
+  });
+
+  protectedApp.post("/v1/telegram/webhook/sync", async (_request, reply) => {
+    if (!config.TELEGRAM_BOT_TOKEN) {
+      return reply.status(400).send({ error: "missing_telegram_bot_token" });
+    }
+
+    if (!config.TELEGRAM_WEBHOOK_BASE_URL) {
+      return reply.status(400).send({ error: "missing_telegram_webhook_base_url" });
+    }
+
+    const targetUrl = buildTelegramWebhookTargetUrl(config.TELEGRAM_WEBHOOK_BASE_URL);
+    await setTelegramWebhook(config.TELEGRAM_BOT_TOKEN, {
+      url: targetUrl,
+      secretToken: config.TELEGRAM_WEBHOOK_SECRET || undefined,
+    });
+
+    const webhook = await getTelegramWebhookInfo(config.TELEGRAM_BOT_TOKEN);
+
+    return {
+      ok: true,
+      targetUrl,
+      webhook,
+    };
+  });
+
+  protectedApp.post("/v1/telegram/webhook/delete", async (_request, reply) => {
+    if (!config.TELEGRAM_BOT_TOKEN) {
+      return reply.status(400).send({ error: "missing_telegram_bot_token" });
+    }
+
+    await deleteTelegramWebhook(config.TELEGRAM_BOT_TOKEN);
+    const webhook = await getTelegramWebhookInfo(config.TELEGRAM_BOT_TOKEN);
+
+    return {
+      ok: true,
+      webhook,
+    };
+  });
 
   protectedApp.get("/v1/dashboard", async () => {
     const [products] = await query<{ count: string }>("select count(*)::text as count from public.products");

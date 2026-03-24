@@ -23,6 +23,7 @@ Optional audit headers:
 ### Read
 
 - GET /v1/dashboard
+- GET /v1/telegram/status
 - GET /v1/products
 - GET /v1/stock
 - GET /v1/customers
@@ -35,6 +36,8 @@ Optional audit headers:
 ### Write
 
 - POST /v1/products
+- POST /v1/telegram/webhook/sync
+- POST /v1/telegram/webhook/delete
 - PATCH /v1/products/:productId
 - POST /v1/stock
 - PATCH /v1/stock/:stockUnitId

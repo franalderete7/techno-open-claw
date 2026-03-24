@@ -54,6 +54,34 @@ const telegramUpdateSchema = z.object({
 export type TelegramMessage = z.infer<typeof telegramMessageSchema>;
 export type TelegramUpdate = z.infer<typeof telegramUpdateSchema>;
 
+export interface TelegramBotProfile {
+  id: number;
+  is_bot: boolean;
+  first_name: string;
+  username?: string;
+  can_join_groups?: boolean;
+  can_read_all_group_messages?: boolean;
+  supports_inline_queries?: boolean;
+}
+
+export interface TelegramWebhookInfo {
+  url: string;
+  has_custom_certificate: boolean;
+  pending_update_count: number;
+  ip_address?: string;
+  last_error_date?: number;
+  last_error_message?: string;
+  last_synchronization_error_date?: number;
+  max_connections?: number;
+  allowed_updates?: string[];
+}
+
+interface TelegramApiEnvelope<T> {
+  ok: boolean;
+  result?: T;
+  description?: string;
+}
+
 export function parseTelegramUpdate(body: unknown) {
   return telegramUpdateSchema.parse(body);
 }
@@ -158,13 +186,85 @@ export function buildTelegramConversationTitle(message: TelegramMessage) {
   return `Telegram ${message.chat.id}`;
 }
 
-export async function getTelegramFileUrl(fileId: string, botToken: string): Promise<string> {
-  const response = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
-  const data = await response.json();
-  
-  if (!data.ok || !data.result?.file_path) {
-    throw new Error(`Failed to get Telegram file URL: ${data.description || "unknown error"}`);
+export function buildTelegramWebhookTargetUrl(baseUrl: string) {
+  return `${baseUrl.replace(/\/+$/, "")}/webhooks/telegram`;
+}
+
+async function telegramApiRequest<T>(
+  botToken: string,
+  method: string,
+  body?: Record<string, unknown>
+): Promise<T> {
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Telegram API ${method} failed: ${response.status}`);
   }
-  
-  return `https://api.telegram.org/file/bot${botToken}/${data.result.file_path}`;
+
+  const data = (await response.json()) as TelegramApiEnvelope<T>;
+  if (!data.ok || data.result == null) {
+    throw new Error(`Telegram API ${method} error: ${data.description || "unknown error"}`);
+  }
+
+  return data.result;
+}
+
+export async function getTelegramFileUrl(fileId: string, botToken: string): Promise<string> {
+  const data = await telegramApiRequest<{ file_path?: string }>(botToken, "getFile", {
+    file_id: fileId,
+  });
+
+  if (!data.file_path) {
+    throw new Error("Failed to get Telegram file URL: missing file_path");
+  }
+
+  return `https://api.telegram.org/file/bot${botToken}/${data.file_path}`;
+}
+
+export async function getTelegramBotProfile(botToken: string) {
+  return telegramApiRequest<TelegramBotProfile>(botToken, "getMe");
+}
+
+export async function getTelegramWebhookInfo(botToken: string) {
+  return telegramApiRequest<TelegramWebhookInfo>(botToken, "getWebhookInfo");
+}
+
+export async function setTelegramWebhook(
+  botToken: string,
+  options: {
+    url: string;
+    secretToken?: string;
+  }
+) {
+  return telegramApiRequest<true>(botToken, "setWebhook", {
+    url: options.url,
+    secret_token: options.secretToken || undefined,
+    allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post"],
+    drop_pending_updates: false,
+  });
+}
+
+export async function deleteTelegramWebhook(botToken: string) {
+  return telegramApiRequest<true>(botToken, "deleteWebhook", {
+    drop_pending_updates: false,
+  });
+}
+
+export async function sendTelegramTextMessage(options: {
+  botToken: string;
+  chatId: number | string;
+  text: string;
+  replyToMessageId?: number;
+}) {
+  return telegramApiRequest<{ message_id: number }>(options.botToken, "sendMessage", {
+    chat_id: options.chatId,
+    text: options.text.slice(0, 4000),
+    reply_to_message_id: options.replyToMessageId,
+    allow_sending_without_reply: true,
+    disable_web_page_preview: true,
+  });
 }
