@@ -212,7 +212,31 @@ app.register(async (protectedApp) => {
           currency_code,
           active,
           created_at,
-          updated_at
+          updated_at,
+          category,
+          cost_usd,
+          logistics_usd,
+          total_cost_usd,
+          margin_pct,
+          price_usd,
+          promo_price_ars,
+          bancarizada_total,
+          bancarizada_cuota,
+          bancarizada_interest,
+          macro_total,
+          macro_cuota,
+          macro_interest,
+          cuotas_qty,
+          in_stock,
+          delivery_type,
+          delivery_days,
+          usd_rate,
+          ram_gb,
+          storage_gb,
+          network,
+          image_url,
+          color,
+          battery_health
         from public.products
         ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
         order by updated_at desc, id desc
