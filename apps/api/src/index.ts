@@ -5,17 +5,8 @@ import { z } from "zod";
 import { config } from "./config.js";
 import { pool, query } from "./db.js";
 import { requireBearerToken } from "./auth.js";
-import {
-  buildTelegramConversationKey,
-  buildTelegramConversationTitle,
-  buildTelegramCustomerExternalRef,
-  extractTelegramMediaUrl,
-  extractTelegramMessage,
-  extractTelegramTextBody,
-  inferTelegramMessageType,
-  isTelegramChatAllowed,
-  parseTelegramUpdate,
-} from "./telegram.js";
+import { handleTelegramWebhook } from "./telegram-webhook.js";
+import { handleManyChatWebhook } from "./manychat-webhook.js";
 
 const app = Fastify({
   logger: true,
@@ -152,152 +143,8 @@ app.get("/health", async () => {
   };
 });
 
-app.post("/webhooks/telegram", async (request, reply) => {
-  if (!config.TELEGRAM_BOT_TOKEN) {
-    return reply.code(503).send({ error: "Telegram is not configured." });
-  }
-
-  const secretHeader = request.headers["x-telegram-bot-api-secret-token"];
-  const secretValue = Array.isArray(secretHeader) ? secretHeader[0] : secretHeader;
-
-  if (config.TELEGRAM_WEBHOOK_SECRET && secretValue !== config.TELEGRAM_WEBHOOK_SECRET) {
-    return reply.code(401).send({ error: "Invalid Telegram webhook secret." });
-  }
-
-  const update = parseTelegramUpdate(request.body);
-  const message = extractTelegramMessage(update);
-
-  if (!message) {
-    return { ok: true, ignored: true, reason: "unsupported-update" };
-  }
-
-  if (!isTelegramChatAllowed(message, config.TELEGRAM_ALLOWED_CHAT_IDS)) {
-    return { ok: true, ignored: true, reason: "chat-not-allowed" };
-  }
-
-  const messageType = inferTelegramMessageType(message);
-  const textBody = extractTelegramTextBody(message);
-  const mediaUrl = extractTelegramMediaUrl(message);
-  const externalRef = buildTelegramCustomerExternalRef(message);
-  const conversationKey = buildTelegramConversationKey(message);
-  const conversationTitle = buildTelegramConversationTitle(message);
-  const messageAt = new Date(message.date * 1000);
-
-  const client = await pool.connect();
-
-  try {
-    await client.query("begin");
-
-    const customerRows = await client.query<{
-      id: number;
-      external_ref: string;
-    }>(
-      `
-        insert into public.customers (
-          external_ref,
-          first_name,
-          last_name,
-          notes
-        ) values ($1, $2, $3, $4)
-        on conflict (external_ref)
-        do update set
-          first_name = coalesce(excluded.first_name, public.customers.first_name),
-          last_name = coalesce(excluded.last_name, public.customers.last_name),
-          notes = coalesce(excluded.notes, public.customers.notes),
-          updated_at = now()
-        returning id, external_ref
-      `,
-      [
-        externalRef,
-        message.from?.first_name ?? message.chat.first_name ?? null,
-        message.from?.last_name ?? message.chat.last_name ?? null,
-        message.from?.username ? `telegram_username:${message.from.username}` : null,
-      ]
-    );
-
-    const customer = customerRows.rows[0];
-
-    const conversationRows = await client.query<{
-      id: number;
-      channel_thread_key: string;
-    }>(
-      `
-        insert into public.conversations (
-          customer_id,
-          channel,
-          channel_thread_key,
-          status,
-          title,
-          last_message_at
-        ) values ($1, 'telegram', $2, 'open', $3, $4)
-        on conflict (channel_thread_key)
-        do update set
-          customer_id = excluded.customer_id,
-          title = coalesce(excluded.title, public.conversations.title),
-          status = 'open',
-          last_message_at = excluded.last_message_at,
-          updated_at = now()
-        returning id, channel_thread_key
-      `,
-      [customer.id, conversationKey, conversationTitle, messageAt]
-    );
-
-    const conversation = conversationRows.rows[0];
-
-    const messageRows = await client.query<{ id: number }>(
-      `
-        insert into public.messages (
-          conversation_id,
-          direction,
-          sender_kind,
-          message_type,
-          text_body,
-          media_url,
-          transcript,
-          payload,
-          created_at
-        ) values ($1, 'inbound', 'customer', $2, $3, $4, null, $5, $6)
-        returning id
-      `,
-      [
-        conversation.id,
-        messageType,
-        textBody,
-        mediaUrl,
-        update,
-        messageAt,
-      ]
-    );
-
-    await client.query(
-      `
-        insert into public.audit_logs (
-          actor_type,
-          actor_id,
-          action,
-          entity_type,
-          entity_id,
-          metadata
-        ) values ('customer', $1, 'telegram.message.received', 'message', $2, $3)
-      `,
-      [externalRef, String(messageRows.rows[0]?.id ?? ""), { conversationKey, messageType }]
-    );
-
-    await client.query("commit");
-
-    return {
-      ok: true,
-      conversationId: conversation.id,
-      messageType,
-      storedMessageId: messageRows.rows[0]?.id ?? null,
-    };
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  } finally {
-    client.release();
-  }
-});
+app.post("/webhooks/telegram", handleTelegramWebhook);
+app.post("/webhooks/manychat", handleManyChatWebhook);
 
 app.register(async (protectedApp) => {
   protectedApp.addHook("preHandler", requireBearerToken);

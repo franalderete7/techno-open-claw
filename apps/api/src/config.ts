@@ -19,10 +19,13 @@ const configSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   OLLAMA_BASE_URL: z.string().default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().default("qwen3.5:cloud"),
+  GROQ_API_KEY: z.string().default(""),
   TELEGRAM_BOT_TOKEN: z.string().default(""),
   TELEGRAM_ALLOWED_CHAT_IDS: csvStringArray,
   TELEGRAM_WEBHOOK_SECRET: z.string().default(""),
   TELEGRAM_WEBHOOK_BASE_URL: z.string().default(""),
+  MANYCHAT_API_KEY: z.string().default(""),
+  MANYCHAT_ACCOUNT_ID: z.string().default(""),
 });
 
 export const config = configSchema.parse(process.env);

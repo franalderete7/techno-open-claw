@@ -3,12 +3,12 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 const navItems = [
-  ["Dashboard", "/"],
   ["Products", "/products"],
   ["Stock", "/stock"],
-  ["Orders", "/orders"],
-  ["Customers", "/customers"],
   ["Conversations", "/conversations"],
+  ["Customers", "/customers"],
+  ["Settings", "/settings"],
+  ["Audit", "/audit"],
 ] as const;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -17,11 +17,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <main>
           <header>
-            <h1>Techno Open Claw</h1>
-            <p>
-              Read-only operations view for products, stock, orders, customers, and conversations. All write
-              actions stay in Telegram/OpenClaw.
-            </p>
+            <h1>TechnoStore 📱</h1>
+            <p>Product catalog & inventory management</p>
           </header>
           <nav>
             {navItems.map(([label, href]) => (

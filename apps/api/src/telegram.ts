@@ -157,3 +157,14 @@ export function buildTelegramConversationTitle(message: TelegramMessage) {
 
   return `Telegram ${message.chat.id}`;
 }
+
+export async function getTelegramFileUrl(fileId: string, botToken: string): Promise<string> {
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+  const data = await response.json();
+  
+  if (!data.ok || !data.result?.file_path) {
+    throw new Error(`Failed to get Telegram file URL: ${data.description || "unknown error"}`);
+  }
+  
+  return `https://api.telegram.org/file/bot${botToken}/${data.result.file_path}`;
+}
