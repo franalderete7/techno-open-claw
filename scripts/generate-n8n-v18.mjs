@@ -98,6 +98,163 @@ function cleanHttpHeaders(workflow) {
   }
 }
 
+function updateNodeJsCode(workflow, nodeName, jsCode) {
+  const node = (workflow.nodes ?? []).find((entry) => entry?.name === nodeName);
+  if (!node || !node.parameters) {
+    return;
+  }
+
+  node.parameters.jsCode = jsCode;
+}
+
+function updateNodeJsonBody(workflow, nodeName, jsonBody) {
+  const node = (workflow.nodes ?? []).find((entry) => entry?.name === nodeName);
+  if (!node || !node.parameters) {
+    return;
+  }
+
+  node.parameters.jsonBody = jsonBody;
+}
+
+function patchEntryWorkflow(workflow, outputFile) {
+  if (outputFile !== "TechnoStore_v18_entry.json") {
+    return;
+  }
+
+  updateNodeJsCode(
+    workflow,
+    "Attach Customer Id",
+    `const base = $('Merge Input').first().json || {};
+const raw = $input.first().json;
+
+const pickId = (value) => {
+  if (value == null || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : null;
+};
+
+const candidates = [];
+
+if (Array.isArray(raw)) {
+  candidates.push(...raw);
+}
+
+if (raw && typeof raw === 'object') {
+  candidates.push(raw);
+
+  for (const key of ['body', 'data', 'result']) {
+    const nested = raw[key];
+    if (Array.isArray(nested)) {
+      candidates.push(...nested);
+    } else if (nested && typeof nested === 'object') {
+      candidates.push(nested);
+    }
+  }
+}
+
+let customerId = null;
+
+for (const candidate of candidates) {
+  if (!candidate || typeof candidate !== 'object') continue;
+  customerId = pickId(candidate.upsert_customer ?? candidate.customer_id ?? candidate.id);
+  if (customerId != null) break;
+}
+
+return [{
+  json: {
+    ...base,
+    customer_id: customerId,
+  }
+}];`
+  );
+
+  updateNodeJsCode(
+    workflow,
+    "Attach Saved Message",
+    `const base = $('Attach Customer Id').first().json || {};
+const raw = $input.first().json;
+
+const pickId = (value) => {
+  if (value == null || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : null;
+};
+
+const candidates = [];
+
+if (Array.isArray(raw)) {
+  candidates.push(...raw);
+}
+
+if (raw && typeof raw === 'object') {
+  candidates.push(raw);
+
+  for (const key of ['body', 'data', 'result']) {
+    const nested = raw[key];
+    if (Array.isArray(nested)) {
+      candidates.push(...nested);
+    } else if (nested && typeof nested === 'object') {
+      candidates.push(nested);
+    }
+  }
+}
+
+let savedMessageId = null;
+
+for (const candidate of candidates) {
+  if (!candidate || typeof candidate !== 'object') continue;
+  savedMessageId = pickId(candidate.id ?? candidate.message_id ?? candidate.saved_message_id);
+  if (savedMessageId != null) break;
+}
+
+return [{
+  json: {
+    ...base,
+    saved_message_id: savedMessageId,
+  }
+}];`
+  );
+
+  updateNodeJsCode(
+    workflow,
+    "Debounce Check",
+    `const base = $('Wait 8s Debounce').first().json || {};
+const rpcResult = $input.first().json;
+
+let isLatest = false;
+if (typeof rpcResult === 'boolean') {
+  isLatest = rpcResult;
+} else if (Array.isArray(rpcResult) && rpcResult.length > 0) {
+  isLatest = rpcResult[0] === true || rpcResult[0]?.check_is_latest_message === true;
+} else if (rpcResult && typeof rpcResult === 'object') {
+  isLatest = rpcResult.check_is_latest_message === true || rpcResult.result === true;
+}
+
+const debounceReason =
+  base.saved_message_id == null
+    ? 'missing_saved_message_id'
+    : base.is_empty
+      ? 'empty_message'
+      : isLatest === true
+        ? 'latest'
+        : 'not_latest';
+
+return [{
+  json: {
+    ...base,
+    should_continue: base.saved_message_id != null && isLatest === true && !base.is_empty,
+    debounce_reason: debounceReason,
+  }
+}];`
+  );
+
+  updateNodeJsonBody(
+    workflow,
+    "Save Incoming Message",
+    `={{ JSON.stringify({ manychat_id: String($json.subscriber_id), customer_id: Number($json.customer_id) > 0 ? Number($json.customer_id) : null, role: "user", message: $json.user_message || "(vacío)", message_type: $json.was_audio ? "audio" : "text", was_audio: $json.was_audio || false, audio_transcription: $json.was_audio ? $json.user_message : null, intent_detected: null, products_mentioned: [], triggered_human: false, channel: "manychat", external_message_id: null, whatsapp_phone_number_id: null }) }}`
+  );
+}
+
 mkdirSync(outputDir, { recursive: true });
 
 const files = readdirSync(sourceDir)
@@ -116,8 +273,8 @@ for (const file of files) {
   }
 
   cleanHttpHeaders(transformed);
-
   const outputFile = basename(file).replace("_v17_", "_v18_");
+  patchEntryWorkflow(transformed, outputFile);
   const outputPath = resolve(outputDir, outputFile);
   writeFileSync(outputPath, `${JSON.stringify(transformed, null, 2)}\n`);
   generated.push(outputPath);

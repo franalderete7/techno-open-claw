@@ -62,31 +62,6 @@ main {
   margin-bottom: 14px;
 }
 
-.masthead-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.brand-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 102px;
-  min-width: 102px;
-  padding: 8px 10px;
-  border: 0.5px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.74);
-}
-
-.brand-badge-image {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
 .brand-copy {
   display: grid;
   gap: 6px;
@@ -140,6 +115,7 @@ nav {
   top: 16px;
   z-index: 10;
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
   margin: 0 0 26px;
@@ -166,6 +142,26 @@ nav a {
 nav a:hover {
   background: var(--surface-strong);
   color: var(--text);
+}
+
+.nav-brand {
+  justify-content: flex-start;
+  margin-right: 2px;
+  padding-right: 12px;
+  border-right: 0.5px solid var(--line);
+  border-radius: 14px;
+  background: transparent;
+}
+
+.nav-brand:hover {
+  background: transparent;
+}
+
+.nav-brand-image {
+  display: block;
+  width: 64px;
+  height: auto;
+  opacity: 0.9;
 }
 
 .page-stack {
@@ -630,24 +626,6 @@ nav a:hover {
   border-bottom: 0.5px solid var(--line);
 }
 
-.setting-brand-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 112px;
-  margin-bottom: 10px;
-  padding: 6px 10px;
-  border: 0.5px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.8);
-}
-
-.setting-brand-image {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
 .setting-card-body {
   display: grid;
   gap: 10px;
@@ -853,17 +831,6 @@ nav a:hover {
     flex-direction: column;
     align-items: flex-start;
     margin-bottom: 12px;
-  }
-
-  .masthead-brand {
-    width: 100%;
-    flex-direction: row;
-    align-items: flex-start;
-  }
-
-  .brand-badge {
-    width: 92px;
-    min-width: 92px;
   }
 
   .masthead-meta {

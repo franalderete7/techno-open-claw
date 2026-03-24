@@ -33,27 +33,24 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className={`${sans.variable} ${serif.variable}`}>
         <main>
           <header className="masthead">
-            <div className="masthead-brand">
-              <div className="brand-badge" aria-hidden="true">
-                <Image
-                  src="/brand/logo-negro-salta.png"
-                  alt="TechnoStore Salta"
-                  width={716}
-                  height={190}
-                  className="brand-badge-image"
-                  priority
-                />
-              </div>
-
-              <div className="brand-copy">
-                <span className="eyebrow">Open Claw</span>
-                <h1 className="wordmark">TechnoStore Ops</h1>
-              </div>
+            <div className="brand-copy">
+              <span className="eyebrow">Open Claw</span>
+              <h1 className="wordmark">TechnoStore Ops</h1>
             </div>
             <p className="masthead-meta">Catalog, stock, customers, orders, workflows.</p>
           </header>
 
           <nav>
+            <Link key="brand" href="/" className="nav-brand" aria-label="TechnoStore Ops">
+              <Image
+                src="/brand/logo-negro-salta.png"
+                alt=""
+                width={64}
+                height={17}
+                className="nav-brand-image"
+                priority
+              />
+            </Link>
             {navItems.map(([label, href]) => (
               <Link key={href} href={href}>
                 {label}

@@ -187,7 +187,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const base = $('Merge Input').first().json || {};\nconst raw = $input.first().json;\n\nconst rows = Array.isArray(raw) ? raw : [raw];\nconst first = rows[0] || {};\nconst rawId = first.upsert_customer ?? first.customer_id ?? first.id ?? raw?.upsert_customer ?? raw?.customer_id ?? raw?.id ?? null;\nconst customerId = Number(rawId);\n\nreturn [{\n  json: {\n    ...base,\n    customer_id: Number.isFinite(customerId) ? customerId : null,\n  }\n}];"
+        "jsCode": "const base = $('Merge Input').first().json || {};\nconst raw = $input.first().json;\n\nconst pickId = (value) => {\n  if (value == null || value === '') return null;\n  const num = Number(value);\n  return Number.isFinite(num) && num > 0 ? num : null;\n};\n\nconst candidates = [];\n\nif (Array.isArray(raw)) {\n  candidates.push(...raw);\n}\n\nif (raw && typeof raw === 'object') {\n  candidates.push(raw);\n\n  for (const key of ['body', 'data', 'result']) {\n    const nested = raw[key];\n    if (Array.isArray(nested)) {\n      candidates.push(...nested);\n    } else if (nested && typeof nested === 'object') {\n      candidates.push(nested);\n    }\n  }\n}\n\nlet customerId = null;\n\nfor (const candidate of candidates) {\n  if (!candidate || typeof candidate !== 'object') continue;\n  customerId = pickId(candidate.upsert_customer ?? candidate.customer_id ?? candidate.id);\n  if (customerId != null) break;\n}\n\nreturn [{\n  json: {\n    ...base,\n    customer_id: customerId,\n  }\n}];"
       },
       "id": "f8770212-f8bd-85a4-6c66-8e49a1f6f456",
       "name": "Attach Customer Id",
@@ -221,7 +221,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ manychat_id: String($json.subscriber_id), customer_id: $json.customer_id || null, role: \"user\", message: $json.user_message || \"(vacío)\", message_type: $json.was_audio ? \"audio\" : \"text\", was_audio: $json.was_audio || false, audio_transcription: $json.was_audio ? $json.user_message : null, intent_detected: null, products_mentioned: [], triggered_human: false, channel: \"manychat\", external_message_id: null, whatsapp_phone_number_id: null }) }}",
+        "jsonBody": "={{ JSON.stringify({ manychat_id: String($json.subscriber_id), customer_id: Number($json.customer_id) > 0 ? Number($json.customer_id) : null, role: \"user\", message: $json.user_message || \"(vacío)\", message_type: $json.was_audio ? \"audio\" : \"text\", was_audio: $json.was_audio || false, audio_transcription: $json.was_audio ? $json.user_message : null, intent_detected: null, products_mentioned: [], triggered_human: false, channel: \"manychat\", external_message_id: null, whatsapp_phone_number_id: null }) }}",
         "options": {
           "timeout": 5000
         }
@@ -239,7 +239,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const base = $('Attach Customer Id').first().json || {};\nconst raw = $input.first().json;\n\nlet savedMessageId = null;\nif (Array.isArray(raw) && raw[0]?.id != null) savedMessageId = raw[0].id;\nif (!savedMessageId && raw && typeof raw === 'object' && raw.id != null) savedMessageId = raw.id;\n\nreturn [{\n  json: {\n    ...base,\n    saved_message_id: savedMessageId,\n  }\n}];"
+        "jsCode": "const base = $('Attach Customer Id').first().json || {};\nconst raw = $input.first().json;\n\nconst pickId = (value) => {\n  if (value == null || value === '') return null;\n  const num = Number(value);\n  return Number.isFinite(num) && num > 0 ? num : null;\n};\n\nconst candidates = [];\n\nif (Array.isArray(raw)) {\n  candidates.push(...raw);\n}\n\nif (raw && typeof raw === 'object') {\n  candidates.push(raw);\n\n  for (const key of ['body', 'data', 'result']) {\n    const nested = raw[key];\n    if (Array.isArray(nested)) {\n      candidates.push(...nested);\n    } else if (nested && typeof nested === 'object') {\n      candidates.push(nested);\n    }\n  }\n}\n\nlet savedMessageId = null;\n\nfor (const candidate of candidates) {\n  if (!candidate || typeof candidate !== 'object') continue;\n  savedMessageId = pickId(candidate.id ?? candidate.message_id ?? candidate.saved_message_id);\n  if (savedMessageId != null) break;\n}\n\nreturn [{\n  json: {\n    ...base,\n    saved_message_id: savedMessageId,\n  }\n}];"
       },
       "id": "84747db0-83b1-5e97-a206-0ffd7af995cc",
       "name": "Attach Saved Message",
@@ -300,7 +300,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const base = $('Wait 8s Debounce').first().json || {};\nconst rpcResult = $input.first().json;\n\nlet isLatest = false;\nif (typeof rpcResult === 'boolean') {\n  isLatest = rpcResult;\n} else if (Array.isArray(rpcResult) && rpcResult.length > 0) {\n  isLatest = rpcResult[0] === true || rpcResult[0]?.check_is_latest_message === true;\n} else if (rpcResult && typeof rpcResult === 'object') {\n  isLatest = rpcResult.check_is_latest_message === true || rpcResult.result === true;\n}\n\nreturn [{\n  json: {\n    ...base,\n    should_continue: isLatest === true && !base.is_empty,\n  }\n}];"
+        "jsCode": "const base = $('Wait 8s Debounce').first().json || {};\nconst rpcResult = $input.first().json;\n\nlet isLatest = false;\nif (typeof rpcResult === 'boolean') {\n  isLatest = rpcResult;\n} else if (Array.isArray(rpcResult) && rpcResult.length > 0) {\n  isLatest = rpcResult[0] === true || rpcResult[0]?.check_is_latest_message === true;\n} else if (rpcResult && typeof rpcResult === 'object') {\n  isLatest = rpcResult.check_is_latest_message === true || rpcResult.result === true;\n}\n\nconst debounceReason =\n  base.saved_message_id == null\n    ? 'missing_saved_message_id'\n    : base.is_empty\n      ? 'empty_message'\n      : isLatest === true\n        ? 'latest'\n        : 'not_latest';\n\nreturn [{\n  json: {\n    ...base,\n    should_continue: base.saved_message_id != null && isLatest === true && !base.is_empty,\n    debounce_reason: debounceReason,\n  }\n}];"
       },
       "id": "0d5668c3-640f-a39d-a2ab-62cdabe0f06c",
       "name": "Debounce Check",

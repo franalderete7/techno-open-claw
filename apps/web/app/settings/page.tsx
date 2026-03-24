@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { getSettings } from "../../lib/api";
 import { SettingView } from "../../components/setting-view";
 
@@ -72,11 +71,6 @@ export default async function SettingsPage() {
             <article key={setting.key} className={getSettingCardClass(setting)}>
               <div className="panel-header setting-card-header">
                 <div>
-                  {setting.key === "store" ? (
-                    <div className="setting-brand-chip" aria-hidden="true">
-                      <Image src="/brand/logo-negro-salta.png" alt="" width={716} height={190} className="setting-brand-image" />
-                    </div>
-                  ) : null}
                   <h3>{labelize(setting.key)}</h3>
                   <p className="setting-key mono">{setting.key}</p>
                 </div>
