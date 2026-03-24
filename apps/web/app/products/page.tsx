@@ -1,113 +1,124 @@
-'use client';
+import { getProducts } from "../../lib/api";
 
-import { useEffect, useState } from 'react';
-
-interface Product {
-  id: number;
-  sku: string;
-  slug: string;
-  brand: string;
-  model: string;
-  title: string;
-  description: string | null;
-  condition: string;
-  price_amount: number | null;
-  currency_code: string;
-  active: boolean;
-  created_at: string;
-  updated_at: string;
-  image_url: string | null;
-  ram_gb: number | null;
-  storage_gb: number | null;
-  network: string | null;
-  color: string | null;
-  battery_health: number | null;
+function formatMoney(amount: number | null, currency: string) {
+  if (amount == null) return "Price not loaded";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
-export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+function formatDate(value: string) {
+  return new Date(value).toLocaleDateString("en-US", {
+    dateStyle: "medium",
+  });
+}
 
-  useEffect(() => {
-    fetch('/api/products?limit=100')
-      .then(res => res.json())
-      .then(data => {
-        setProducts(data.items || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error('Failed to load products:', err);
-        setLoading(false);
-      });
-  }, []);
+export default async function ProductsPage() {
+  let items = [] as Awaited<ReturnType<typeof getProducts>>["items"];
+  let error: string | null = null;
 
-  if (loading) {
-    return <div className="p-8 text-center">Cargando productos...</div>;
+  try {
+    const response = await getProducts(120);
+    items = response.items;
+  } catch (caught) {
+    error = caught instanceof Error ? caught.message : "Failed to load products";
   }
 
+  const activeCount = items.filter((item) => item.active).length;
+  const totalAvailable = items.filter((item) => item.in_stock).length;
+
   return (
-    <div className="p-8">
-      <h2 className="text-2xl font-bold mb-4">Productos ({products.length})</h2>
-      
-      <div className="bg-white rounded shadow overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-xs">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-3 py-2 text-left">IMG</th>
-              <th className="px-3 py-2 text-left">SKU</th>
-              <th className="px-3 py-2 text-left">Producto</th>
-              <th className="px-3 py-2 text-left">RAM</th>
-              <th className="px-3 py-2 text-left">Storage</th>
-              <th className="px-3 py-2 text-left">Network</th>
-              <th className="px-3 py-2 text-left">Color</th>
-              <th className="px-3 py-2 text-left">Battery</th>
-              <th className="px-3 py-2 text-left">Cond</th>
-              <th className="px-3 py-2 text-left">Precio</th>
-              <th className="px-3 py-2 text-left">Estado</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {products.map(product => (
-              <tr key={product.id} className="hover:bg-gray-50">
-                <td className="px-3 py-3">
-                  {product.image_url ? (
-                    <img src={product.image_url} alt="" className="w-8 h-8 rounded object-cover" />
-                  ) : (
-                    <span className="text-gray-400">📱</span>
-                  )}
-                </td>
-                <td className="px-3 py-3 font-mono">{product.sku}</td>
-                <td className="px-3 py-3">
-                  <div className="font-medium">{product.brand} {product.model}</div>
-                  <div className="text-gray-500 text-xs">{product.title}</div>
-                </td>
-                <td className="px-3 py-3">{product.ram_gb || '-'}</td>
-                <td className="px-3 py-3">{product.storage_gb || '-'}</td>
-                <td className="px-3 py-3">{product.network || '-'}</td>
-                <td className="px-3 py-3">{product.color || '-'}</td>
-                <td className="px-3 py-3">{product.battery_health ? `${product.battery_health}%` : '-'}</td>
-                <td className="px-3 py-3">
-                  <span className={`px-2 py-1 rounded text-xs ${
-                    product.condition === 'new' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {product.condition}
+    <div className="page-stack">
+      <section className="page-hero">
+        <span className="eyebrow">Products</span>
+        <h2 className="hero-title">Catalog</h2>
+        <div className="chip-row">
+          <span className="chip accent">{items.length} products</span>
+          <span className="chip good">{activeCount} active</span>
+          <span className="chip warn">{totalAvailable} in stock</span>
+        </div>
+        {error ? <p className="empty">{error}</p> : null}
+      </section>
+
+      {items.length === 0 ? (
+        <section className="panel">
+          <p className="empty">No products available.</p>
+        </section>
+      ) : (
+        <section className="product-list">
+          {items.map((product) => (
+            <article key={product.id} className="product-card">
+              <div className="product-thumb">
+                {product.image_url ? (
+                  <img src={product.image_url} alt={product.title} />
+                ) : (
+                  <div className="product-placeholder">{product.brand.slice(0, 2).toUpperCase()}</div>
+                )}
+              </div>
+
+              <div className="product-main">
+                <div>
+                  <p className="catalog-kicker">{product.brand}</p>
+                  <h3 className="product-heading">{product.title}</h3>
+                  <p className="product-subline">{product.model}</p>
+                </div>
+
+                <div className="chip-row">
+                  <span className="chip accent mono">{product.sku}</span>
+                  <span className={`chip ${product.active ? "good" : "warn"}`}>
+                    {product.active ? "Active" : "Inactive"}
                   </span>
-                </td>
-                <td className="px-3 py-3 font-medium">
-                  ${product.price_amount?.toLocaleString('es-AR') || '-'}
-                </td>
-                <td className="px-3 py-3">
-                  {product.active ? (
-                    <span className="text-green-600">● Activo</span>
+                  <span className={`chip ${product.in_stock ? "good" : "danger"}`}>
+                    {product.in_stock ? "In stock" : "Out"}
+                  </span>
+                  {product.ram_gb ? <span className="chip">{product.ram_gb}GB RAM</span> : null}
+                  {product.storage_gb ? <span className="chip">{product.storage_gb}GB</span> : null}
+                  {product.network ? <span className="chip">{product.network.toUpperCase()}</span> : null}
+                  {product.color ? <span className="chip">{product.color}</span> : null}
+                  {product.delivery_days != null ? (
+                    <span className="chip">{product.delivery_days === 0 ? "Immediate" : `${product.delivery_days} days`}</span>
+                  ) : null}
+                </div>
+
+                {product.description ? <p className="product-copy">{product.description}</p> : null}
+              </div>
+
+              <div className="product-side">
+                <div className="price-stack">
+                  <span>Promo</span>
+                  <strong>{formatMoney(product.promo_price_ars ?? product.price_amount, product.currency_code)}</strong>
+                  {product.promo_price_ars && product.price_amount && product.promo_price_ars !== product.price_amount ? (
+                    <span className="price-note">List {formatMoney(product.price_amount, product.currency_code)}</span>
                   ) : (
-                    <span className="text-gray-400">○ Inactivo</span>
+                    <span className="price-note">Updated {formatDate(product.updated_at)}</span>
                   )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                </div>
+
+                <div className="metric-grid">
+                  <div className="metric">
+                    <span className="metric-label">Available</span>
+                    <strong className="metric-value">{product.stock_units_available}</strong>
+                  </div>
+                  <div className="metric">
+                    <span className="metric-label">Total</span>
+                    <strong className="metric-value">{product.stock_units_total}</strong>
+                  </div>
+                  <div className="metric">
+                    <span className="metric-label">Sold</span>
+                    <strong className="metric-value">{product.stock_units_sold}</strong>
+                  </div>
+                  <div className="metric">
+                    <span className="metric-label">USD</span>
+                    <strong className="metric-value">{product.price_usd == null ? "-" : `$${product.price_usd}`}</strong>
+                  </div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

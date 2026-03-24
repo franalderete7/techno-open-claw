@@ -1,0 +1,47 @@
+{
+  "name": "TechnoStore - v17 Router",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "80d4a700-70d5-bb43-63ba-3ab48015286f",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json || {};\nconst context = data.context || {};\nconst message = String(data.user_message || '').trim();\nconst normalized = message\n  .toLowerCase()\n  .normalize('NFD')\n  .replace(/[\\u0300-\\u036f]/g, '')\n  .replace(/[^a-z0-9\\s]/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nconst recentMessages = Array.isArray(context.recent_messages) ? context.recent_messages : [];\nconst candidateProducts = Array.isArray(context.candidate_products) ? context.candidate_products : [];\nconst storefrontHandoff = context.storefront_handoff;\n\nconst unique = (values) => [...new Set(values.filter(Boolean))];\nconst extractBrands = (text) => {\n  const brands = [];\n  if (/(^| )(iphone|apple|ipad|macbook)( |$)/.test(text)) brands.push('apple');\n  if (/(^| )(samsung|galaxy)( |$)/.test(text)) brands.push('samsung');\n  if (/(^| )(motorola|moto)( |$)/.test(text)) brands.push('motorola');\n  if (/(^| )(xiaomi)( |$)/.test(text)) brands.push('xiaomi');\n  if (/(^| )(redmi)( |$)/.test(text)) brands.push('redmi');\n  if (/(^| )(poco)( |$)/.test(text)) brands.push('redmi');\n  if (/(^| )(google|pixel)( |$)/.test(text)) brands.push('google');\n  return unique(brands);\n};\n\nconst extractTier = (text) => {\n  if (/(^| )(pro max|promax)( |$)/.test(text)) return 'pro_max';\n  if (/(^| )(ultra)( |$)/.test(text)) return 'ultra';\n  if (/(^| )(pro)( |$)/.test(text)) return 'pro';\n  if (/(^| )(plus)( |$)/.test(text)) return 'plus';\n  return null;\n};\n\nconst brandKeys = extractBrands(normalized);\nconst tierKey = extractTier(normalized);\nconst familyMatch = normalized.match(/(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\\s+([0-9]{1,3})/i);\nconst familyNumber = familyMatch ? Number(familyMatch[1]) : null;\nconst storageMatch = normalized.match(/\\b(64|128|256|512|1024)\\b(?:\\s*gb)?\\b/);\nconst storageValue = storageMatch ? Number(storageMatch[1]) : null;\nconst modelVariantMatch = normalized.match(/\\b(?:a\\d{1,3}|s\\d{1,3}|g\\d{1,3}|x\\d{1,3}|z\\s?flip\\s?\\d|z\\s?fold\\s?\\d|edge\\s?\\d{1,3}|note\\s?\\d{1,3}|reno\\s?\\d{1,3}|find\\s?x\\d{1,2})\\b/i);\nconst hasModelVariantToken = Boolean(modelVariantMatch);\nconst asksPriceDirectly = /(precio|cuanto sale|cu[aá]nto sale|valor|costo|cotizacion|cotizaci[oó]n)/.test(normalized);\n\nconst wantsStoreInfo = /(ubicacion|ubicacion|direccion|direccion|sucursal|horario|abren|cierran|medios de pago|medio de pago|envio|envios|warranty|garantia|garantia|como llego|donde estan|donde quedan|retiro)/.test(normalized);\n\nconst isFirstContact = recentMessages.length <= 1;\nconst topCandidateKeys = candidateProducts.slice(0, 3).map((product) => product.product_key).filter(Boolean);\n\nlet route_key = 'generic_sales';\nlet retrieval_scope = 'catalog_broad';\nlet search_mode = 'brand_browse';\nlet should_offer_store_url = isFirstContact;\nlet confidence = 0.72;\nlet rationale = 'Consulta amplia de ventas.';\nlet use_info_responder = false;\n\nif (storefrontHandoff && storefrontHandoff.ok === true) {\n  route_key = 'storefront_order';\n  retrieval_scope = 'storefront_handoff';\n  search_mode = 'storefront_handoff';\n  confidence = 0.99;\n  rationale = 'Se detectó un handoff de pedido web válido.';\n  use_info_responder = true;\n  should_offer_store_url = false;\n} else if (wantsStoreInfo) {\n  route_key = 'store_info';\n  retrieval_scope = 'store_info';\n  search_mode = 'info';\n  confidence = 0.9;\n  rationale = 'La consulta es sobre ubicación, horarios, pagos, envíos o garantía.';\n  use_info_responder = true;\n  should_offer_store_url = isFirstContact;\n} else if (brandKeys.length > 0 && (familyNumber !== null || storageValue !== null || tierKey !== null || hasModelVariantToken || asksPriceDirectly && candidateProducts.length > 0)) {\n  route_key = 'exact_product_quote';\n  retrieval_scope = 'catalog_narrow';\n  search_mode = 'exact';\n  confidence = candidateProducts.length > 0 ? 0.9 : 0.78;\n  rationale = 'Consulta con marca y detalles de modelo suficientes para cotización puntual.';\n  should_offer_store_url = false;\n} else if (brandKeys.length > 0 || tierKey !== null) {\n  route_key = 'brand_catalog';\n  retrieval_scope = 'catalog_broad';\n  search_mode = tierKey ? 'tier_browse' : 'brand_browse';\n  confidence = 0.82;\n  rationale = 'Consulta de catálogo por marca o línea premium.';\n  should_offer_store_url = true;\n} else {\n  route_key = 'generic_sales';\n  retrieval_scope = 'catalog_broad';\n  search_mode = 'brand_browse';\n  confidence = 0.7;\n  rationale = 'Consulta comercial amplia sin producto exacto.';\n  should_offer_store_url = isFirstContact;\n}\n\nreturn [{\n  json: {\n    ...data,\n    use_info_responder,\n    router_output: {\n      route_key,\n      confidence,\n      retrieval_scope,\n      search_mode,\n      should_offer_store_url,\n      selected_candidate_product_keys: topCandidateKeys,\n      rationale,\n    },\n  }\n}];"
+      },
+      "id": "df5041f8-b8f0-fb3f-bddb-ecbc70432b23",
+      "name": "Route Turn",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Route Turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

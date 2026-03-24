@@ -9,6 +9,7 @@
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "dotenv": "^16.6.1",
     "next": "16.2.1",
     "react": "18.2.0",
     "react-dom": "18.2.0"

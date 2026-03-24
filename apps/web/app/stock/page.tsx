@@ -1,99 +1,116 @@
-'use client';
+import { getStock } from "../../lib/api";
 
-import { useEffect, useState } from 'react';
-
-interface StockUnit {
-  id: number;
-  serial_number: string | null;
-  color: string | null;
-  battery_health: number | null;
-  status: string;
-  product_id: number;
-  product: {
-    sku: string;
-    brand: string;
-    model: string;
-    title: string;
-  } | null;
+function formatDate(value: string | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleDateString("en-US", { dateStyle: "medium" });
 }
 
-export default function StockPage() {
-  const [stock, setStock] = useState<StockUnit[]>([]);
-  const [loading, setLoading] = useState(true);
+export default async function StockPage() {
+  let items = [] as Awaited<ReturnType<typeof getStock>>["items"];
+  let error: string | null = null;
 
-  useEffect(() => {
-    fetch('/api/stock?limit=100')
-      .then(res => res.json())
-      .then(data => {
-        setStock(data.items || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error('Failed to load stock:', err);
-        setLoading(false);
-      });
-  }, []);
-
-  if (loading) {
-    return <div className="p-8 text-center">Cargando stock...</div>;
+  try {
+    const response = await getStock(150);
+    items = response.items;
+  } catch (caught) {
+    error = caught instanceof Error ? caught.message : "Failed to load stock";
   }
 
+  const inStockCount = items.filter((item) => item.status === "in_stock").length;
+  const reservedCount = items.filter((item) => item.status === "reserved").length;
+  const soldCount = items.filter((item) => item.status === "sold").length;
+
   return (
-    <div className="p-8">
-      <h2 className="text-2xl font-bold mb-4">Stock ({stock.length} unidades)</h2>
-      
-      <div className="bg-white rounded shadow overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left">ID</th>
-              <th className="px-4 py-2 text-left">Producto</th>
-              <th className="px-4 py-2 text-left">Serial</th>
-              <th className="px-4 py-2 text-left">Color</th>
-              <th className="px-4 py-2 text-left">Batería</th>
-              <th className="px-4 py-2 text-left">Estado</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {stock.map(unit => (
-              <tr key={unit.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 font-mono">#{unit.id}</td>
-                <td className="px-4 py-3">
-                  <div className="font-medium">{unit.product?.sku}</div>
-                  <div className="text-gray-500 text-xs">{unit.product?.title}</div>
-                </td>
-                <td className="px-4 py-3 font-mono text-xs">{unit.serial_number || '-'}</td>
-                <td className="px-4 py-3">{unit.color || '-'}</td>
-                <td className="px-4 py-3">
-                  {unit.battery_health ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 bg-gray-200 rounded-full h-2">
-                        <div 
-                          className={`h-2 rounded-full ${
-                            unit.battery_health > 80 ? 'bg-green-500' :
-                            unit.battery_health > 60 ? 'bg-yellow-500' : 'bg-red-500'
-                          }`}
-                          style={{ width: `${unit.battery_health}%` }}
-                        />
+    <div className="page-stack">
+      <section className="page-hero">
+        <span className="eyebrow">Stock</span>
+        <h2 className="hero-title">Units</h2>
+        <div className="chip-row">
+          <span className="chip accent">{items.length} units</span>
+          <span className="chip good">{inStockCount} in stock</span>
+          <span className="chip warn">{reservedCount} reserved</span>
+          <span className="chip">{soldCount} sold</span>
+        </div>
+        {error ? <p className="empty">{error}</p> : null}
+      </section>
+
+      <section className="table-card">
+        <div className="panel-header">
+          <div>
+            <h3 className="panel-title">Inventory</h3>
+          </div>
+        </div>
+
+        {items.length === 0 ? (
+          <p className="empty">No stock units available.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Unit</th>
+                  <th>Product</th>
+                  <th>Serial</th>
+                  <th>Condition Notes</th>
+                  <th>Status</th>
+                  <th>Location</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((unit) => (
+                  <tr key={unit.id}>
+                    <td>
+                      <div className="value-stack">
+                        <strong>#{unit.id}</strong>
+                        <span className="muted">Acquired {formatDate(unit.acquired_at)}</span>
                       </div>
-                      <span>{unit.battery_health}%</span>
-                    </div>
-                  ) : '-'}
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-1 rounded text-xs ${
-                    unit.status === 'in_stock' ? 'bg-green-100 text-green-800' :
-                    unit.status === 'reserved' ? 'bg-yellow-100 text-yellow-800' :
-                    unit.status === 'sold' ? 'bg-gray-100 text-gray-800' : 'bg-red-100 text-red-800'
-                  }`}>
-                    {unit.status.replace('_', ' ')}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                    </td>
+                    <td>
+                      <div className="value-stack">
+                        <strong>
+                          {unit.brand} {unit.model}
+                        </strong>
+                        <span className="muted mono">{unit.sku}</span>
+                        <span className="muted">{unit.title}</span>
+                      </div>
+                    </td>
+                    <td className="mono">{unit.serial_number || "-"}</td>
+                    <td>
+                      <div className="chip-row">
+                        <span className="chip">{unit.color || "No color"}</span>
+                        <span className={`chip ${unit.battery_health && unit.battery_health >= 85 ? "good" : ""}`}>
+                          {unit.battery_health == null ? "Battery -" : `${unit.battery_health}% battery`}
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <span
+                        className={`pill ${
+                          unit.status === "in_stock"
+                            ? "good"
+                            : unit.status === "reserved"
+                              ? "warn"
+                              : unit.status === "damaged"
+                                ? "danger"
+                                : ""
+                        }`}
+                      >
+                        {unit.status.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="value-stack">
+                        <strong>{unit.location_code || "-"}</strong>
+                        <span className="muted">Sold {formatDate(unit.sold_at)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

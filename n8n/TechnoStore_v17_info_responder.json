@@ -1,0 +1,47 @@
+{
+  "name": "TechnoStore - v17 Info Responder",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "5120717d-51f1-0b87-e097-22eeb7ccfc97",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json || {};\nconst context = data.context || {};\nconst router = data.router_output || {};\nconst store = context.store || {};\nconst website = String(store.store_website_url || 'https://puntotechno.com').trim();\nconst message = String(data.user_message || '')\n  .toLowerCase()\n  .normalize('NFD')\n  .replace(/[\\u0300-\\u036f]/g, '')\n  .replace(/[^a-z0-9\\s]/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nconst wantsLocation = /(ubicacion|direccion|sucursal|como llego|donde estan|donde quedan|mapa)/.test(message);\nconst wantsHours = /(horario|abren|cierran|hora)/.test(message);\nconst wantsPayments = /(pago|pagos|cuotas|tarjeta|transferencia|efectivo|crypto|mercado pago)/.test(message);\nconst wantsShipping = /(envio|envios|despacho|retiro)/.test(message);\nconst wantsWarranty = /(garantia|warranty)/.test(message);\n\nconst formatArs = (value) => {\n  const amount = Number(value);\n  if (!Number.isFinite(amount)) return null;\n  return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(amount);\n};\n\nlet replyText = '';\nlet actions = [];\nlet stateDelta = {\n  intent_key: 'store_info',\n  funnel_stage: 'browsing',\n  lead_score_delta: 2,\n  share_store_location: false,\n  selected_product_keys: [],\n  tags_to_add: [],\n  tags_to_remove: [],\n  payment_method_key: null,\n  summary: 'Respuesta de información general.',\n};\n\nswitch (router.route_key) {\n  case 'storefront_order': {\n    const order = context.storefront_handoff?.order;\n    if (order) {\n      const totalText = formatArs(order.subtotal);\n      replyText = 'Perfecto, ya tomé tu pedido web #' + order.id + '. Veo ' + (order.item_count || 0) + ' producto(s)' + (totalText ? ' por ARS ' + totalText : '') + '. Seguimos por acá con la gestión. Si ya hiciste el pago, mandame el comprobante por este chat.';\n    } else {\n      replyText = 'Perfecto, seguimos con tu pedido web por acá. Si querés, pasame el número de pedido o el comprobante y lo revisamos.';\n    }\n    stateDelta.intent_key = 'storefront_order';\n    stateDelta.funnel_stage = 'closing';\n    stateDelta.lead_score_delta = 10;\n    stateDelta.summary = 'Seguimiento de pedido web por WhatsApp.';\n    break;\n  }\n  case 'store_info':\n  default: {\n    const parts = [];\n    if (wantsLocation || (!wantsHours && !wantsPayments && !wantsShipping && !wantsWarranty)) {\n      if (store.store_address) parts.push('Estamos en ' + store.store_address + '.');\n      stateDelta.share_store_location = wantsLocation;\n    }\n    if (wantsHours && store.store_hours) parts.push('Horario: ' + store.store_hours);\n    if (wantsPayments && store.store_payment_methods) parts.push('Medios de pago: ' + store.store_payment_methods);\n    if (wantsShipping && store.store_shipping_policy) parts.push('Envíos: ' + store.store_shipping_policy);\n    if (wantsWarranty) {\n      if (store.store_warranty_new) parts.push('Nuevos: ' + store.store_warranty_new);\n      if (store.store_warranty_used) parts.push('Usados: ' + store.store_warranty_used);\n    }\n    if (router.should_offer_store_url) {\n      parts.push('Si querés ver todo el catálogo, también lo tenés en ' + website + '.');\n      actions = ['attach_store_url'];\n    }\n    parts.push('Si querés, decime qué modelo buscás y te oriento por acá.');\n    replyText = parts.join(' ');\n    stateDelta.intent_key = 'store_info';\n    stateDelta.funnel_stage = 'browsing';\n    stateDelta.lead_score_delta = 2;\n    stateDelta.summary = 'Respuesta de información general de la tienda.';\n    break;\n  }\n}\n\nreturn [{\n  json: {\n    ...data,\n    responder_output: {\n      route_key: router.route_key || 'store_info',\n      reply_text: replyText,\n      selected_product_keys: [],\n      actions,\n      state_delta: stateDelta,\n    },\n    responder_provider_name: 'deterministic',\n    responder_model_name: 'deterministic-info',\n  }\n}];"
+      },
+      "id": "0e272936-4c32-7a61-bc39-51c0d38fa71a",
+      "name": "Build Info Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Build Info Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

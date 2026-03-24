@@ -1,137 +1,145 @@
-'use client';
+import { getConversations, getDashboard, getProducts, getSettings } from "../lib/api";
+import { SettingView } from "../components/setting-view";
 
-import { useEffect, useState } from 'react';
-
-interface Product {
-  id: number;
-  sku: string;
-  slug: string;
-  brand: string;
-  model: string;
-  title: string;
-  description: string | null;
-  condition: 'new' | 'used' | 'like_new' | 'refurbished';
-  price_amount: number | null;
-  currency_code: string;
-  active: boolean;
+function formatDate(value: string | null) {
+  if (!value) return "No activity yet";
+  return new Date(value).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
-export default function Storefront() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+export default async function HomePage() {
+  let dashboard = null;
+  let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
+  let conversations = [] as Awaited<ReturnType<typeof getConversations>>["items"];
+  let settings = [] as Awaited<ReturnType<typeof getSettings>>["items"];
+  let error: string | null = null;
 
-  useEffect(() => {
-    fetch('/api/products?active=true&limit=50')
-      .then(res => res.json())
-      .then(data => {
-        setProducts(data.items || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error('Failed to load products:', err);
-        setLoading(false);
-      });
-  }, []);
+  try {
+    const [dashboardResponse, productResponse, conversationResponse, settingsResponse] = await Promise.all([
+      getDashboard(),
+      getProducts(6),
+      getConversations(5),
+      getSettings(),
+    ]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-800">TechnoStore</h1>
-          <p className="text-gray-600 mt-2">Cargando productos...</p>
-        </div>
-      </div>
-    );
+    dashboard = dashboardResponse;
+    products = productResponse.items;
+    conversations = conversationResponse.items;
+    settings = settingsResponse.items;
+  } catch (caught) {
+    error = caught instanceof Error ? caught.message : "Failed to load dashboard";
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <h1 className="text-3xl font-bold text-gray-900">
-            TechnoStore Salta 📱
-          </h1>
-          <p className="text-gray-600 mt-2">
-            iPhones, Samsung, Xiaomi y más
-          </p>
-        </div>
-      </header>
-
-      {/* Products Grid */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        {products.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-gray-600">No hay productos disponibles</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {products.map(product => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-white border-t mt-12">
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <p className="text-gray-600 text-center">
-            📍 Caseros 1365, Salta Capital | 📱 WhatsApp: +54 9 387 XXX XXXX
-          </p>
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-function ProductCard({ product }: { product: Product }) {
-  const formatPrice = (amount: number | null, currency: string) => {
-    if (!amount) return 'Consultar';
-    return `$${amount.toLocaleString('es-AR')} ${currency}`;
-  };
-
-  const conditionLabels = {
-    new: 'Nuevo',
-    used: 'Seminuevo',
-    like_new: 'Como Nuevo',
-    refurbished: 'Reacondicionado',
-  };
+  const storeSetting = settings.find((item) => item.key === "store");
 
   return (
-    <div className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
-      <div className="aspect-square bg-gray-200 flex items-center justify-center">
-        <span className="text-gray-400 text-4xl">📱</span>
-      </div>
-      
-      <div className="p-4">
-        <div className="flex items-start justify-between">
+    <div className="page-stack">
+      <section className="page-hero">
+        <span className="eyebrow">Overview</span>
+        <h2 className="hero-title">Control room</h2>
+        {error ? <p className="empty">{error}</p> : null}
+      </section>
+
+      {dashboard ? (
+        <section className="stats-grid">
+          <article className="stat-card">
+            <span className="stat-label">Products</span>
+            <strong className="stat-value">{dashboard.products}</strong>
+          </article>
+          <article className="stat-card">
+            <span className="stat-label">In Stock Units</span>
+            <strong className="stat-value">{dashboard.inStockUnits}</strong>
+          </article>
+          <article className="stat-card">
+            <span className="stat-label">Customers</span>
+            <strong className="stat-value">{dashboard.customers}</strong>
+          </article>
+          <article className="stat-card">
+            <span className="stat-label">Open Conversations</span>
+            <strong className="stat-value">{dashboard.openConversations}</strong>
+          </article>
+          <article className="stat-card">
+            <span className="stat-label">Orders</span>
+            <strong className="stat-value">{dashboard.orders}</strong>
+          </article>
+        </section>
+      ) : null}
+
+      <section className="split-grid">
+        <article className="panel">
+          <div className="panel-header">
+            <div>
+              <h3 className="panel-title">Recent Products</h3>
+            </div>
+          </div>
+
+          {products.length === 0 ? (
+            <p className="empty">No products available.</p>
+          ) : (
+            <div className="activity-list">
+              {products.map((product) => (
+                <div key={product.id} className="activity-item">
+                  <strong>
+                    {product.brand} {product.model}
+                  </strong>
+                  <div className="chip-row">
+                    <span className="chip accent mono">{product.sku}</span>
+                    <span className={`chip ${product.active ? "good" : ""}`}>
+                      {product.active ? "Active" : "Inactive"}
+                    </span>
+                    <span className={`chip ${product.stock_units_available > 0 ? "good" : "warn"}`}>
+                      {product.stock_units_available} available
+                    </span>
+                  </div>
+                  <span className="muted">{product.title}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <div>
+              <h3 className="panel-title">Recent Conversations</h3>
+            </div>
+          </div>
+
+          {conversations.length === 0 ? (
+            <p className="empty">No conversations available.</p>
+          ) : (
+            <div className="activity-list">
+              {conversations.map((conversation) => (
+                <div key={conversation.id} className="activity-item">
+                  <strong>
+                    {[conversation.first_name, conversation.last_name].filter(Boolean).join(" ") || "Unknown contact"}
+                  </strong>
+                  <div className="chip-row">
+                    <span className="chip accent">{conversation.channel}</span>
+                    <span className={`chip ${conversation.status === "open" ? "good" : "warn"}`}>
+                      {conversation.status}
+                    </span>
+                    <span className="chip mono">{conversation.channel_thread_key}</span>
+                  </div>
+                  <span className="muted">{formatDate(conversation.last_message_at)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+      </section>
+
+      <article className="panel">
+        <div className="panel-header">
           <div>
-            <h3 className="font-semibold text-gray-900">
-              {product.brand} {product.model}
-            </h3>
-            <p className="text-sm text-gray-600 mt-1">
-              {product.title}
-            </p>
+            <h3 className="panel-title">Store</h3>
           </div>
-          <span className={`px-2 py-1 rounded text-xs font-medium ${
-            product.condition === 'new' 
-              ? 'bg-green-100 text-green-800'
-              : 'bg-blue-100 text-blue-800'
-          }`}>
-            {conditionLabels[product.condition]}
-          </span>
         </div>
 
-        <div className="mt-4 flex items-center justify-between">
-          <span className="text-lg font-bold text-gray-900">
-            {formatPrice(product.price_amount, product.currency_code)}
-          </span>
-          <button className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors">
-            Ver detalles
-          </button>
-        </div>
-      </div>
+        {storeSetting ? <SettingView value={storeSetting.value} /> : <p className="empty">No `store` setting found.</p>}
+      </article>
     </div>
   );
 }

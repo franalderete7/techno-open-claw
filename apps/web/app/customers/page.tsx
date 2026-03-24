@@ -1,86 +1,78 @@
-'use client';
+import { getCustomers } from "../../lib/api";
 
-import { useEffect, useState } from 'react';
-
-interface Customer {
-  id: number;
-  external_ref: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  email: string | null;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
+function formatDate(value: string) {
+  return new Date(value).toLocaleDateString("en-US", {
+    dateStyle: "medium",
+  });
 }
 
-export default function CustomersPage() {
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(true);
+export default async function CustomersPage() {
+  let items = [] as Awaited<ReturnType<typeof getCustomers>>["items"];
+  let error: string | null = null;
 
-  useEffect(() => {
-    fetch('/api/customers?limit=50')
-      .then(res => res.json())
-      .then(data => {
-        setCustomers(data.items || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error('Failed to load customers:', err);
-        setLoading(false);
-      });
-  }, []);
-
-  if (loading) {
-    return <div className="p-8 text-center">Cargando clientes...</div>;
+  try {
+    const response = await getCustomers(120);
+    items = response.items;
+  } catch (caught) {
+    error = caught instanceof Error ? caught.message : "Failed to load customers";
   }
 
   return (
-    <div className="p-8">
-      <h2 className="text-2xl font-bold mb-4">Clientes ({customers.length})</h2>
-      
-      <div className="bg-white rounded shadow overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left">ID</th>
-              <th className="px-4 py-2 text-left">Nombre</th>
-              <th className="px-4 py-2 text-left">Teléfono</th>
-              <th className="px-4 py-2 text-left">Email</th>
-              <th className="px-4 py-2 text-left">Source</th>
-              <th className="px-4 py-2 text-left">Notes</th>
-              <th className="px-4 py-2 text-left">Creado</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {customers.map(customer => (
-              <tr key={customer.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 font-mono">#{customer.id}</td>
-                <td className="px-4 py-3">
-                  <div className="font-medium">
-                    {customer.first_name || customer.last_name ? (
-                      `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
-                    ) : (
-                      <span className="text-gray-400">Anónimo</span>
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-3">{customer.phone || '-'}</td>
-                <td className="px-4 py-3">{customer.email || '-'}</td>
-                <td className="px-4 py-3 text-xs font-mono">
-                  {customer.external_ref?.split(':')[0] || '-'}
-                </td>
-                <td className="px-4 py-3 max-w-xs truncate text-xs text-gray-500">
-                  {customer.notes || '-'}
-                </td>
-                <td className="px-4 py-3 text-xs text-gray-500">
-                  {new Date(customer.created_at).toLocaleDateString('es-AR')}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="page-stack">
+      <section className="page-hero">
+        <span className="eyebrow">Customers</span>
+        <h2 className="hero-title">Customers</h2>
+        <div className="chip-row">
+          <span className="chip accent">{items.length} records</span>
+        </div>
+        {error ? <p className="empty">{error}</p> : null}
+      </section>
+
+      <section className="table-card">
+        <div className="panel-header">
+          <div>
+            <h3 className="panel-title">Directory</h3>
+          </div>
+        </div>
+
+        {items.length === 0 ? (
+          <p className="empty">No customers available.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Source</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>State Notes</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((customer) => (
+                  <tr key={customer.id}>
+                    <td>
+                      <div className="value-stack">
+                        <strong>
+                          {[customer.first_name, customer.last_name].filter(Boolean).join(" ") || "Unnamed contact"}
+                        </strong>
+                        <span className="muted mono">#{customer.id}</span>
+                      </div>
+                    </td>
+                    <td className="mono">{customer.external_ref || "-"}</td>
+                    <td>{customer.phone || "-"}</td>
+                    <td>{customer.email || "-"}</td>
+                    <td className="mono muted">{customer.notes || "-"}</td>
+                    <td>{formatDate(customer.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

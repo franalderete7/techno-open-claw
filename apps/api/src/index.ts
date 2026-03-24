@@ -6,7 +6,7 @@ import { config } from "./config.js";
 import { pool, query } from "./db.js";
 import { requireBearerToken } from "./auth.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
-import { handleManyChatWebhook } from "./manychat-webhook.js";
+import { n8nCompatRoutes } from "./routes/n8n-compat.js";
 
 const app = Fastify({
   logger: true,
@@ -25,6 +25,29 @@ const actorTypeValues = ["system", "agent", "admin", "customer", "tool"] as cons
 const jsonValueSchema: z.ZodTypeAny = z.lazy(() =>
   z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema)])
 );
+
+function listLimitSchema(defaultLimit = 50, maxLimit = 200) {
+  return z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(defaultLimit)
+    .transform((value) => Math.min(value, maxLimit));
+}
+
+app.setErrorHandler((error, request, reply) => {
+  if (error instanceof z.ZodError) {
+    return reply.status(400).send({
+      error: "validation_error",
+      issues: error.issues,
+    });
+  }
+
+  request.log.error(error);
+  return reply.status(500).send({
+    error: "internal_server_error",
+  });
+});
 
 function slugify(value: string) {
   const normalized = value
@@ -144,10 +167,10 @@ app.get("/health", async () => {
 });
 
 app.post("/webhooks/telegram", handleTelegramWebhook);
-app.post("/webhooks/manychat", handleManyChatWebhook);
 
 app.register(async (protectedApp) => {
   protectedApp.addHook("preHandler", requireBearerToken);
+  protectedApp.register(n8nCompatRoutes, { prefix: "/rest/v1" });
 
   protectedApp.get("/v1/dashboard", async () => {
     const [products] = await query<{ count: string }>("select count(*)::text as count from public.products");
@@ -176,7 +199,7 @@ app.register(async (protectedApp) => {
         .enum(["true", "false"])
         .optional()
         .transform((value) => (value == null ? null : value === "true")),
-      limit: z.coerce.number().int().positive().max(100).default(50),
+      limit: listLimitSchema(),
     });
     const params = schema.parse(request.query);
 
@@ -186,13 +209,13 @@ app.register(async (protectedApp) => {
     if (params.q) {
       values.push(`%${params.q}%`);
       where.push(
-        `(title ilike $${values.length} or sku ilike $${values.length} or brand ilike $${values.length} or model ilike $${values.length})`
+        `(p.title ilike $${values.length} or p.sku ilike $${values.length} or p.brand ilike $${values.length} or p.model ilike $${values.length})`
       );
     }
 
     if (params.active != null) {
       values.push(params.active);
-      where.push(`active = $${values.length}`);
+      where.push(`p.active = $${values.length}`);
     }
 
     values.push(params.limit);
@@ -200,7 +223,116 @@ app.register(async (protectedApp) => {
     const rows = await query(
       `
         select
-          id,
+          p.id,
+          p.legacy_source_id,
+          p.sku,
+          p.slug,
+          p.brand,
+          p.model,
+          p.title,
+          p.description,
+          p.condition,
+          p.price_amount,
+          p.currency_code,
+          p.active,
+          p.created_at,
+          p.updated_at,
+          p.category,
+          p.cost_usd,
+          p.logistics_usd,
+          p.total_cost_usd,
+          p.margin_pct,
+          p.price_usd,
+          p.promo_price_ars,
+          p.bancarizada_total,
+          p.bancarizada_cuota,
+          p.bancarizada_interest,
+          p.macro_total,
+          p.macro_cuota,
+          p.macro_interest,
+          p.cuotas_qty,
+          (coalesce(inv.in_stock_units, 0) > 0 or p.in_stock) as in_stock,
+          p.delivery_type,
+          p.delivery_days,
+          p.usd_rate,
+          p.ram_gb,
+          p.storage_gb,
+          p.network,
+          p.image_url,
+          p.color,
+          p.battery_health,
+          coalesce(inv.total_units, 0) as stock_units_total,
+          coalesce(inv.in_stock_units, 0) as stock_units_available,
+          coalesce(inv.reserved_units, 0) as stock_units_reserved,
+          coalesce(inv.sold_units, 0) as stock_units_sold
+        from public.products p
+        left join lateral (
+          select
+            count(*)::int as total_units,
+            count(*) filter (where status = 'in_stock')::int as in_stock_units,
+            count(*) filter (where status = 'reserved')::int as reserved_units,
+            count(*) filter (where status = 'sold')::int as sold_units
+          from public.stock_units su
+          where su.product_id = p.id
+        ) inv on true
+        ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
+        order by p.updated_at desc, p.id desc
+        limit $${values.length}
+      `,
+      values
+    );
+
+    return { items: rows };
+  });
+
+  protectedApp.post("/v1/products", async (request, reply) => {
+    const schema = z.object({
+      legacy_source_id: z.coerce.number().int().positive().optional().nullable(),
+      sku: z.string().trim().min(1),
+      slug: z.string().trim().optional(),
+      brand: z.string().trim().min(1),
+      model: z.string().trim().min(1),
+      title: z.string().trim().min(1),
+      description: z.string().trim().optional().nullable(),
+      condition: z.enum(productConditionValues).default("new"),
+      price_amount: z.coerce.number().finite().nonnegative().optional().nullable(),
+      currency_code: z.string().trim().min(1).default("ARS"),
+      active: z.boolean().default(true),
+      category: z.string().trim().optional().nullable(),
+      cost_usd: z.coerce.number().finite().nonnegative().optional().nullable(),
+      logistics_usd: z.coerce.number().finite().nonnegative().optional().nullable(),
+      total_cost_usd: z.coerce.number().finite().nonnegative().optional().nullable(),
+      margin_pct: z.coerce.number().finite().optional().nullable(),
+      price_usd: z.coerce.number().finite().nonnegative().optional().nullable(),
+      promo_price_ars: z.coerce.number().finite().nonnegative().optional().nullable(),
+      bancarizada_total: z.coerce.number().finite().nonnegative().optional().nullable(),
+      bancarizada_cuota: z.coerce.number().finite().nonnegative().optional().nullable(),
+      bancarizada_interest: z.coerce.number().finite().optional().nullable(),
+      macro_total: z.coerce.number().finite().nonnegative().optional().nullable(),
+      macro_cuota: z.coerce.number().finite().nonnegative().optional().nullable(),
+      macro_interest: z.coerce.number().finite().optional().nullable(),
+      cuotas_qty: z.coerce.number().int().nonnegative().optional().nullable(),
+      in_stock: z.boolean().optional().default(false),
+      delivery_type: z.string().trim().optional().nullable(),
+      delivery_days: z.coerce.number().int().nonnegative().optional().nullable(),
+      usd_rate: z.coerce.number().finite().nonnegative().optional().nullable(),
+      image_url: z.string().trim().url().optional().nullable().or(z.literal("")),
+      ram_gb: z.coerce.number().int().nonnegative().optional().nullable(),
+      storage_gb: z.coerce.number().int().nonnegative().optional().nullable(),
+      network: z.string().trim().optional().nullable(),
+      color: z.string().trim().optional().nullable(),
+      battery_health: z.coerce.number().int().min(0).max(100).optional().nullable(),
+    });
+    const body = schema.parse(request.body);
+    if (body.image_url === "") {
+      body.image_url = null;
+    }
+    const slug = body.slug || slugify(`${body.brand}-${body.model}-${body.title}`);
+
+    const rows = await query(
+      `
+        insert into public.products (
+          legacy_source_id,
           sku,
           slug,
           brand,
@@ -211,8 +343,6 @@ app.register(async (protectedApp) => {
           price_amount,
           currency_code,
           active,
-          created_at,
-          updated_at,
           category,
           cost_usd,
           logistics_usd,
@@ -231,56 +361,22 @@ app.register(async (protectedApp) => {
           delivery_type,
           delivery_days,
           usd_rate,
+          image_url,
           ram_gb,
           storage_gb,
           network,
-          image_url,
           color,
           battery_health
-        from public.products
-        ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-        order by updated_at desc, id desc
-        limit $${values.length}
-      `,
-      values
-    );
-
-    return { items: rows };
-  });
-
-  protectedApp.post("/v1/products", async (request, reply) => {
-    const schema = z.object({
-      sku: z.string().trim().min(1),
-      slug: z.string().trim().optional(),
-      brand: z.string().trim().min(1),
-      model: z.string().trim().min(1),
-      title: z.string().trim().min(1),
-      description: z.string().trim().optional().nullable(),
-      condition: z.enum(productConditionValues).default("new"),
-      price_amount: z.coerce.number().finite().nonnegative().optional().nullable(),
-      currency_code: z.string().trim().min(1).default("ARS"),
-      active: z.boolean().default(true),
-    });
-    const body = schema.parse(request.body);
-    const slug = body.slug || slugify(`${body.brand}-${body.model}-${body.title}`);
-
-    const rows = await query(
-      `
-        insert into public.products (
-          sku,
-          slug,
-          brand,
-          model,
-          title,
-          description,
-          condition,
-          price_amount,
-          currency_code,
-          active
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) values (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+          $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+          $31, $32, $33, $34, $35
+        )
         returning *
       `,
       [
+        body.legacy_source_id ?? null,
         body.sku,
         slug,
         body.brand,
@@ -291,6 +387,30 @@ app.register(async (protectedApp) => {
         body.price_amount ?? null,
         body.currency_code,
         body.active,
+        body.category ?? null,
+        body.cost_usd ?? null,
+        body.logistics_usd ?? null,
+        body.total_cost_usd ?? null,
+        body.margin_pct ?? null,
+        body.price_usd ?? null,
+        body.promo_price_ars ?? null,
+        body.bancarizada_total ?? null,
+        body.bancarizada_cuota ?? null,
+        body.bancarizada_interest ?? null,
+        body.macro_total ?? null,
+        body.macro_cuota ?? null,
+        body.macro_interest ?? null,
+        body.cuotas_qty ?? null,
+        body.in_stock,
+        body.delivery_type ?? null,
+        body.delivery_days ?? null,
+        body.usd_rate ?? null,
+        body.image_url || null,
+        body.ram_gb ?? null,
+        body.storage_gb ?? null,
+        body.network ?? null,
+        body.color ?? null,
+        body.battery_health ?? null,
       ]
     );
 
@@ -308,6 +428,7 @@ app.register(async (protectedApp) => {
       productId: z.coerce.number().int().positive(),
     });
     const bodySchema = z.object({
+      legacy_source_id: z.coerce.number().int().positive().nullable().optional(),
       sku: z.string().trim().min(1).optional(),
       slug: z.string().trim().min(1).optional(),
       brand: z.string().trim().min(1).optional(),
@@ -318,10 +439,37 @@ app.register(async (protectedApp) => {
       price_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
       currency_code: z.string().trim().min(1).optional(),
       active: z.boolean().optional(),
+      category: z.string().trim().nullable().optional(),
+      cost_usd: z.coerce.number().finite().nonnegative().nullable().optional(),
+      logistics_usd: z.coerce.number().finite().nonnegative().nullable().optional(),
+      total_cost_usd: z.coerce.number().finite().nonnegative().nullable().optional(),
+      margin_pct: z.coerce.number().finite().nullable().optional(),
+      price_usd: z.coerce.number().finite().nonnegative().nullable().optional(),
+      promo_price_ars: z.coerce.number().finite().nonnegative().nullable().optional(),
+      bancarizada_total: z.coerce.number().finite().nonnegative().nullable().optional(),
+      bancarizada_cuota: z.coerce.number().finite().nonnegative().nullable().optional(),
+      bancarizada_interest: z.coerce.number().finite().nullable().optional(),
+      macro_total: z.coerce.number().finite().nonnegative().nullable().optional(),
+      macro_cuota: z.coerce.number().finite().nonnegative().nullable().optional(),
+      macro_interest: z.coerce.number().finite().nullable().optional(),
+      cuotas_qty: z.coerce.number().int().nonnegative().nullable().optional(),
+      in_stock: z.boolean().optional(),
+      delivery_type: z.string().trim().nullable().optional(),
+      delivery_days: z.coerce.number().int().nonnegative().nullable().optional(),
+      usd_rate: z.coerce.number().finite().nonnegative().nullable().optional(),
+      image_url: z.string().trim().url().nullable().optional().or(z.literal("")),
+      ram_gb: z.coerce.number().int().nonnegative().nullable().optional(),
+      storage_gb: z.coerce.number().int().nonnegative().nullable().optional(),
+      network: z.string().trim().nullable().optional(),
+      color: z.string().trim().nullable().optional(),
+      battery_health: z.coerce.number().int().min(0).max(100).nullable().optional(),
     });
 
     const { productId } = paramsSchema.parse(request.params);
     const body = bodySchema.parse(request.body);
+    if (body.image_url === "") {
+      body.image_url = null;
+    }
     const update = buildUpdateClause(body);
 
     if (!update) {
@@ -351,7 +499,7 @@ app.register(async (protectedApp) => {
   protectedApp.get("/v1/stock", async (request) => {
     const schema = z.object({
       status: z.string().trim().optional(),
-      limit: z.coerce.number().int().positive().max(100).default(50),
+      limit: listLimitSchema(),
     });
     const params = schema.parse(request.query);
 
@@ -581,7 +729,7 @@ app.register(async (protectedApp) => {
   protectedApp.get("/v1/customers", async (request) => {
     const schema = z.object({
       q: z.string().trim().optional(),
-      limit: z.coerce.number().int().positive().max(100).default(50),
+      limit: listLimitSchema(),
     });
     const params = schema.parse(request.query);
 
@@ -675,7 +823,7 @@ app.register(async (protectedApp) => {
 
   protectedApp.get("/v1/conversations", async (request) => {
     const schema = z.object({
-      limit: z.coerce.number().int().positive().max(100).default(50),
+      limit: listLimitSchema(),
     });
     const params = schema.parse(request.query);
 
@@ -699,6 +847,51 @@ app.register(async (protectedApp) => {
         limit $1
       `,
       [params.limit]
+    );
+
+    return { items: rows };
+  });
+
+  protectedApp.get("/v1/audit", async (request) => {
+    const schema = z.object({
+      limit: listLimitSchema(100, 200),
+      actor_type: z.string().trim().optional(),
+      entity_type: z.string().trim().optional(),
+    });
+    const params = schema.parse(request.query);
+
+    const values: unknown[] = [];
+    const where: string[] = [];
+
+    if (params.actor_type) {
+      values.push(params.actor_type);
+      where.push(`actor_type = $${values.length}`);
+    }
+
+    if (params.entity_type) {
+      values.push(params.entity_type);
+      where.push(`entity_type = $${values.length}`);
+    }
+
+    values.push(params.limit);
+
+    const rows = await query(
+      `
+        select
+          id,
+          actor_type,
+          actor_id,
+          action,
+          entity_type,
+          entity_id,
+          metadata,
+          created_at
+        from public.audit_logs
+        ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
+        order by created_at desc, id desc
+        limit $${values.length}
+      `,
+      values
     );
 
     return { items: rows };
@@ -794,7 +987,7 @@ app.register(async (protectedApp) => {
 
   protectedApp.get("/v1/orders", async (request) => {
     const schema = z.object({
-      limit: z.coerce.number().int().positive().max(100).default(50),
+      limit: listLimitSchema(),
     });
     const params = schema.parse(request.query);
 
@@ -1023,7 +1216,7 @@ app.register(async (protectedApp) => {
     });
     const { key } = schema.parse(request.params);
 
-    const rows = await query(`select key, value, updated_at from public.settings where key = $1`, [key]);
+    const rows = await query(`select key, value, description, updated_at from public.settings where key = $1`, [key]);
     const setting = rows[0];
 
     if (!setting) {
@@ -1033,12 +1226,29 @@ app.register(async (protectedApp) => {
     return setting;
   });
 
+  protectedApp.get("/v1/settings", async () => {
+    const rows = await query(
+      `
+        select
+          key,
+          value,
+          description,
+          updated_at
+        from public.settings
+        order by key asc
+      `
+    );
+
+    return { items: rows };
+  });
+
   protectedApp.put("/v1/settings/:key", async (request) => {
     const paramsSchema = z.object({
       key: z.string().trim().min(1),
     });
     const bodySchema = z.object({
-      value: z.record(z.string(), jsonValueSchema),
+      value: jsonValueSchema,
+      description: z.string().trim().nullable().optional(),
     });
 
     const { key } = paramsSchema.parse(request.params);
@@ -1046,18 +1256,22 @@ app.register(async (protectedApp) => {
 
     const rows = await query(
       `
-        insert into public.settings (key, value)
-        values ($1, $2)
+        insert into public.settings (key, value, description)
+        values ($1, $2::jsonb, $3)
         on conflict (key)
         do update set
           value = excluded.value,
+          description = excluded.description,
           updated_at = now()
-        returning key, value, updated_at
+        returning key, value, description, updated_at
       `,
-      [key, body.value]
+      [key, JSON.stringify(body.value), body.description ?? null]
     );
 
-    await writeAuditLog(pool, request, "setting.updated", "setting", key, body.value);
+    await writeAuditLog(pool, request, "setting.updated", "setting", key, {
+      value: body.value,
+      description: body.description ?? null,
+    });
     return rows[0];
   });
 });

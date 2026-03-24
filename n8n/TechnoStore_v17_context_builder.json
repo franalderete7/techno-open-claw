@@ -1,0 +1,121 @@
+{
+  "name": "TechnoStore - v17 Context Builder",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "4aa12cfd-0e01-bd4f-b70a-adfb9b068b04",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\nconst userMessage = String(input.user_message || input.raw_message || '').trim();\n\nreturn [{\n  json: {\n    ...input,\n    user_message: userMessage || '(vacío)',\n    channel: String(input.channel || 'manychat'),\n  }\n}];"
+      },
+      "id": "235d47ca-02ca-acd0-497b-d05dcf59918d",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/v17_build_turn_context",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_manychat_id: $json.subscriber_id, p_user_message: $json.user_message, p_recent_limit: 6, p_candidate_limit: 8, p_storefront_order_id: $json.storefront_order_id || null, p_storefront_order_token: $json.storefront_order_token || null }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "d08ea3a1-dce1-349a-5f34-bf94249984a2",
+      "name": "Fetch Turn Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        300
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Normalize Input').first().json || {};\nconst raw = $input.first().json || {};\nconst context = raw.v17_build_turn_context || raw || {};\n\nif (!context.store || typeof context.store !== 'object') {\n  context.store = {};\n}\n\ncontext.store.store_website_url = context.store.store_website_url || 'https://puntotechno.com';\n\nreturn [{\n  json: {\n    ...base,\n    context,\n  }\n}];"
+      },
+      "id": "fcac67a5-15c2-c495-df5b-1fcb9ea4549c",
+      "name": "Normalize Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Fetch Turn Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Turn Context": {
+      "main": [
+        [
+          {
+            "node": "Normalize Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

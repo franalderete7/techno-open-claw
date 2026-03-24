@@ -78,6 +78,10 @@ Migration files:
 
 This is the core structure. There are no tags, CRM classification systems, or workflow-specific state tables in the new stack.
 
+## Legacy reference inputs
+
+A dedicated drop-zone now exists at `docs/legacy/`. Put any old workflow exports, prompts, and business-rule documents there so the resident agent can use them as reference when recreating old behavior in-app.
+
 ## Current repo state
 
 Key repo files:
