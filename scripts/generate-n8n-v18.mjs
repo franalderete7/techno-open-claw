@@ -230,13 +230,79 @@ return [{
     `const base = $('Wait 8s Debounce').first().json || {};
 const rpcResult = $input.first().json;
 
-let isLatest = false;
-if (typeof rpcResult === 'boolean') {
-  isLatest = rpcResult;
-} else if (Array.isArray(rpcResult) && rpcResult.length > 0) {
-  isLatest = rpcResult[0] === true || rpcResult[0]?.check_is_latest_message === true;
-} else if (rpcResult && typeof rpcResult === 'object') {
-  isLatest = rpcResult.check_is_latest_message === true || rpcResult.result === true;
+const pickBool = (value) => value === true || value === 'true';
+const pickId = (value) => {
+  if (value == null || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : null;
+};
+
+const candidates = [];
+const visit = (value) => {
+  if (value == null) return;
+
+  if (typeof value === 'string') {
+    try {
+      visit(JSON.parse(value));
+    } catch (error) {}
+    return;
+  }
+
+  if (typeof value === 'boolean') {
+    candidates.push(value);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      visit(item);
+    }
+    return;
+  }
+
+  if (typeof value === 'object') {
+    candidates.push(value);
+    for (const key of ['body', 'data', 'result']) {
+      visit(value[key]);
+    }
+  }
+};
+
+visit(rpcResult);
+
+let isLatest = null;
+let latestMessageId = null;
+let checkedMessageId = pickId(base.saved_message_id);
+
+for (const candidate of candidates) {
+  if (typeof candidate === 'boolean') {
+    isLatest = candidate;
+    break;
+  }
+
+  if (!candidate || typeof candidate !== 'object') continue;
+
+  if (latestMessageId == null) {
+    latestMessageId = pickId(candidate.latest_message_id ?? candidate.latestMessageId);
+  }
+
+  if (checkedMessageId == null) {
+    checkedMessageId = pickId(candidate.checked_message_id ?? candidate.checkedMessageId ?? candidate.message_id);
+  }
+
+  if (candidate.check_is_latest_message !== undefined) {
+    isLatest = pickBool(candidate.check_is_latest_message);
+    break;
+  }
+
+  if (candidate.result !== undefined && typeof candidate.result !== 'object') {
+    isLatest = pickBool(candidate.result);
+    break;
+  }
+}
+
+if (isLatest == null && latestMessageId != null && checkedMessageId != null) {
+  isLatest = latestMessageId === checkedMessageId;
 }
 
 const debounceReason =
@@ -244,7 +310,9 @@ const debounceReason =
     ? 'missing_saved_message_id'
     : base.is_empty
       ? 'empty_message'
-      : isLatest === true
+      : isLatest == null
+        ? 'rpc_shape_unknown'
+        : isLatest === true
         ? 'latest'
         : 'not_latest';
 
@@ -253,6 +321,9 @@ return [{
     ...base,
     should_continue: base.saved_message_id != null && isLatest === true && !base.is_empty,
     debounce_reason: debounceReason,
+    rpc_is_latest: isLatest,
+    rpc_latest_message_id: latestMessageId,
+    rpc_checked_message_id: checkedMessageId,
   }
 }];`
   );
