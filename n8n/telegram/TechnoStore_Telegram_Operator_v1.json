@@ -1,0 +1,695 @@
+{
+  "name": "TechnoStore - Telegram Operator v1",
+  "active": false,
+  "nodes": [
+    {
+      "id": "telegram-webhook",
+      "name": "Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1160,
+        220
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "technostore-telegram-operator-v1",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "technostore-telegram-operator-v1"
+    },
+    {
+      "id": "parse-update",
+      "name": "Parse Telegram Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst body = raw.body || raw;\nconst headers = raw.headers || {};\nconst message = body.message || body.edited_message || body.channel_post || body.edited_channel_post || null;\n\nif (!message) {\n  return [{ json: { ignore: true, ignore_reason: 'no_message_payload' } }];\n}\n\nconst expectedSecret = String($env.TELEGRAM_WEBHOOK_SECRET || '').trim();\nconst providedSecret = String(headers['x-telegram-bot-api-secret-token'] || headers['X-Telegram-Bot-Api-Secret-Token'] || '').trim();\nconst secretValid = !expectedSecret || expectedSecret === providedSecret;\n\nconst allowedRaw = String($env.TELEGRAM_ALLOWED_CHAT_IDS || '')\n  .split(',')\n  .map((value) => value.trim())\n  .filter(Boolean);\n\nconst chatId = String(message.chat?.id || '');\nconst userId = String(message.from?.id || message.chat?.id || '');\nconst allowed =\n  allowedRaw.length === 0 ||\n  allowedRaw.includes(chatId) ||\n  allowedRaw.includes(userId);\n\nconst photos = Array.isArray(message.photo) ? message.photo : [];\nconst photo = photos.length > 0 ? photos[photos.length - 1] : null;\nconst textBody = String(message.text || message.caption || '').trim();\n\nlet messageType = 'text';\nif (message.voice || message.audio) messageType = 'audio';\nelse if (photo) messageType = 'image';\nelse if (message.video || message.video_note) messageType = 'video';\nelse if (message.document) messageType = 'file';\n\nconst firstName = String(message.from?.first_name || message.chat?.first_name || '').trim();\nconst lastName = String(message.from?.last_name || message.chat?.last_name || '').trim();\nconst conversationTitle =\n  String(message.chat?.title || '').trim() ||\n  [firstName, lastName].filter(Boolean).join(' ').trim() ||\n  (message.chat?.username ? '@' + String(message.chat.username).trim() : '') ||\n  (message.from?.username ? '@' + String(message.from.username).trim() : '') ||\n  `Telegram ${chatId}`;\n\nconst mediaUrl =\n  message.voice?.file_id ? `telegram://voice/${message.voice.file_id}` :\n  message.audio?.file_id ? `telegram://audio/${message.audio.file_id}` :\n  message.video?.file_id ? `telegram://video/${message.video.file_id}` :\n  message.video_note?.file_id ? `telegram://video-note/${message.video_note.file_id}` :\n  message.document?.file_id ? `telegram://document/${message.document.file_id}` :\n  photo?.file_id ? `telegram://photo/${photo.file_id}` :\n  null;\n\nconst userMessage =\n  textBody ||\n  (messageType === 'image' ? 'Please analyze the attached image.' :\n   messageType === 'audio' ? '(audio message)' :\n   '(empty message)');\n\nreturn [{\n  json: {\n    ignore: !secretValid || !allowed,\n    ignore_reason: !secretValid ? 'invalid_secret' : (!allowed ? 'chat_not_allowed' : null),\n    secret_valid: secretValid,\n    allowed,\n    update_id: body.update_id ?? null,\n    chat_id: chatId,\n    chat_id_number: Number(message.chat?.id || 0),\n    user_id: userId || null,\n    message_id: message.message_id ?? null,\n    first_name: firstName || null,\n    last_name: lastName || null,\n    external_ref: `telegram-user:${userId || chatId}`,\n    conversation_key: `telegram-chat:${chatId}`,\n    conversation_title: conversationTitle,\n    text_body: textBody || null,\n    user_message: userMessage,\n    message_type: messageType,\n    media_url: mediaUrl,\n    voice_file_id: String(message.voice?.file_id || message.audio?.file_id || ''),\n    photo_file_id: String(photo?.file_id || ''),\n    message_at: new Date(((message.date ?? Math.floor(Date.now() / 1000))) * 1000).toISOString(),\n    payload: {\n      updateId: body.update_id ?? null,\n      telegramMessageId: message.message_id ?? null,\n      chatId: Number(message.chat?.id || 0),\n      fromId: message.from?.id ?? null,\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "accept-update",
+      "name": "Accept Update?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -660,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "accept-update-condition",
+              "leftValue": "={{ $json.ignore }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ignored",
+      "name": "Ignored",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        420
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true, ignored: true, reason: $input.first().json.ignore_reason || 'ignored' } }];"
+      }
+    },
+    {
+      "id": "is-audio",
+      "name": "Is Audio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -400,
+        120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-audio-condition",
+              "leftValue": "={{ $json.message_type }}",
+              "rightValue": "audio",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "get-audio-file",
+      "name": "Get Audio File Meta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        20
+      ],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/getFile?file_id=' + $json.voice_file_id }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "download-audio",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        20
+      ],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/file/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.result?.file_path || '') }}",
+        "options": {
+          "response": {
+            "responseFormat": "file",
+            "outputPropertyName": "audioFile"
+          },
+          "timeout": 15000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "groq-whisper",
+      "name": "Groq Whisper Transcribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        380,
+        20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.GROQ_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "audioFile"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3-turbo"
+            },
+            {
+              "name": "language",
+              "value": "es"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "is-image",
+      "name": "Is Image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-image-condition",
+              "leftValue": "={{ $('Parse Telegram Update').first().json.message_type }}",
+              "rightValue": "image",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "get-image-file",
+      "name": "Get Image File Meta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        120
+      ],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/getFile?file_id=' + $('Parse Telegram Update').first().json.photo_file_id }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "download-image",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        120
+      ],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/file/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.result?.file_path || '') }}",
+        "options": {
+          "response": {
+            "responseFormat": "file",
+            "outputPropertyName": "imageFile"
+          },
+          "timeout": 15000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "encode-image",
+      "name": "Encode Image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        120
+      ],
+      "parameters": {
+        "jsCode": "const binary = $input.first().binary?.imageFile;\nif (!binary?.data) {\n  return [{ json: { image_base64: null } }];\n}\nconst mimeType = binary.mimeType || 'image/jpeg';\nreturn [{ json: { image_base64: `data:${mimeType};base64,${binary.data}` } }];"
+      }
+    },
+    {
+      "id": "compose-input",
+      "name": "Compose Operator Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const base = $('Parse Telegram Update').first().json || {};\nlet transcript = null;\nlet imageBase64 = null;\n\ntry {\n  const whisper = $('Groq Whisper Transcribe').first().json || {};\n  if (typeof whisper.text === 'string' && whisper.text.trim()) {\n    transcript = whisper.text.trim();\n  }\n} catch (error) {}\n\ntry {\n  const image = $('Encode Image').first().json || {};\n  if (typeof image.image_base64 === 'string' && image.image_base64.trim()) {\n    imageBase64 = image.image_base64.trim();\n  }\n} catch (error) {}\n\nconst effectiveMessage =\n  transcript ||\n  base.user_message ||\n  (imageBase64 ? 'Please analyze the attached image.' : 'Operator message');\n\nreturn [{\n  json: {\n    actor_ref: `telegram:${base.chat_id}:${base.user_id || base.chat_id}`,\n    chat_id: String(base.chat_id || ''),\n    chat_id_number: Number(base.chat_id_number || 0),\n    user_id: base.user_id || null,\n    user_message: effectiveMessage,\n    text_body: base.text_body || null,\n    message_type: base.message_type || 'text',\n    media_url: base.media_url || null,\n    transcript,\n    image_base64: imageBase64,\n    external_ref: base.external_ref,\n    conversation_key: base.conversation_key,\n    conversation_title: base.conversation_title,\n    first_name: base.first_name || null,\n    last_name: base.last_name || null,\n    message_at: base.message_at,\n    reply_to_message_id: base.message_id || null,\n    payload: {\n      ...(base.payload || {}),\n      source: 'n8n-telegram-operator-v1',\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "run-turn",
+      "name": "Run Operator Turn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1940,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL + '/v1/operator/telegram/turn' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 20000
+        }
+      }
+    },
+    {
+      "id": "needs-ai",
+      "name": "Needs AI Chat?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "needs-ai-condition",
+              "leftValue": "={{ $json.kind }}",
+              "rightValue": "chat",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ollama-generate",
+      "name": "Ollama Generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2460,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_BASE_URL.replace(/\\/$/, '') + '/api/generate' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3.5:cloud', stream: false, system: $('Run Operator Turn').first().json.systemPrompt || '', prompt: $('Run Operator Turn').first().json.prompt || '', options: { temperature: 0.2, top_p: 0.9 } }) }}",
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "finalize-reply",
+      "name": "Finalize Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const turn = $('Run Operator Turn').first().json || {};\nconst base = $('Compose Operator Input').first().json || {};\n\nlet replyText = String(turn.text || '').trim();\n\nif (turn.kind === 'chat') {\n  try {\n    const llm = $('Ollama Generate').first().json || {};\n    replyText = String(llm.response || '').trim();\n  } catch (error) {\n    replyText = '';\n  }\n}\n\nif (!replyText) {\n  replyText = 'No pude preparar una respuesta útil. Revisá la ejecución en n8n.';\n}\n\nreturn [{\n  json: {\n    chat_id: Number(base.chat_id_number || 0),\n    reply_to_message_id: base.reply_to_message_id || null,\n    text: replyText.slice(0, 4000),\n    conversation_id: turn.conversation_id || null,\n    payload: {\n      telegramChatId: base.chat_id || null,\n      inboundMessageId: turn.inbound_message_id || null,\n      source: 'n8n-telegram-operator-v1',\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "send-message",
+      "name": "Send Telegram Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2980,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chat_id, text: $json.text, reply_to_message_id: $json.reply_to_message_id || undefined }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "build-outbound",
+      "name": "Build Outbound Save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3240,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const reply = $('Finalize Reply').first().json || {};\nconst sendResult = $input.first().json || {};\n\nreturn [{\n  json: {\n    conversation_id: reply.conversation_id,\n    text: reply.text,\n    message_type: 'text',\n    payload: {\n      ...(reply.payload || {}),\n      telegramMessageId: sendResult.result?.message_id || null,\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "persist-outbound",
+      "name": "Persist Outbound Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3500,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL + '/v1/operator/telegram/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Telegram Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Telegram Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Telegram Update": {
+      "main": [
+        [
+          {
+            "node": "Accept Update?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept Update?": {
+      "main": [
+        [
+          {
+            "node": "Is Audio?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignored",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Audio?": {
+      "main": [
+        [
+          {
+            "node": "Get Audio File Meta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Audio File Meta": {
+      "main": [
+        [
+          {
+            "node": "Download Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio": {
+      "main": [
+        [
+          {
+            "node": "Groq Whisper Transcribe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Whisper Transcribe": {
+      "main": [
+        [
+          {
+            "node": "Is Image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Image?": {
+      "main": [
+        [
+          {
+            "node": "Get Image File Meta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compose Operator Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Image File Meta": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Encode Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encode Image": {
+      "main": [
+        [
+          {
+            "node": "Compose Operator Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Operator Input": {
+      "main": [
+        [
+          {
+            "node": "Run Operator Turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Operator Turn": {
+      "main": [
+        [
+          {
+            "node": "Needs AI Chat?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs AI Chat?": {
+      "main": [
+        [
+          {
+            "node": "Ollama Generate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Finalize Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Generate": {
+      "main": [
+        [
+          {
+            "node": "Finalize Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Build Outbound Save",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Outbound Save": {
+      "main": [
+        [
+          {
+            "node": "Persist Outbound Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
