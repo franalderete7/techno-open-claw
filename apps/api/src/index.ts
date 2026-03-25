@@ -7,6 +7,11 @@ import { config } from "./config.js";
 import { pool, query } from "./db.js";
 import { requireBearerToken } from "./auth.js";
 import { inferMediaContentType, openMediaStream, resolveMediaFilePath } from "./media-storage.js";
+import {
+  createStorefrontPaymentIntent,
+  handleGalioPayWebhook,
+  resolveStorefrontCheckoutHandoff,
+} from "./storefront-checkouts.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { n8nCompatRoutes } from "./routes/n8n-compat.js";
 import { telegramOperatorApiRoutes } from "./routes/telegram-operator-api.js";
@@ -199,6 +204,10 @@ app.get("/media/*", async (request, reply) => {
 });
 
 app.post("/webhooks/telegram", handleTelegramWebhook);
+app.post("/webhooks/galiopay", async (request, reply) => {
+  const result = await handleGalioPayWebhook(request.body);
+  return reply.code(200).send(result);
+});
 
 app.register(async (protectedApp) => {
   protectedApp.addHook("preHandler", requireBearerToken);
@@ -299,6 +308,46 @@ app.register(async (protectedApp) => {
       openConversations: Number(openConversations?.count ?? 0),
       orders: Number(orders?.count ?? 0),
     };
+  });
+
+  protectedApp.post("/v1/storefront/payment-intents", async (request, reply) => {
+    const schema = z.object({
+      product_id: z.coerce.number().int().positive(),
+      source_host: z.string().trim().optional().nullable(),
+      source_path: z.string().trim().optional().nullable(),
+      channel: z.enum(["storefront", "whatsapp", "telegram", "api"]).default("storefront"),
+    });
+
+    const body = schema.parse(request.body);
+    const intent = await createStorefrontPaymentIntent({
+      productId: body.product_id,
+      sourceHost: body.source_host ?? null,
+      sourcePath: body.source_path ?? null,
+      channel: body.channel,
+    });
+
+    await writeAuditLog(pool, request, "storefront.payment_intent.created", "order", String(intent.order_id), {
+      channel: body.channel,
+      source_host: body.source_host ?? null,
+    });
+
+    return reply.code(201).send(intent);
+  });
+
+  protectedApp.post("/v1/storefront/payment-intents/resolve", async (request, reply) => {
+    const schema = z.object({
+      order_id: z.coerce.number().int().positive(),
+      token: z.string().trim().min(8).max(128),
+    });
+
+    const body = schema.parse(request.body);
+    const handoff = await resolveStorefrontCheckoutHandoff(body.order_id, body.token.toLowerCase());
+
+    if (!handoff.ok) {
+      return reply.code(404).send(handoff);
+    }
+
+    return reply.send(handoff);
   });
 
   protectedApp.get("/v1/schema", async () => {

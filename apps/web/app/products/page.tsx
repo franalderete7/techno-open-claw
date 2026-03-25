@@ -33,9 +33,9 @@ export default async function ProductsPage() {
       <StorefrontCatalog
         store={store}
         products={buildStorefrontProducts(items)}
-        eyebrow="Catálogo"
-        title="Catálogo TechnoStore."
-        lead="Buscá por marca, memoria o color. Cuando encontrás el modelo, seguís la consulta por WhatsApp."
+        eyebrow="Seleccion TechnoStore"
+        title="Equipos con precio final y compra simple."
+        lead="Filtra por RAM, memoria o precio. Cuando elegis el modelo, seguimos la operacion por WhatsApp con el link de pago listo."
       />
     );
   }

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 
-function normalizeApiBaseUrl(rawUrl: string) {
+export function normalizeApiBaseUrl(rawUrl: string) {
   if (existsSync("/.dockerenv")) {
     return rawUrl;
   }
@@ -21,12 +21,18 @@ function normalizeApiBaseUrl(rawUrl: string) {
 const apiBaseUrl = normalizeApiBaseUrl(process.env.INTERNAL_API_BASE_URL || "http://127.0.0.1:4000");
 const apiBearerToken = process.env.INTERNAL_API_BEARER_TOKEN || "";
 
-async function apiFetch<T>(path: string): Promise<T> {
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${apiBearerToken}`);
+
+  if (init?.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const response = await fetch(`${apiBaseUrl}${path}`, {
     cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${apiBearerToken}`,
-    },
+    ...init,
+    headers,
   });
 
   if (!response.ok) {
@@ -34,6 +40,10 @@ async function apiFetch<T>(path: string): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+async function apiFetch<T>(path: string): Promise<T> {
+  return apiRequest<T>(path);
 }
 
 export type DashboardResponse = {
@@ -224,6 +234,16 @@ export type SchemaResponse = {
   relationships: SchemaRelationshipRecord[];
 };
 
+export type StorefrontPaymentIntentCreateResponse = {
+  order_id: number;
+  token: string;
+  redirect_url: string;
+  whatsapp_message: string;
+  product_title: string;
+  price_amount: number;
+  currency_code: string;
+};
+
 export async function getDashboard() {
   return apiFetch<DashboardResponse>("/v1/dashboard");
 }
@@ -267,4 +287,16 @@ export async function getAudit(limit = 100) {
 
 export async function getSchema() {
   return apiFetch<SchemaResponse>("/v1/schema");
+}
+
+export async function createStorefrontPaymentIntent(payload: {
+  product_id: number;
+  source_host?: string | null;
+  source_path?: string | null;
+  channel?: "storefront" | "whatsapp" | "telegram" | "api";
+}) {
+  return apiRequest<StorefrontPaymentIntentCreateResponse>("/v1/storefront/payment-intents", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

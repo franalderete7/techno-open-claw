@@ -27,7 +27,10 @@ export type StorefrontProfile = {
   storefront_url: string | null;
   address: string | null;
   hours: string | null;
+  map_embed_url: string | null;
 };
+
+const DEFAULT_STORE_WHATSAPP = "543875319940";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -71,37 +74,42 @@ export function buildStorefrontProfile(settings: SettingRecord[]): StorefrontPro
   const address = pickText(settingsMap, storeRoot, "store_address", "address");
   const hours = pickText(settingsMap, storeRoot, "store_hours", "hours");
   const storefrontUrl = pickText(settingsMap, storeRoot, "storefront_url", "store_website_url");
-  const whatsappNumber = normalizePhone(
-    pickText(
-      settingsMap,
-      storeRoot,
-      "store_whatsapp",
-      "store_whatsapp_phone",
-      "store_whatsapp_number",
-      "whatsapp",
-      "whatsapp_phone",
-      "whatsapp_number",
-      "contact_whatsapp",
-      "contact_phone",
-      "store_contact_whatsapp",
-      "store_contact_phone",
-      "store_phone",
-      "store_phone_number",
-      "phone",
-      "telefono",
-      "telefono_whatsapp",
-      "celular"
-    )
-  );
+  const whatsappNumber =
+    normalizePhone(
+      pickText(
+        settingsMap,
+        storeRoot,
+        "store_whatsapp",
+        "store_whatsapp_phone",
+        "store_whatsapp_number",
+        "whatsapp",
+        "whatsapp_phone",
+        "whatsapp_number",
+        "contact_whatsapp",
+        "contact_phone",
+        "store_contact_whatsapp",
+        "store_contact_phone",
+        "store_phone",
+        "store_phone_number",
+        "phone",
+        "telefono",
+        "telefono_whatsapp",
+        "celular"
+      )
+    ) || DEFAULT_STORE_WHATSAPP;
+  const mapEmbedUrl = address
+    ? `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`
+    : null;
 
   return {
     name,
-    tagline: "Modelos nuevos y usados con atención directa por WhatsApp.",
+    tagline: "iPhone, Samsung, Xiaomi y mas con precio final y atencion directa.",
     whatsapp_number: whatsappNumber,
     whatsapp_url: whatsappNumber ? `https://wa.me/${whatsappNumber}` : null,
-    storefront_url: storefrontUrl,
+    storefront_url: storefrontUrl || "https://technostoresalta.com",
     address,
     hours,
+    map_embed_url: mapEmbedUrl,
   };
 }
 

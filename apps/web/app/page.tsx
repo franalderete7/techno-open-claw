@@ -43,8 +43,8 @@ export default async function HomePage() {
         store={store}
         products={storefrontProducts}
         eyebrow="TechnoStore Salta"
-        title="Celulares en Salta."
-        lead="Precio final en pesos, memoria, color y entrega clara. Elegís el modelo y seguís por WhatsApp con atención humana."
+        title="Smartphones con precio final y pago directo."
+        lead="Elegi el modelo, comparalo por RAM, memoria o precio y recibi el link de pago por WhatsApp con atencion directa."
       />
     );
   }

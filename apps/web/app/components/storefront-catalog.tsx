@@ -15,6 +15,28 @@ type StorefrontCatalogProps = {
 
 const INITIAL_BATCH_SIZE = 8;
 const BATCH_SIZE = 8;
+const FAQ_ITEMS = [
+  {
+    question: "Como funciona la compra?",
+    answer:
+      "Elegis el modelo, tocás 'Quiero pagarlo ahora' y seguimos la operacion por WhatsApp con el equipo ya seleccionado.",
+  },
+  {
+    question: "Los precios ya estan en pesos?",
+    answer:
+      "Si. El valor que ves en cada card es el precio final publico en ARS para ese equipo.",
+  },
+  {
+    question: "Hacen entrega o retiro?",
+    answer:
+      "Si. Coordinamos retiro en Salta o entrega segun el equipo y la disponibilidad publicada.",
+  },
+  {
+    question: "Recibo un link de pago personalizado?",
+    answer:
+      "Si. Cuando avanzas por WhatsApp te enviamos el link de pago preparado para ese modelo y ese importe.",
+  },
+];
 
 function formatMoney(amount: number | null) {
   if (amount == null) return "Consultar";
@@ -25,21 +47,26 @@ function formatMoney(amount: number | null) {
   }).format(amount);
 }
 
-function buildWhatsAppUrl(baseUrl: string | null, product: StorefrontProduct) {
+function buildWhatsAppUrl(baseUrl: string | null, message: string) {
   if (!baseUrl) return null;
-  const message = `Hola! Quiero consultar por ${product.title}.`;
   return `${baseUrl}?text=${encodeURIComponent(message)}`;
 }
 
+function buildProductConsultUrl(baseUrl: string | null, product: StorefrontProduct) {
+  return buildWhatsAppUrl(baseUrl, `Hola! Quiero consultar por ${product.title}.`);
+}
+
+function buildProductPaymentFallbackUrl(baseUrl: string | null, product: StorefrontProduct) {
+  return buildWhatsAppUrl(baseUrl, `Hola! Quiero pagarlo ahora por ${product.title}.`);
+}
+
 function buildSpecSummary(product: StorefrontProduct) {
-  const parts = [
+  return [
     product.ram_gb ? `${product.ram_gb}GB RAM` : null,
     product.storage_gb ? `${product.storage_gb}GB` : null,
     product.network ? product.network.toUpperCase() : null,
     product.color,
   ].filter(Boolean);
-
-  return parts.join(", ");
 }
 
 function normalizeComparableText(value: string | null) {
@@ -55,7 +82,12 @@ function ProductImage({ product }: { product: StorefrontProduct }) {
   const [failed, setFailed] = useState(false);
 
   if (!product.image_url || failed) {
-    return <div className="storefront-image-fallback">{initials}</div>;
+    return (
+      <div className="storefront-image-fallback">
+        <span className="storefront-image-fallback-mark">{initials}</span>
+        <span className="storefront-image-fallback-copy">Imagen a confirmar</span>
+      </div>
+    );
   }
 
   return (
@@ -63,6 +95,8 @@ function ProductImage({ product }: { product: StorefrontProduct }) {
       src={product.image_url}
       alt={product.title}
       loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
       className="storefront-product-image"
       onError={() => setFailed(true)}
     />
@@ -82,14 +116,33 @@ function WhatsAppIcon() {
 
 export function StorefrontCatalog({ store, products, eyebrow, title, lead }: StorefrontCatalogProps) {
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
+  const [availability, setAvailability] = useState("all");
+  const [ramFilter, setRamFilter] = useState("all");
+  const [storageFilter, setStorageFilter] = useState("all");
+  const [sort, setSort] = useState("featured");
   const [visibleCount, setVisibleCount] = useState(INITIAL_BATCH_SIZE);
+  const [pendingPayProductId, setPendingPayProductId] = useState<number | null>(null);
   const deferredQuery = useDeferredValue(query);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const needle = deferredQuery.trim().toLowerCase();
 
+  const ramOptions = useMemo(
+    () =>
+      [...new Set(products.map((product) => product.ram_gb).filter((value): value is number => value != null))].sort(
+        (left, right) => left - right
+      ),
+    [products]
+  );
+  const storageOptions = useMemo(
+    () =>
+      [...new Set(products.map((product) => product.storage_gb).filter((value): value is number => value != null))].sort(
+        (left, right) => left - right
+      ),
+    [products]
+  );
+
   const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
+    const next = products.filter((product) => {
       const matchesQuery =
         needle.length === 0 ||
         [
@@ -99,26 +152,49 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
           product.description ?? "",
           product.network ?? "",
           product.color ?? "",
+          product.ram_gb ? `${product.ram_gb}gb ram` : "",
+          product.storage_gb ? `${product.storage_gb}gb` : "",
         ]
           .join(" ")
           .toLowerCase()
           .includes(needle);
 
-      const matchesFilter =
-        filter === "all" ||
-        (filter === "available" && product.in_stock) ||
-        (filter === "new" && product.condition === "new") ||
-        (filter === "used" && product.condition !== "new");
+      const matchesAvailability =
+        availability === "all" || (availability === "available" && product.in_stock);
+      const matchesRam = ramFilter === "all" || String(product.ram_gb ?? "") === ramFilter;
+      const matchesStorage = storageFilter === "all" || String(product.storage_gb ?? "") === storageFilter;
 
-      return matchesQuery && matchesFilter;
+      return matchesQuery && matchesAvailability && matchesRam && matchesStorage;
     });
-  }, [filter, needle, products]);
+
+    next.sort((left, right) => {
+      if (sort === "price-asc") {
+        return (left.public_price_ars ?? Number.MAX_SAFE_INTEGER) - (right.public_price_ars ?? Number.MAX_SAFE_INTEGER);
+      }
+
+      if (sort === "price-desc") {
+        return (right.public_price_ars ?? -1) - (left.public_price_ars ?? -1);
+      }
+
+      if (sort === "alphabetical") {
+        return left.title.localeCompare(right.title, "es");
+      }
+
+      if (Number(right.in_stock) !== Number(left.in_stock)) {
+        return Number(right.in_stock) - Number(left.in_stock);
+      }
+
+      return 0;
+    });
+
+    return next;
+  }, [availability, needle, products, ramFilter, sort, storageFilter]);
 
   useEffect(() => {
     startTransition(() => {
       setVisibleCount(INITIAL_BATCH_SIZE);
     });
-  }, [filter, needle, products.length]);
+  }, [availability, needle, products.length, ramFilter, sort, storageFilter]);
 
   useEffect(() => {
     const node = loadMoreRef.current;
@@ -128,8 +204,7 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const shouldLoad = entries.some((entry) => entry.isIntersecting);
-        if (!shouldLoad) return;
+        if (!entries.some((entry) => entry.isIntersecting)) return;
 
         startTransition(() => {
           setVisibleCount((current) => Math.min(current + BATCH_SIZE, filteredProducts.length));
@@ -145,44 +220,123 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
   const availableCount = products.filter((product) => product.in_stock).length;
   const visibleProducts = filteredProducts.slice(0, visibleCount);
   const hasMoreProducts = visibleCount < filteredProducts.length;
-  const catalogWhatsAppUrl = store.whatsapp_url
-    ? `${store.whatsapp_url}?text=${encodeURIComponent("Hola! Quiero consultar el catálogo.")}`
-    : null;
+  const generalWhatsAppUrl = buildWhatsAppUrl(
+    store.whatsapp_url,
+    "Hola! Quiero comprar un equipo en TechnoStore Salta."
+  );
+  const paymentIntroUrl = buildWhatsAppUrl(
+    store.whatsapp_url,
+    "Hola! Quiero avanzar con un pago y recibir el link del equipo que elija."
+  );
+
+  async function handlePayNow(product: StorefrontProduct) {
+    const fallbackUrl = buildProductPaymentFallbackUrl(store.whatsapp_url, product);
+
+    try {
+      setPendingPayProductId(product.id);
+
+      const response = await fetch("/api/storefront/payment-intents", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          product_id: product.id,
+          source_path: window.location.pathname,
+        }),
+      });
+
+      const payload = (await response.json()) as { redirect_url?: string };
+      if (!response.ok || !payload.redirect_url) {
+        throw new Error("No pudimos preparar el link de pago.");
+      }
+
+      window.location.assign(payload.redirect_url);
+    } catch {
+      if (fallbackUrl) {
+        window.location.assign(fallbackUrl);
+      }
+    } finally {
+      setPendingPayProductId(null);
+    }
+  }
 
   return (
     <div className="storefront-stack">
+      <header className="storefront-navbar">
+        <div className="storefront-navbar-top">
+          <Link href="/" className="storefront-navbar-brand">
+            <Image src="/brand/logo-negro-salta.png" alt="TechnoStore Salta" width={108} height={28} priority />
+            <span className="storefront-navbar-brand-copy">
+              <strong>{store.name}</strong>
+              <small>Smartphones en Salta</small>
+            </span>
+          </Link>
+
+          {generalWhatsAppUrl ? (
+            <a className="storefront-navbar-cta" href={generalWhatsAppUrl} target="_blank" rel="noreferrer">
+              <WhatsAppIcon />
+              WhatsApp
+            </a>
+          ) : null}
+        </div>
+
+        <div className="storefront-navbar-actions">
+          <a href="#modelos" className="storefront-navbar-link">
+            Equipos
+          </a>
+          <a href="#pago" className="storefront-navbar-link">
+            Pago simple
+          </a>
+          <a href="#preguntas" className="storefront-navbar-link">
+            FAQ
+          </a>
+          <a href="#ubicacion" className="storefront-navbar-link">
+            Local
+          </a>
+        </div>
+      </header>
+
       <section className="storefront-hero">
         <div className="storefront-hero-copy">
           <div className="storefront-topline">
-            <Image src="/brand/logo-negro-salta.png" alt="" width={92} height={24} priority />
             <span className="eyebrow">{eyebrow}</span>
           </div>
           <h1 className="storefront-title">{title}</h1>
           <p className="storefront-lead">{lead}</p>
           <div className="chip-row">
-            <span className="chip accent">{products.length} modelos</span>
-            <span className="chip good">{availableCount} disponibles</span>
+            <span className="chip accent">{products.length} equipos</span>
+            <span className="chip good">{availableCount} publicados</span>
+            <span className="chip">Pago por link</span>
             {store.address ? <span className="chip">{store.address}</span> : null}
           </div>
         </div>
 
-        <aside className="storefront-callout">
-          <p className="storefront-callout-label">Contacto</p>
-          <h2>{store.name}</h2>
-          <p>{store.tagline}</p>
+        <aside className="storefront-callout" id="pago">
+          <p className="storefront-callout-label">Compra simple</p>
+          <h2>Paga desde WhatsApp.</h2>
+          <p>
+            Elegis el modelo, abrimos la conversacion con el equipo cargado y te enviamos el link de pago listo para
+            seguir.
+          </p>
+          <div className="storefront-callout-points">
+            <span>Precio final en ARS</span>
+            <span>Link de pago del equipo elegido</span>
+            <span>Retiro o entrega coordinada</span>
+          </div>
           {store.hours ? <p className="storefront-callout-meta">Horario: {store.hours}</p> : null}
-          {catalogWhatsAppUrl ? (
-            <a className="storefront-whatsapp-button" href={catalogWhatsAppUrl} target="_blank" rel="noreferrer">
+          {paymentIntroUrl ? (
+            <a className="storefront-pay-button storefront-pay-button-inline" href={paymentIntroUrl} target="_blank" rel="noreferrer">
               <WhatsAppIcon />
-              WhatsApp
+              Quiero que me asesoren
             </a>
           ) : null}
         </aside>
       </section>
 
-      <section className="storefront-toolbar">
+      <section className="storefront-toolbar" id="modelos">
         <label className="storefront-search">
-          <span className="storefront-search-label">Buscar</span>
+          <span className="storefront-search-label">Buscar equipo</span>
           <input
             type="search"
             placeholder="iPhone, Xiaomi, Samsung, memoria, color..."
@@ -191,38 +345,73 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
           />
         </label>
 
-        <div className="storefront-filter-row">
-          {[
-            { value: "all", label: "Todo" },
-            { value: "available", label: "Disponibles" },
-            { value: "new", label: "Nuevos" },
-            { value: "used", label: "Usados" },
-          ].map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`storefront-filter ${filter === option.value ? "is-active" : ""}`}
-              onClick={() => setFilter(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
+        <div className="storefront-toolbar-controls">
+          <div className="storefront-filter-row">
+            {[
+              { value: "all", label: "Todos" },
+              { value: "available", label: "Disponibles" },
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`storefront-filter ${availability === option.value ? "is-active" : ""}`}
+                onClick={() => setAvailability(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <label className="storefront-select">
+            <span>RAM</span>
+            <select value={ramFilter} onChange={(event) => setRamFilter(event.target.value)}>
+              <option value="all">Todas</option>
+              {ramOptions.map((value) => (
+                <option key={value} value={String(value)}>
+                  {value} GB
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="storefront-select">
+            <span>Memoria</span>
+            <select value={storageFilter} onChange={(event) => setStorageFilter(event.target.value)}>
+              <option value="all">Todas</option>
+              {storageOptions.map((value) => (
+                <option key={value} value={String(value)}>
+                  {value} GB
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="storefront-select">
+            <span>Ordenar</span>
+            <select value={sort} onChange={(event) => setSort(event.target.value)}>
+              <option value="featured">Destacados</option>
+              <option value="price-asc">Precio menor</option>
+              <option value="price-desc">Precio mayor</option>
+              <option value="alphabetical">A-Z</option>
+            </select>
+          </label>
         </div>
       </section>
 
       {filteredProducts.length === 0 ? (
         <section className="panel storefront-empty-state">
-          <p className="empty">No encontré modelos con ese filtro. Probá otra marca, memoria o color.</p>
+          <p className="empty">No encontré modelos con ese filtro. Probá otra marca, RAM o memoria.</p>
         </section>
       ) : (
         <>
           <section className="storefront-grid">
             {visibleProducts.map((product) => {
-              const whatsappUrl = buildWhatsAppUrl(store.whatsapp_url, product);
+              const consultUrl = buildProductConsultUrl(store.whatsapp_url, product);
               const specSummary = buildSpecSummary(product);
               const shouldShowDescription =
                 Boolean(product.description) &&
-                normalizeComparableText(product.description) !== normalizeComparableText(specSummary);
+                normalizeComparableText(product.description) !== normalizeComparableText(specSummary.join(", "));
+              const payEnabled = product.public_price_ars != null;
 
               return (
                 <article key={product.id} className="storefront-card">
@@ -230,42 +419,58 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
                     <ProductImage product={product} />
                     <div className="storefront-status-row">
                       <span className={`chip ${product.in_stock ? "good" : "warn"}`}>
-                        {product.in_stock ? "Disponible" : "Consultar"}
+                        {product.in_stock ? "Disponible" : "Consultar disponibilidad"}
                       </span>
-                      <span className="chip">{product.condition === "new" ? "Nuevo" : "Usado"}</span>
                     </div>
                   </div>
 
                   <div className="storefront-card-body">
-                    <p className="catalog-kicker">{product.brand}</p>
-                    <h3 className="storefront-card-title">{product.title}</h3>
-                    <p className="storefront-card-subtitle">{product.model}</p>
-
-                    {specSummary ? <p className="storefront-spec-line">{specSummary}</p> : null}
-
-                    <div className="storefront-chip-row">
-                      {product.delivery_days ? <span className="chip">Entrega {product.delivery_days} días</span> : null}
-                      {product.color ? <span className="chip">{product.color}</span> : null}
-                      {product.battery_health ? <span className="chip">Batería {product.battery_health}%</span> : null}
+                    <div className="storefront-card-header">
+                      <p className="catalog-kicker">{product.brand}</p>
+                      <h3 className="storefront-card-title">{product.title}</h3>
+                      {product.model ? <p className="storefront-card-subtitle">{product.model}</p> : null}
                     </div>
+
+                    {specSummary.length > 0 ? (
+                      <div className="storefront-spec-list">
+                        {specSummary.map((spec) => (
+                          <span key={spec} className="storefront-spec-chip">
+                            {spec}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
 
                     {shouldShowDescription ? <p className="storefront-card-copy">{product.description}</p> : null}
 
                     <div className="storefront-card-footer">
                       <div className="storefront-price-stack">
-                        <p className="storefront-price-label">Precio</p>
+                        <p className="storefront-price-label">Precio final</p>
                         <strong className="storefront-price">{formatMoney(product.public_price_ars)}</strong>
                         <p className="storefront-price-note">
-                          {product.delivery_days ? `Entrega estimada en ${product.delivery_days} días` : "Consultá entrega y retiro"}
+                          {product.delivery_days
+                            ? `Entrega estimada en ${product.delivery_days} días`
+                            : "Retiro o entrega coordinada"}
                         </p>
                       </div>
 
-                      {whatsappUrl ? (
-                        <a className="storefront-whatsapp-button" href={whatsappUrl} target="_blank" rel="noreferrer">
-                          <WhatsAppIcon />
-                          <span>Consultar</span>
-                        </a>
-                      ) : null}
+                      <div className="storefront-card-actions">
+                        <button
+                          type="button"
+                          className="storefront-pay-button"
+                          disabled={!payEnabled || pendingPayProductId === product.id}
+                          onClick={() => void handlePayNow(product)}
+                        >
+                          {pendingPayProductId === product.id ? "Preparando..." : "Quiero pagarlo ahora"}
+                        </button>
+                        {consultUrl ? (
+                          <a className="storefront-secondary-button" href={consultUrl} target="_blank" rel="noreferrer">
+                            <WhatsAppIcon />
+                            Consultar
+                          </a>
+                        ) : null}
+                        <p className="storefront-card-action-note">Abrimos WhatsApp con este modelo ya cargado.</p>
+                      </div>
                     </div>
                   </div>
                 </article>
@@ -273,41 +478,94 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
             })}
           </section>
 
-          {hasMoreProducts ? (
-            <div ref={loadMoreRef} className="storefront-load-more">
-              <button
-                type="button"
-                className="storefront-filter"
-                onClick={() =>
-                  startTransition(() => {
-                    setVisibleCount((current) => Math.min(current + BATCH_SIZE, filteredProducts.length));
-                  })
-                }
-              >
-                Cargar más
-              </button>
-              <span className="storefront-load-more-copy">
-                Mostrando {visibleProducts.length} de {filteredProducts.length}
-              </span>
-            </div>
-          ) : null}
+          <div ref={loadMoreRef} className="storefront-load-more" aria-hidden={!hasMoreProducts}>
+            {hasMoreProducts ? (
+              <>
+                <span className="storefront-load-more-copy">Seguimos mostrando más modelos a medida que avanzás.</span>
+                <button
+                  type="button"
+                  className="storefront-filter"
+                  onClick={() => setVisibleCount((current) => Math.min(current + BATCH_SIZE, filteredProducts.length))}
+                >
+                  Cargar más
+                </button>
+              </>
+            ) : (
+              <span className="storefront-load-more-copy">Mostrando {filteredProducts.length} equipos.</span>
+            )}
+          </div>
         </>
       )}
 
-      <footer className="storefront-footer">
-        <div>
-          <strong>{store.name}</strong>
-          {store.address ? <p>{store.address}</p> : null}
+      <section className="storefront-faq" id="preguntas">
+        <div className="storefront-faq-copy">
+          <span className="eyebrow">FAQ</span>
+          <h2 className="storefront-location-title">Compra clara y directa.</h2>
+          <p className="storefront-location-lead">
+            Todo lo importante para elegir el equipo, avanzar por WhatsApp y resolver pago, retiro o entrega sin
+            vueltas.
+          </p>
         </div>
-        <div className="storefront-footer-links">
-          <Link href="/">Inicio</Link>
-          <Link href="/products">Catálogo</Link>
-          {catalogWhatsAppUrl ? (
-            <a href={catalogWhatsAppUrl} target="_blank" rel="noreferrer">
-              WhatsApp
+
+        <div className="storefront-faq-list">
+          {FAQ_ITEMS.map((item) => (
+            <details key={item.question} className="storefront-faq-item">
+              <summary>{item.question}</summary>
+              <p>{item.answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+
+      <section className="storefront-location" id="ubicacion">
+        <div className="storefront-location-copy">
+          <span className="eyebrow">Visitanos</span>
+          <h2 className="storefront-location-title">Atención presencial en Salta</h2>
+          <p className="storefront-location-lead">
+            Coordiná por WhatsApp, resolvé el pago y pasá por el local cuando quieras cerrar retiro o entrega.
+          </p>
+          <div className="storefront-location-details">
+            {store.address ? (
+              <div>
+                <span className="storefront-location-label">Dirección</span>
+                <strong>{store.address}</strong>
+              </div>
+            ) : null}
+            {store.hours ? (
+              <div>
+                <span className="storefront-location-label">Horario</span>
+                <strong>{store.hours}</strong>
+              </div>
+            ) : null}
+          </div>
+          {generalWhatsAppUrl ? (
+            <a className="storefront-navbar-cta" href={generalWhatsAppUrl} target="_blank" rel="noreferrer">
+              <WhatsAppIcon />
+              Hablar por WhatsApp
             </a>
           ) : null}
         </div>
+
+        {store.map_embed_url ? (
+          <div className="storefront-map-frame">
+            <iframe
+              src={store.map_embed_url}
+              title={`Mapa de ${store.name}`}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              allowFullScreen
+            />
+          </div>
+        ) : null}
+      </section>
+
+      <footer className="storefront-footer">
+        <div className="storefront-footer-facts">
+          <span>Precios publicos en ARS</span>
+          <span>Pago por link</span>
+          <span>Atencion directa</span>
+        </div>
+        <p>Hecho con amor en Salta.</p>
       </footer>
     </div>
   );

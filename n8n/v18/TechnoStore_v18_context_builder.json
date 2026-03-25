@@ -63,7 +63,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const base = $('Normalize Input').first().json || {};\nconst raw = $input.first().json || {};\nconst context = raw.v17_build_turn_context || raw || {};\n\nif (!context.store || typeof context.store !== 'object') {\n  context.store = {};\n}\n\ncontext.store.store_website_url = context.store.store_website_url || 'https://puntotechno.com';\n\nreturn [{\n  json: {\n    ...base,\n    context,\n  }\n}];"
+        "jsCode": "const base = $('Normalize Input').first().json || {};\nconst raw = $input.first().json || {};\nconst context = raw.v17_build_turn_context || raw || {};\n\nif (!context.store || typeof context.store !== 'object') {\n  context.store = {};\n}\n\ncontext.store.store_website_url = context.store.store_website_url || 'https://technostoresalta.com';\n\nreturn [{\n  json: {\n    ...base,\n    context,\n  }\n}];"
       },
       "id": "fcac67a5-15c2-c495-df5b-1fcb9ea4549c",
       "name": "Normalize Context",

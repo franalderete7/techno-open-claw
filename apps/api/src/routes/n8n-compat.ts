@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { pool, query } from "../db.js";
+import { resolveStorefrontCheckoutHandoff } from "../storefront-checkouts.js";
 
 type NotesState = {
   tags: string[];
@@ -531,6 +532,10 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     const userMessage = String(body.p_user_message ?? body.user_message ?? "").trim();
     const recentLimit = Math.max(1, Math.min(20, Number(body.p_recent_limit ?? 6) || 6));
     const candidateLimit = Math.max(1, Math.min(20, Number(body.p_candidate_limit ?? 8) || 8));
+    const storefrontOrderId = Number(body.p_storefront_order_id ?? body.storefront_order_id ?? 0) || null;
+    const storefrontOrderToken = String(body.p_storefront_order_token ?? body.storefront_order_token ?? "")
+      .trim()
+      .toLowerCase();
 
     if (!manychatId) {
       return reply.code(400).send({ error: "Missing p_manychat_id" });
@@ -696,8 +701,47 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         settingValueToText(settingsMap.get("store_website_url")) ||
         settingValueToText(storeRoot.store_website_url) ||
         settingValueToText(storeRoot.storefront_url) ||
-        "https://puntotechno.com",
+        "https://technostoresalta.com",
     };
+
+    let storefrontHandoff: Awaited<ReturnType<typeof resolveStorefrontCheckoutHandoff>> | {
+      ok: false;
+      order: null;
+      payment: null;
+    } = {
+      ok: false,
+      order: null,
+      payment: null,
+    };
+
+    if (storefrontOrderId && storefrontOrderToken) {
+      try {
+        storefrontHandoff = await resolveStorefrontCheckoutHandoff(storefrontOrderId, storefrontOrderToken);
+      } catch (error) {
+        storefrontHandoff = {
+          ok: true,
+          order: {
+            id: storefrontOrderId,
+            order_number: `TOC-${storefrontOrderId}`,
+            item_count: 1,
+            subtotal: 0,
+            total: 0,
+            currency_code: "ARS",
+            status: "pending",
+            title: "pedido web",
+            image_url: null,
+            delivery_days: null,
+          },
+          payment: {
+            ready: false,
+            status: "failed",
+            url: null,
+            provider: "galiopay",
+            message: error instanceof Error ? error.message : "No se pudo preparar el link de pago.",
+          },
+        };
+      }
+    }
 
     return reply.send({
       v17_build_turn_context: {
@@ -730,10 +774,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           })),
         candidate_products: candidateProducts,
         store,
-        storefront_handoff: {
-          ok: false,
-          order: null,
-        },
+        storefront_handoff: storefrontHandoff,
       },
     });
   });

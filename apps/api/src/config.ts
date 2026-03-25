@@ -30,6 +30,18 @@ const csvStringArray = z.preprocess((value) => {
     .filter(Boolean);
 }, z.array(z.string()));
 
+const envBoolean = z.preprocess((value) => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  return ["1", "true", "yes", "si", "sí", "y"].includes(value.trim().toLowerCase());
+}, z.boolean());
+
 const configSchema = z.object({
   API_HOST: z.string().default("0.0.0.0"),
   API_PORT: z.coerce.number().int().positive().default(4000),
@@ -46,6 +58,14 @@ const configSchema = z.object({
   TELEGRAM_WEBHOOK_BASE_URL: z.string().default(""),
   MANYCHAT_API_KEY: z.string().default(""),
   MANYCHAT_ACCOUNT_ID: z.string().default(""),
+  STORE_WHATSAPP_PHONE: z.string().default("543875319940"),
+  GALIOPAY_API_BASE_URL: z.string().default("https://pay.galio.app"),
+  GALIOPAY_CLIENT_ID: z.string().default(""),
+  GALIOPAY_API_KEY: z.string().default(""),
+  GALIOPAY_NOTIFICATION_URL: z.string().default(""),
+  GALIOPAY_SUCCESS_URL: z.string().default(""),
+  GALIOPAY_FAILURE_URL: z.string().default(""),
+  GALIOPAY_SANDBOX: envBoolean.default(false),
 });
 
 export const config = configSchema.parse(process.env);

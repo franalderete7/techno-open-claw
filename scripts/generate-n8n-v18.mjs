@@ -30,6 +30,8 @@ const stringReplacements = [
   ["$env.SUPABASE_URL", "$env.OPENCLAW_API_BASE_URL"],
   ["$env.SUPABASE_KEY", "$env.OPENCLAW_API_TOKEN"],
   ["workflow_version: 'v17'", "workflow_version: 'v18'"],
+  ["https://puntotechno.com", "https://technostoresalta.com"],
+  ["puntotechno.com", "technostoresalta.com"],
 ];
 
 function replaceAll(value) {
@@ -516,6 +518,146 @@ return [{
   });
 }
 
+function patchContextBuilderWorkflow(workflow, outputFile) {
+  if (outputFile !== "TechnoStore_v18_context_builder.json") {
+    return;
+  }
+
+  updateNodeJsCode(
+    workflow,
+    "Normalize Context",
+    `const base = $('Normalize Input').first().json || {};
+const raw = $input.first().json || {};
+const context = raw.v17_build_turn_context || raw || {};
+
+if (!context.store || typeof context.store !== 'object') {
+  context.store = {};
+}
+
+context.store.store_website_url = context.store.store_website_url || 'https://technostoresalta.com';
+
+return [{
+  json: {
+    ...base,
+    context,
+  }
+}];`
+  );
+}
+
+function patchInfoResponderWorkflow(workflow, outputFile) {
+  if (outputFile !== "TechnoStore_v18_info_responder.json") {
+    return;
+  }
+
+  updateNodeJsCode(
+    workflow,
+    "Build Info Response",
+    `const data = $input.first().json || {};
+const context = data.context || {};
+const router = data.router_output || {};
+const store = context.store || {};
+const website = String(store.store_website_url || 'https://technostoresalta.com').trim();
+const storefrontHandoff = context.storefront_handoff || {};
+const message = String(data.user_message || '')
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\\u0300-\\u036f]/g, '')
+  .replace(/[^a-z0-9\\s]/g, ' ')
+  .replace(/\\s+/g, ' ')
+  .trim();
+
+const wantsLocation = /(ubicacion|direccion|sucursal|como llego|donde estan|donde quedan|mapa)/.test(message);
+const wantsHours = /(horario|abren|cierran|hora)/.test(message);
+const wantsPayments = /(pago|pagos|cuotas|tarjeta|transferencia|efectivo|crypto|mercado pago|link de pago)/.test(message);
+const wantsShipping = /(envio|envios|despacho|retiro)/.test(message);
+const wantsWarranty = /(garantia|warranty)/.test(message);
+
+const formatArs = (value) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(amount);
+};
+
+let replyText = '';
+let actions = [];
+let stateDelta = {
+  intent_key: 'store_info',
+  funnel_stage: 'browsing',
+  lead_score_delta: 2,
+  share_store_location: false,
+  selected_product_keys: [],
+  tags_to_add: [],
+  tags_to_remove: [],
+  payment_method_key: null,
+  summary: 'Respuesta de información general.',
+};
+
+switch (router.route_key) {
+  case 'storefront_order': {
+    const order = storefrontHandoff.order;
+    const payment = storefrontHandoff.payment;
+    const totalText = formatArs(order?.total || order?.subtotal);
+    if (payment?.status === 'paid') {
+      replyText = 'Tu pago ya figura aprobado para ' + (order?.title || 'tu pedido') + '. Si querés, seguimos por este chat con la coordinación de entrega o retiro.';
+    } else if (payment?.url) {
+      replyText = 'Perfecto, ya te preparé el link de pago para ' + (order?.title || 'tu pedido') + (totalText ? ' por ARS ' + totalText : '') + '. Pagalo acá: ' + payment.url + ' Cuando lo completes, seguí por este mismo chat.';
+    } else if (payment?.message) {
+      replyText = 'Tomé tu pedido web #' + (order?.id || '') + '. ' + payment.message + ' Si querés, también puedo seguir la coordinación por acá.';
+    } else {
+      replyText = 'Perfecto, ya tomé tu pedido web #' + (order?.id || '') + '. Seguimos por acá con la compra y la coordinación.';
+    }
+    stateDelta.intent_key = 'storefront_order';
+    stateDelta.funnel_stage = 'closing';
+    stateDelta.lead_score_delta = 10;
+    stateDelta.summary = 'Seguimiento de pedido web por WhatsApp.';
+    break;
+  }
+  case 'store_info':
+  default: {
+    const parts = [];
+    if (wantsLocation || (!wantsHours && !wantsPayments && !wantsShipping && !wantsWarranty)) {
+      if (store.store_address) parts.push('Estamos en ' + store.store_address + '.');
+      stateDelta.share_store_location = wantsLocation;
+    }
+    if (wantsHours && store.store_hours) parts.push('Horario: ' + store.store_hours);
+    if (wantsPayments && store.store_payment_methods) parts.push('Medios de pago: ' + store.store_payment_methods);
+    if (wantsShipping && store.store_shipping_policy) parts.push('Envíos: ' + store.store_shipping_policy);
+    if (wantsWarranty) {
+      if (store.store_warranty_new) parts.push('Nuevos: ' + store.store_warranty_new);
+      if (store.store_warranty_used) parts.push('Usados: ' + store.store_warranty_used);
+    }
+    if (router.should_offer_store_url) {
+      parts.push('Si querés ver los modelos, también los tenés en ' + website + '.');
+      actions = ['attach_store_url'];
+    }
+    parts.push('Si querés, decime qué modelo buscás y te ayudo por acá.');
+    replyText = parts.join(' ');
+    stateDelta.intent_key = 'store_info';
+    stateDelta.funnel_stage = 'browsing';
+    stateDelta.lead_score_delta = 2;
+    stateDelta.summary = 'Respuesta de información general de la tienda.';
+    break;
+  }
+}
+
+return [{
+  json: {
+    ...data,
+    responder_output: {
+      route_key: router.route_key || 'store_info',
+      reply_text: replyText,
+      selected_product_keys: [],
+      actions,
+      state_delta: stateDelta,
+    },
+    responder_provider_name: 'deterministic',
+    responder_model_name: 'deterministic-info',
+  }
+}];`
+  );
+}
+
 mkdirSync(outputDir, { recursive: true });
 
 const files = readdirSync(sourceDir)
@@ -537,6 +679,8 @@ for (const file of files) {
   const outputFile = basename(file).replace("_v17_", "_v18_");
   patchEntryWorkflow(transformed, outputFile);
   patchStateUpdateWorkflow(transformed, outputFile);
+  patchContextBuilderWorkflow(transformed, outputFile);
+  patchInfoResponderWorkflow(transformed, outputFile);
   const outputPath = resolve(outputDir, outputFile);
   writeFileSync(outputPath, `${JSON.stringify(transformed, null, 2)}\n`);
   generated.push(outputPath);
