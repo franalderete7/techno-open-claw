@@ -1,4 +1,5 @@
-import { getConversations, getDashboard, getProducts, getSettings } from "../lib/api";
+import { getConversations, getCustomers, getDashboard, getProducts, getSettings } from "../lib/api";
+import { DashboardSearch } from "./components/dashboard-search";
 import { SettingView } from "./components/setting-view";
 
 function formatDate(value: string | null) {
@@ -12,20 +13,23 @@ function formatDate(value: string | null) {
 export default async function HomePage() {
   let dashboard = null;
   let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
+  let customers = [] as Awaited<ReturnType<typeof getCustomers>>["items"];
   let conversations = [] as Awaited<ReturnType<typeof getConversations>>["items"];
   let settings = [] as Awaited<ReturnType<typeof getSettings>>["items"];
   let error: string | null = null;
 
   try {
-    const [dashboardResponse, productResponse, conversationResponse, settingsResponse] = await Promise.all([
+      const [dashboardResponse, productResponse, customerResponse, conversationResponse, settingsResponse] = await Promise.all([
       getDashboard(),
-      getProducts(6),
-      getConversations(5),
+      getProducts(18),
+      getCustomers(40),
+      getConversations(20),
       getSettings(),
     ]);
 
     dashboard = dashboardResponse;
     products = productResponse.items;
+    customers = customerResponse.items;
     conversations = conversationResponse.items;
     settings = settingsResponse.items;
   } catch (caught) {
@@ -66,6 +70,8 @@ export default async function HomePage() {
           </article>
         </section>
       ) : null}
+
+      <DashboardSearch products={products} customers={customers} conversations={conversations} settings={settings} />
 
       <section className="split-grid">
         <article className="panel">

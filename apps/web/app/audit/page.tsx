@@ -1,11 +1,5 @@
 import { getAudit } from "../../lib/api";
-
-function formatDate(value: string) {
-  return new Date(value).toLocaleString("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
+import { AuditExplorer } from "../components/audit-explorer";
 
 export default async function AuditPage() {
   let items = [] as Awaited<ReturnType<typeof getAudit>>["items"];
@@ -29,54 +23,7 @@ export default async function AuditPage() {
         {error ? <p className="empty">{error}</p> : null}
       </section>
 
-      <section className="table-card">
-        <div className="panel-header">
-          <div>
-            <h3 className="panel-title">Latest</h3>
-          </div>
-        </div>
-
-        {items.length === 0 ? (
-          <p className="empty">No audit entries available.</p>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Actor</th>
-                  <th>Action</th>
-                  <th>Entity</th>
-                  <th>Metadata</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => (
-                  <tr key={item.id}>
-                    <td>{formatDate(item.created_at)}</td>
-                    <td>
-                      <div className="value-stack">
-                        <strong>{item.actor_type}</strong>
-                        <span className="muted mono">{item.actor_id || "-"}</span>
-                      </div>
-                    </td>
-                    <td className="mono">{item.action}</td>
-                    <td>
-                      <div className="value-stack">
-                        <strong>{item.entity_type}</strong>
-                        <span className="muted mono">{item.entity_id}</span>
-                      </div>
-                    </td>
-                    <td className="mono muted">
-                      {item.metadata == null ? "-" : JSON.stringify(item.metadata)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      <AuditExplorer items={items} />
     </div>
   );
 }

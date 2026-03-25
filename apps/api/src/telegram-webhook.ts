@@ -23,7 +23,124 @@ import {
 import { streamTelegramResponse, sendThinkingMessage } from "./telegram-streaming.js";
 import { pool } from "./db.js";
 import { transcribeAudio } from "./sales-agent.js";
-import { parseCommand, executeCommand } from "./telegram-tools.js";
+import { handleTelegramOperatorMessage } from "./telegram-operator.js";
+
+async function upsertTelegramCustomer(params: {
+  externalRef: string;
+  firstName: string | null;
+  lastName: string | null;
+}) {
+  const existing = await pool.query<{ id: number }>(
+    `select id from public.customers where external_ref = $1 limit 1`,
+    [params.externalRef]
+  );
+
+  if (existing.rows[0]) {
+    const result = await pool.query<{ id: number }>(
+      `
+        update public.customers
+        set
+          first_name = coalesce(first_name, $2),
+          last_name = coalesce(last_name, $3),
+          updated_at = now()
+        where external_ref = $1
+        returning id
+      `,
+      [params.externalRef, params.firstName, params.lastName]
+    );
+
+    return result.rows[0].id;
+  }
+
+  const created = await pool.query<{ id: number }>(
+    `
+      insert into public.customers (external_ref, first_name, last_name)
+      values ($1, $2, $3)
+      returning id
+    `,
+    [params.externalRef, params.firstName, params.lastName]
+  );
+
+  return created.rows[0].id;
+}
+
+async function upsertTelegramConversation(params: {
+  customerId: number;
+  conversationKey: string;
+  conversationTitle: string;
+  messageAt: Date;
+}) {
+  const result = await pool.query<{ id: number }>(
+    `
+      insert into public.conversations (
+        customer_id,
+        channel,
+        channel_thread_key,
+        status,
+        title,
+        last_message_at
+      ) values ($1, 'telegram', $2, 'open', $3, $4)
+      on conflict (channel_thread_key)
+      do update set
+        customer_id = coalesce(excluded.customer_id, public.conversations.customer_id),
+        status = 'open',
+        title = coalesce(excluded.title, public.conversations.title),
+        last_message_at = greatest(excluded.last_message_at, public.conversations.last_message_at)
+      returning id
+    `,
+    [params.customerId, params.conversationKey, params.conversationTitle, params.messageAt.toISOString()]
+  );
+
+  return result.rows[0].id;
+}
+
+async function saveConversationMessage(params: {
+  conversationId: number;
+  direction: "inbound" | "outbound";
+  senderKind: "customer" | "tool";
+  messageType: "text" | "audio" | "image" | "video" | "file";
+  textBody?: string | null;
+  mediaUrl?: string | null;
+  transcript?: string | null;
+  payload?: Record<string, unknown>;
+}) {
+  const result = await pool.query<{ id: number }>(
+    `
+      insert into public.messages (
+        conversation_id,
+        direction,
+        sender_kind,
+        message_type,
+        text_body,
+        media_url,
+        transcript,
+        payload
+      ) values ($1, $2, $3, $4, $5, $6, $7, $8)
+      returning id
+    `,
+    [
+      params.conversationId,
+      params.direction,
+      params.senderKind,
+      params.messageType,
+      params.textBody ?? null,
+      params.mediaUrl ?? null,
+      params.transcript ?? null,
+      params.payload ?? {},
+    ]
+  );
+
+  await pool.query(
+    `
+      update public.conversations
+      set last_message_at = now(), updated_at = now()
+      where id = $1
+    `,
+    [params.conversationId]
+  );
+
+  return result.rows[0].id;
+}
 
 export async function handleTelegramWebhook(request: FastifyRequest, reply: FastifyReply) {
   if (!config.TELEGRAM_BOT_TOKEN) {
@@ -77,11 +194,9 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
   // Extract user message (transcript for audio, text for text)
   let userMessage = textBody || "";
   let transcript: string | undefined = undefined;
-  let isAudio = false;
 
   // Handle audio transcription
   if (messageType === "audio" && (message.voice || message.audio)) {
-    isAudio = true;
     const file = message.voice || message.audio;
     
     if (file?.file_id && config.TELEGRAM_BOT_TOKEN) {
@@ -97,105 +212,145 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
     }
   }
 
-  // Check for commands first
-  const command = parseCommand(userMessage);
-  
-  if (command) {
-    // Execute command directly (no streaming needed for data queries)
-    const result = await executeCommand(command);
-    
-    await sendTelegramTextMessage({
-      botToken: config.TELEGRAM_BOT_TOKEN,
-      chatId: message.chat.id,
-      text: result,
-      replyToMessageId: message.message_id,
-    });
-    
-    return {
-      ok: true,
-      replied: true,
-      commandExecuted: command,
-      result,
-    };
-  }
-
-  // Send thinking message first
-  const thinkingMsgId = await sendThinkingMessage(
-    message.chat.id,
-    config.TELEGRAM_BOT_TOKEN,
-    message.message_id
-  );
-
-  // Build system prompt - respond in USER's language, not forced Spanish
-  const systemPrompt = `You are the personal assistant of the TechnoStore developer.
-Respond in the SAME LANGUAGE the user writes to you.
-- If they write in Spanish → respond in Spanish
-- If they write in English → respond in English
-- If they write in Russian → respond in Russian
-- etc.
-
-Be natural, direct, and technical when needed. Like a teammate, not corporate.
-You can help with:
-- Database queries
-- System status
-- App commands
-- Products, customers, sales info
-- Debugging and logs
-
-If you don't understand, ask. If you don't have the info, say so.`;
-
-  // Handle images with vision model (download and convert to base64)
   let imageBase64: string | undefined = undefined;
   if (messageType === "image" && message.photo && message.photo.length > 0) {
     const photo = message.photo[message.photo.length - 1];
+
     try {
       const fileUrl = await getTelegramFileUrl(photo.file_id, config.TELEGRAM_BOT_TOKEN);
       const imageResponse = await fetch(fileUrl);
       const arrayBuffer = await imageResponse.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString('base64');
-      imageBase64 = `data:image/jpeg;base64,${base64}`;
-    } catch (err) {
-      request.log.warn({ err }, "Failed to download image for vision model");
+      imageBase64 = `data:image/jpeg;base64,${Buffer.from(arrayBuffer).toString("base64")}`;
+    } catch (error) {
+      request.log.warn({ error }, "Failed to load Telegram image for operator context");
     }
   }
 
-  // Stream the response
-  const prompt = `User message: "${userMessage}"
-${imageBase64 ? '[User sent an image - describe it if relevant]' : ''}
-
-Context: You are the developer's assistant for TechnoStore. Help them with what they need.`;
-
-  const responseText = await streamTelegramResponse({
-    chatId: message.chat.id,
-    messageId: thinkingMsgId || message.message_id,
-    botToken: config.TELEGRAM_BOT_TOKEN,
-    prompt: prompt,
-    systemPrompt: systemPrompt,
-    imageUrl: imageBase64,
+  const customerId = await upsertTelegramCustomer({
+    externalRef,
+    firstName: message.from?.first_name?.trim() || message.chat.first_name?.trim() || null,
+    lastName: message.from?.last_name?.trim() || message.chat.last_name?.trim() || null,
   });
 
-  // Save message to DB (optional, for history)
-  try {
-    await pool.query(
-      `INSERT INTO messages (conversation_id, direction, sender_kind, message_type, text_body, created_at)
-       VALUES (
-         (SELECT id FROM conversations WHERE channel_thread_key = $1 LIMIT 1),
-         'inbound',
-         'customer',
-         $2,
-         $3,
-         NOW()
-       )
-       ON CONFLICT DO NOTHING`,
-      [conversationKey, messageType, textBody || mediaUrl]
-    );
-  } catch (err) {
-    request.log.warn({ err }, "Failed to save inbound message");
-  }
+  const conversationId = await upsertTelegramConversation({
+    customerId,
+    conversationKey,
+    conversationTitle,
+    messageAt,
+  });
 
-  return {
-    ok: true,
-    replied: true,
-    responseText,
-  };
+  await saveConversationMessage({
+    conversationId,
+    direction: "inbound",
+    senderKind: "customer",
+    messageType,
+    textBody: textBody || userMessage || null,
+    mediaUrl,
+    transcript: transcript ?? null,
+    payload: {
+      updateId: update.update_id ?? null,
+      telegramMessageId: message.message_id,
+      chatId: message.chat.id,
+    },
+  });
+
+  try {
+    const operatorResult = await handleTelegramOperatorMessage({
+      actorRef: `telegram:${message.chat.id}:${message.from?.id ?? message.chat.id}`,
+      chatId: String(message.chat.id),
+      chatIdNumber: message.chat.id,
+      userId: message.from ? String(message.from.id) : null,
+      userMessage,
+      imageBase64,
+    });
+
+    if (operatorResult.kind === "reply") {
+      await sendTelegramTextMessage({
+        botToken: config.TELEGRAM_BOT_TOKEN,
+        chatId: message.chat.id,
+        text: operatorResult.text,
+        replyToMessageId: message.message_id,
+      });
+
+      await saveConversationMessage({
+        conversationId,
+        direction: "outbound",
+        senderKind: "tool",
+        messageType: "text",
+        textBody: operatorResult.text,
+        payload: {
+          source: "telegram-operator",
+        },
+      });
+
+      return {
+        ok: true,
+        replied: true,
+        mode: "operator",
+      };
+    }
+
+    // Send thinking message first
+    const thinkingMsgId = await sendThinkingMessage(
+      message.chat.id,
+      config.TELEGRAM_BOT_TOKEN,
+      message.message_id
+    );
+
+    const responseText = await streamTelegramResponse({
+      chatId: message.chat.id,
+      messageId: thinkingMsgId || message.message_id,
+      botToken: config.TELEGRAM_BOT_TOKEN,
+      prompt: operatorResult.prompt,
+      systemPrompt: operatorResult.systemPrompt,
+      imageUrl: imageBase64,
+    });
+
+    if (responseText.trim()) {
+      await saveConversationMessage({
+        conversationId,
+        direction: "outbound",
+        senderKind: "tool",
+        messageType: "text",
+        textBody: responseText,
+        payload: {
+          source: "telegram-chat",
+        },
+      });
+    }
+
+    return {
+      ok: true,
+      replied: true,
+      responseText,
+    };
+  } catch (error) {
+    request.log.error({ error }, "Telegram operator flow failed");
+
+    const fallbackText = error instanceof Error ? error.message : "No pude procesar esa instrucción.";
+
+    await sendTelegramTextMessage({
+      botToken: config.TELEGRAM_BOT_TOKEN,
+      chatId: message.chat.id,
+      text: fallbackText,
+      replyToMessageId: message.message_id,
+    });
+
+    await saveConversationMessage({
+      conversationId,
+      direction: "outbound",
+      senderKind: "tool",
+      messageType: "text",
+      textBody: fallbackText,
+      payload: {
+        source: "telegram-error",
+      },
+    });
+
+    return {
+      ok: true,
+      replied: true,
+      error: fallbackText,
+    };
+  }
 }

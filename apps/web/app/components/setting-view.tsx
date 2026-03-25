@@ -1,3 +1,5 @@
+"use client";
+
 function labelize(value: string) {
   return value.replace(/[_-]+/g, " ");
 }
