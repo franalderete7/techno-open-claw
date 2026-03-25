@@ -23,6 +23,14 @@ function summarizePayload(payload: Record<string, unknown>) {
     .join(" · ");
 }
 
+function isPreviewableImage(url: string | null) {
+  if (!url) {
+    return false;
+  }
+
+  return (/^https?:\/\//.test(url) && /(\.png|\.jpe?g|\.webp|\.gif)(\?|$)/i.test(url)) || url.includes("/media/");
+}
+
 export default async function ConversationDetailPage({ params }: ConversationPageProps) {
   const { conversationId: rawConversationId } = await params;
   const conversationId = Number(rawConversationId);
@@ -135,7 +143,16 @@ export default async function ConversationDetailPage({ params }: ConversationPag
 
                   {message.text_body ? <p className="message-body">{message.text_body}</p> : null}
                   {message.transcript ? <p className="message-support"><strong>Transcript:</strong> {message.transcript}</p> : null}
-                  {message.media_url ? <p className="message-support mono">{message.media_url}</p> : null}
+                  {message.media_url ? (
+                    <div className="message-asset">
+                      {isPreviewableImage(message.media_url) ? (
+                        <img className="message-image" src={message.media_url} alt={`Message ${message.id} asset`} loading="lazy" />
+                      ) : null}
+                      <a className="message-link mono" href={message.media_url} target="_blank" rel="noreferrer">
+                        {message.media_url}
+                      </a>
+                    </div>
+                  ) : null}
                   {payloadSummary ? <p className="message-support mono">{payloadSummary}</p> : null}
                 </article>
               );

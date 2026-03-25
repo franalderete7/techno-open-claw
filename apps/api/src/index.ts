@@ -1,10 +1,12 @@
 import Fastify from "fastify";
 import type { FastifyRequest } from "fastify";
+import { stat } from "node:fs/promises";
 import type { PoolClient } from "pg";
 import { z } from "zod";
 import { config } from "./config.js";
 import { pool, query } from "./db.js";
 import { requireBearerToken } from "./auth.js";
+import { inferMediaContentType, openMediaStream, resolveMediaFilePath } from "./media-storage.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { n8nCompatRoutes } from "./routes/n8n-compat.js";
 import { telegramOperatorApiRoutes } from "./routes/telegram-operator-api.js";
@@ -172,6 +174,28 @@ app.get("/health", async () => {
     service: "techno-open-claw-api",
     databaseTime: now[0]?.now ?? null,
   };
+});
+
+app.get("/media/*", async (request, reply) => {
+  const wildcardPath = (request.params as { "*": string })["*"] || "";
+  const filePath = resolveMediaFilePath(wildcardPath);
+
+  if (!filePath) {
+    return reply.code(404).send({ error: "media_not_found" });
+  }
+
+  try {
+    const file = await stat(filePath);
+    if (!file.isFile()) {
+      return reply.code(404).send({ error: "media_not_found" });
+    }
+
+    reply.header("cache-control", "public, max-age=31536000, immutable");
+    reply.type(inferMediaContentType(filePath));
+    return reply.send(openMediaStream(filePath));
+  } catch {
+    return reply.code(404).send({ error: "media_not_found" });
+  }
 });
 
 app.post("/webhooks/telegram", handleTelegramWebhook);

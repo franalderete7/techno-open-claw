@@ -819,6 +819,27 @@ nav a:hover {
   word-break: break-word;
 }
 
+.message-asset {
+  display: grid;
+  gap: 8px;
+}
+
+.message-image {
+  width: min(100%, 320px);
+  border-radius: 12px;
+  border: 0.5px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.message-link {
+  color: var(--soft-text);
+  text-decoration: none;
+}
+
+.message-link:hover {
+  text-decoration: underline;
+}
+
 .setting-row {
   display: grid;
   gap: 6px;

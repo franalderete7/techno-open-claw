@@ -35,6 +35,8 @@ const configSchema = z.object({
   API_PORT: z.coerce.number().int().positive().default(4000),
   API_BEARER_TOKEN: z.string().min(1, "API_BEARER_TOKEN is required"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  UPLOADS_DIR: z.string().default(resolve(process.cwd(), "data/uploads")),
+  PUBLIC_API_BASE_URL: z.string().default(""),
   OLLAMA_BASE_URL: z.string().default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().default("qwen3.5:cloud"),
   GROQ_API_KEY: z.string().default(""),

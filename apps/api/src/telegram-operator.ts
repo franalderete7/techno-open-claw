@@ -199,6 +199,7 @@ export type ActorContext = {
   userId: string | null;
   userMessage: string;
   imageBase64?: string;
+  attachedImageUrl?: string;
 };
 
 type OperatorTurnStartResult =
@@ -442,6 +443,7 @@ export async function buildOperatorSnapshot() {
 async function generateDraft(params: {
   text: string;
   imageBase64?: string;
+  attachedImageUrl?: string;
   snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
 }): Promise<Draft> {
   const { systemPrompt, prompt } = buildDraftPrompts(params);
@@ -491,6 +493,7 @@ const OPERATOR_SCHEMA_GUIDE = [
   "- public.settings stores key/value configuration. Stable ref: key. update_setting requires key and value. delete_setting removes the key.",
   "- public.customers stores operator and customer contacts. Stable refs: id, external_ref, phone, email. create_customer requires at least one of external_ref, phone, or email.",
   "- public.conversations stores thread headers by channel_thread_key. public.messages stores the actual interaction timeline. Each Telegram inbound and outbound message is saved in public.messages.",
+  "- Product images can use public URLs. If the operator attached a Telegram image, the API can persist it on the VPS and provide a /media/... URL for image_url.",
   "- public.operator_confirmations stores pending write actions that require CONFIRM <TOKEN> or CANCEL <TOKEN>.",
   "- public.audit_logs stores executed mutations and important operator actions.",
   "- public.orders and public.order_items store commercial orders. They are readable in the operator chat even if writes are not yet exposed there.",
@@ -503,6 +506,7 @@ const OPERATOR_SCHEMA_GUIDE = [
 function buildDraftPrompts(params: {
   text: string;
   imageBase64?: string;
+  attachedImageUrl?: string;
   snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
 }) {
   const systemPrompt = [
@@ -525,6 +529,11 @@ function buildDraftPrompts(params: {
   const prompt = [
     "Current app snapshot:",
     JSON.stringify(params.snapshot, null, 2),
+    "",
+    params.attachedImageUrl
+      ? "The operator attached an image with this VPS-hosted URL candidate. Use it as image_url for product create/update unless they explicitly override it."
+      : "",
+    params.attachedImageUrl ? `attached_image_url: ${params.attachedImageUrl}` : "",
     "",
     "JSON shape:",
     JSON.stringify(
@@ -1497,6 +1506,9 @@ function buildChatPrompts(params: {
   const prompt = [
     `Operator message: ${params.actor.userMessage}`,
     "",
+    params.actor.attachedImageUrl
+      ? `Attached image available for operator use: ${params.actor.attachedImageUrl}`
+      : "",
     "Use the snapshot to answer about the app and environment. If the operator is asking to change data but you cannot do it safely, ask for a narrower instruction.",
   ].join("\n");
 
@@ -1525,6 +1537,42 @@ function parseQuickReadCommand(text: string): { command: ReadCommandName; params
   return null;
 }
 
+function applyAttachedImageDefaults(
+  actor: ActorContext,
+  command: WriteCommandName | ReadCommandName | undefined,
+  rawParams: Record<string, unknown>
+) {
+  if (!actor.attachedImageUrl || !command) {
+    return rawParams;
+  }
+
+  if (command === "create_product" && rawParams.image_url == null) {
+    return {
+      ...rawParams,
+      image_url: actor.attachedImageUrl,
+    };
+  }
+
+  if (command === "update_product") {
+    const changes =
+      rawParams.changes && typeof rawParams.changes === "object" && !Array.isArray(rawParams.changes)
+        ? (rawParams.changes as Record<string, unknown>)
+        : null;
+
+    if (changes && changes.image_url === undefined) {
+      return {
+        ...rawParams,
+        changes: {
+          ...changes,
+          image_url: actor.attachedImageUrl,
+        },
+      };
+    }
+  }
+
+  return rawParams;
+}
+
 export async function handleTelegramOperatorMessage(actor: ActorContext): Promise<OperatorMessageResult> {
   const start = await startTelegramOperatorTurn(actor);
 
@@ -1538,6 +1586,7 @@ export async function handleTelegramOperatorMessage(actor: ActorContext): Promis
     draft = await generateDraft({
       text: actor.userMessage,
       imageBase64: actor.imageBase64,
+      attachedImageUrl: actor.attachedImageUrl,
       snapshot: start.snapshot,
     });
   } catch {
@@ -1600,7 +1649,7 @@ export async function resolveTelegramOperatorDraft(
     return { kind: "chat", ...chat };
   }
 
-  const params = draft.params || {};
+  const params = applyAttachedImageDefaults(actor, draft.command, draft.params || {});
 
   if (draft.mode === "read") {
     return {

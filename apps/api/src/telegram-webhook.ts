@@ -21,6 +21,7 @@ import {
   sendTelegramTextMessage,
 } from "./telegram.js";
 import { transcribeAudio } from "./sales-agent.js";
+import { storeTelegramImage } from "./media-storage.js";
 import { handleTelegramOperatorMessage, renderOperatorChatReply } from "./telegram-operator.js";
 import { sendThinkingMessage, streamTelegramResponse } from "./telegram-streaming.js";
 import {
@@ -60,7 +61,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
 
   const messageType = inferTelegramMessageType(message);
   const textBody = extractTelegramTextBody(message);
-  const mediaUrl = extractTelegramMediaUrl(message);
+  let mediaUrl = extractTelegramMediaUrl(message);
   const externalRef = buildTelegramCustomerExternalRef(message);
   const conversationKey = buildTelegramConversationKey(message);
   const conversationTitle = buildTelegramConversationTitle(message);
@@ -101,14 +102,28 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
   }
 
   let imageBase64: string | undefined = undefined;
+  let attachedImageUrl: string | undefined = undefined;
   if (messageType === "image" && message.photo && message.photo.length > 0) {
     const photo = message.photo[message.photo.length - 1];
 
     try {
       const fileUrl = await getTelegramFileUrl(photo.file_id, config.TELEGRAM_BOT_TOKEN);
       const imageResponse = await fetch(fileUrl);
+      if (!imageResponse.ok) {
+        throw new Error(`Telegram image download failed: ${imageResponse.status}`);
+      }
       const arrayBuffer = await imageResponse.arrayBuffer();
-      imageBase64 = `data:image/jpeg;base64,${Buffer.from(arrayBuffer).toString("base64")}`;
+      const imageBuffer = Buffer.from(arrayBuffer);
+      imageBase64 = `data:image/jpeg;base64,${imageBuffer.toString("base64")}`;
+
+      const storedImage = await storeTelegramImage({
+        chatId: message.chat.id,
+        messageId: message.message_id,
+        sourceFileUrl: fileUrl,
+        buffer: imageBuffer,
+      });
+      attachedImageUrl = storedImage.publicUrl;
+      mediaUrl = storedImage.publicUrl;
     } catch (error) {
       request.log.warn({ error }, "Failed to load Telegram image for operator context");
     }
@@ -166,6 +181,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
         userId: message.from ? String(message.from.id) : null,
         userMessage,
         imageBase64,
+        attachedImageUrl,
       });
 
       let responseText = "";
