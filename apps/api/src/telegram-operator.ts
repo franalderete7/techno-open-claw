@@ -73,9 +73,17 @@ const listProductsSchema = z.object({
   query: z.string().trim().optional(),
 });
 
+const getProductDetailsSchema = z.object({
+  product_ref: z.string().trim().min(1),
+});
+
 const listStockSchema = z.object({
   query: z.string().trim().optional(),
   status: z.enum(stockStatusValues).optional(),
+});
+
+const getStockDetailsSchema = z.object({
+  stock_ref: z.string().trim().min(1),
 });
 
 const createStockSchema = z.object({
@@ -118,6 +126,10 @@ const listSettingsSchema = z.object({
   query: z.string().trim().optional(),
 });
 
+const getSettingDetailsSchema = z.object({
+  key: z.string().trim().min(1),
+});
+
 const updateSettingSchema = z.object({
   key: z.string().trim().min(1),
   value: jsonValueSchema,
@@ -130,6 +142,10 @@ const deleteSettingSchema = z.object({
 
 const listCustomersSchema = z.object({
   query: z.string().trim().optional(),
+});
+
+const getCustomerDetailsSchema = z.object({
+  customer_ref: z.string().trim().min(1),
 });
 
 const createCustomerSchema = z
@@ -188,9 +204,13 @@ export const draftSchema = z.object({
       "health_check",
       "list_workflows",
       "list_products",
+      "get_product_details",
       "list_stock",
+      "get_stock_details",
       "list_settings",
+      "get_setting_details",
       "list_customers",
+      "get_customer_details",
       "list_orders",
       "list_conversations",
       "create_product",
@@ -247,9 +267,13 @@ type ReadCommandName =
   | "health_check"
   | "list_workflows"
   | "list_products"
+  | "get_product_details"
   | "list_stock"
+  | "get_stock_details"
   | "list_settings"
+  | "get_setting_details"
   | "list_customers"
+  | "get_customer_details"
   | "list_orders"
   | "list_conversations";
 
@@ -324,6 +348,13 @@ function formatJsonPreview(value: unknown) {
   }
 
   return JSON.stringify(value, null, 2);
+}
+
+function formatRecordDump(label: string, row: Record<string, unknown>) {
+  return [
+    label,
+    ...Object.entries(row).map(([key, value]) => `• ${key}: ${formatJsonPreview(value)}`),
+  ].join("\n");
 }
 
 function formatMoney(amount: string | number | null, currency = "ARS") {
@@ -543,10 +574,11 @@ function buildDraftPrompts(params: {
     OPERATOR_SKILL_GUIDE,
     "Convert the operator request into a strict JSON decision for the automation flow.",
     "Return JSON only. No prose. No markdown.",
-    "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, list_stock, list_settings, list_customers, list_orders, list_conversations.",
+    "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, get_product_details, list_stock, get_stock_details, list_settings, get_setting_details, list_customers, get_customer_details, list_orders, list_conversations.",
     "Allowed write commands: create_product, update_product, bulk_update_products, delete_product, create_stock_unit, update_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
     "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
     "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
+    "If the user asks for full row, all columns, entire row, toda la fila, or all information about a product/stock/customer/setting, prefer the matching get_*_details read command instead of any list_* command.",
     "Never invent IDs. Keep product_ref, stock_ref, customer_ref and setting keys as plain text from the user's request.",
     "For update commands, only include the fields the user explicitly wants to change.",
     "For delete commands, only use them if the user explicitly asked to delete or remove.",
@@ -850,6 +882,39 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
         ),
       ].join("\n");
     }
+    case "get_product_details": {
+      const parsed = getProductDetailsSchema.parse(params);
+      const product = await resolveProduct(parsed.product_ref);
+      const rows = await query<Record<string, unknown>>(
+        `
+          select
+            p.*,
+            coalesce(inv.stock_units_total, 0) as stock_units_total,
+            coalesce(inv.stock_units_available, 0) as stock_units_available,
+            coalesce(inv.stock_units_reserved, 0) as stock_units_reserved,
+            coalesce(inv.stock_units_sold, 0) as stock_units_sold
+          from public.products p
+          left join lateral (
+            select
+              count(*)::int as stock_units_total,
+              count(*) filter (where status = 'in_stock')::int as stock_units_available,
+              count(*) filter (where status = 'reserved')::int as stock_units_reserved,
+              count(*) filter (where status = 'sold')::int as stock_units_sold
+            from public.stock_units su
+            where su.product_id = p.id
+          ) inv on true
+          where p.id = $1
+          limit 1
+        `,
+        [product.id]
+      );
+
+      if (rows.length === 0) {
+        return `No pude cargar la fila completa del producto ${parsed.product_ref}.`;
+      }
+
+      return formatRecordDump(`Fila completa de producto ${product.sku}:`, rows[0]);
+    }
     case "list_stock": {
       const parsed = listStockSchema.parse(params);
       const values: unknown[] = [];
@@ -891,6 +956,32 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
         ),
       ].join("\n");
     }
+    case "get_stock_details": {
+      const parsed = getStockDetailsSchema.parse(params);
+      const stock = await resolveStock(parsed.stock_ref);
+      const rows = await query<Record<string, unknown>>(
+        `
+          select
+            su.*,
+            p.sku as product_sku,
+            p.slug as product_slug,
+            p.brand as product_brand,
+            p.model as product_model,
+            p.title as product_title
+          from public.stock_units su
+          join public.products p on p.id = su.product_id
+          where su.id = $1
+          limit 1
+        `,
+        [stock.id]
+      );
+
+      if (rows.length === 0) {
+        return `No pude cargar la fila completa del stock ${parsed.stock_ref}.`;
+      }
+
+      return formatRecordDump(`Fila completa de stock #${stock.id}:`, rows[0]);
+    }
     case "list_settings": {
       const parsed = listSettingsSchema.parse(params);
       const rows = await query<{ key: string; value: unknown }>(
@@ -909,6 +1000,25 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       }
 
       return ["Settings:", ...rows.map((row) => `• ${row.key} = ${asText(row.value)}`)].join("\n");
+    }
+    case "get_setting_details": {
+      const parsed = getSettingDetailsSchema.parse(params);
+      const setting = await resolveSetting(parsed.key);
+      const rows = await query<Record<string, unknown>>(
+        `
+          select key, value, description, created_at, updated_at
+          from public.settings
+          where key = $1
+          limit 1
+        `,
+        [setting.key]
+      );
+
+      if (rows.length === 0) {
+        return `No pude cargar la fila completa del setting ${parsed.key}.`;
+      }
+
+      return formatRecordDump(`Fila completa del setting ${setting.key}:`, rows[0]);
     }
     case "list_customers": {
       const parsed = listCustomersSchema.parse(params);
@@ -940,6 +1050,25 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
             }`
         ),
       ].join("\n");
+    }
+    case "get_customer_details": {
+      const parsed = getCustomerDetailsSchema.parse(params);
+      const customer = await resolveCustomer(parsed.customer_ref);
+      const rows = await query<Record<string, unknown>>(
+        `
+          select *
+          from public.customers
+          where id = $1
+          limit 1
+        `,
+        [customer.id]
+      );
+
+      if (rows.length === 0) {
+        return `No pude cargar la fila completa del cliente ${parsed.customer_ref}.`;
+      }
+
+      return formatRecordDump(`Fila completa del cliente #${customer.id}:`, rows[0]);
     }
     case "list_orders": {
       const parsed = listOrdersSchema.parse(params);
@@ -1655,6 +1784,73 @@ function buildChatPrompts(params: {
   return { systemPrompt, prompt };
 }
 
+const detailIntentPatterns = [
+  "full row",
+  "entire row",
+  "all columns",
+  "all information",
+  "all the information",
+  "all the data",
+  "complete row",
+  "complete details",
+  "full details",
+  "fila completa",
+  "toda la fila",
+  "todos los campos",
+  "toda la info",
+  "toda la informacion",
+  "toda la información",
+  "detalle completo",
+  "detalles completos",
+];
+
+function cleanDetailReference(text: string) {
+  return text
+    .replace(/["'`]/g, " ")
+    .replace(/\b(?:give me|show me|dame|mostrar|mostrame|muéstrame|quiero|please|por favor|yes|that one|ese|esa|ese producto|ese item|ese ítem)\b/gi, " ")
+    .replace(/\b(?:all|the|of|for|on|about|product|producto|item|sku|stock|setting|customer|cliente|row|columns|information|data|entire|full|complete|completa|completo|fila|campos|detalles|info|sobre|del|de|para|that|this)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseExplicitDetailCommand(text: string): { command: ReadCommandName; params: Record<string, unknown> } | null {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (!detailIntentPatterns.some((pattern) => lower.includes(pattern))) {
+    return null;
+  }
+
+  let command: ReadCommandName = "get_product_details";
+  let paramKey: "product_ref" | "stock_ref" | "key" | "customer_ref" = "product_ref";
+
+  if (
+    /\b(stock|serial|serial_number|imei|unidad|inventory|inventario)\b/i.test(trimmed)
+  ) {
+    command = "get_stock_details";
+    paramKey = "stock_ref";
+  } else if (/\b(setting|config|configuration|configuracion|configuración|clave)\b/i.test(trimmed)) {
+    command = "get_setting_details";
+    paramKey = "key";
+  } else if (/\b(customer|cliente|phone|email|external_ref)\b/i.test(trimmed)) {
+    command = "get_customer_details";
+    paramKey = "customer_ref";
+  }
+
+  const quotedRef = trimmed.match(/["'`]([^"'`]+)["'`]/);
+  const skuLikeRef = trimmed.match(/\b[a-z0-9]+(?:-[a-z0-9]+){1,}\b/i);
+  const suffixRef = trimmed.match(/\b(?:for|of|on|about|de|del|para|sobre)\b\s+(.+)$/i);
+
+  const rawRef = quotedRef?.[1] ?? skuLikeRef?.[0] ?? suffixRef?.[1] ?? trimmed;
+  const ref = cleanDetailReference(rawRef);
+
+  if (!ref) {
+    return null;
+  }
+
+  return { command, params: { [paramKey]: ref } };
+}
+
 function parseQuickReadCommand(text: string): { command: ReadCommandName; params: Record<string, unknown> } | null {
   const trimmed = text.trim().toLowerCase();
 
@@ -1676,6 +1872,11 @@ function parseQuickReadCommand(text: string): { command: ReadCommandName; params
 
   if (trimmed.includes("workflow")) {
     return { command: "list_workflows", params: {} };
+  }
+
+  const detailCommand = parseExplicitDetailCommand(text);
+  if (detailCommand) {
+    return detailCommand;
   }
 
   return null;

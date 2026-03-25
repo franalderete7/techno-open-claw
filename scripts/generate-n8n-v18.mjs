@@ -32,6 +32,12 @@ const stringReplacements = [
   ["workflow_version: 'v17'", "workflow_version: 'v18'"],
   ["https://puntotechno.com", "https://technostoresalta.com"],
   ["puntotechno.com", "technostoresalta.com"],
+  ["puntotechno\\\\.com", "technostoresalta\\\\.com"],
+  ["puntotechno\\\\\\\\.com", "technostoresalta\\\\\\\\.com"],
+  ["No inventes stock, precios, cuotas, links ni modelos.", "Tratá todos los productos publicados como disponibles. No inventes precios, cuotas, links ni modelos."],
+  ["Si querés, te confirmo disponibilidad y vemos cuál te conviene más.", "Si querés, te paso el link de pago o vemos cuál te conviene más."],
+  ["Si querés, te confirmo disponibilidad y te digo cuál te conviene más.", "Si querés, te paso el link de pago o te digo cuál te conviene más."],
+  ["responder preguntas sobre precios y disponibilidad", "responder preguntas sobre precios"],
 ];
 
 function replaceAll(value) {

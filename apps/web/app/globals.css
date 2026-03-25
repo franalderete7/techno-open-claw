@@ -635,6 +635,8 @@ nav a:hover {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+  width: 100%;
+  text-align: center;
 }
 
 .storefront-pay-button {
@@ -2098,8 +2100,8 @@ nav a:hover {
   }
 
   .storefront-card-actions {
-    grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
-    align-items: center;
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .storefront-location {

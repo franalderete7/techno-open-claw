@@ -648,7 +648,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         condition: product.condition,
         storage_gb: product.storage_gb ?? inferStorageGb(product),
         color: product.color ?? inferColor(product),
-        in_stock: product.in_stock_units > 0 || product.in_stock,
+        in_stock: true,
         in_stock_units: product.in_stock_units,
         delivery_days: product.delivery_days,
         price_ars: product.price_amount == null ? null : Number(product.price_amount),

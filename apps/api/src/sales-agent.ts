@@ -170,6 +170,8 @@ const DEFAULT_STAGE_BY_ROUTE: Record<string, string> = {
   store_info: "browsing",
 };
 
+const PUBLISHED_PRODUCTS_ALWAYS_AVAILABLE = true;
+
 const INTENT_KEYWORDS: Record<string, string[]> = {
   price_inquiry: ["precio", "cuanto", "valor", "costa", "cuanto sale", "precio tiene"],
   catalog_browse: ["catalogo", "modelos", "tenes", "disponibles", "que hay", "ver"],
@@ -349,10 +351,11 @@ export async function routeTurn(context: TurnContext): Promise<RouterOutput> {
  */
 export async function generateResponse(context: TurnContext, router: RouterOutput): Promise<ResponderOutput> {
   const systemPrompt = `Eres un asistente de ventas de TechnoStore, una tienda de teléfonos móviles en Argentina.
-Tu rol es ayudar a los clientes a encontrar el equipo que buscan, responder preguntas sobre precios y disponibilidad, y guiarlos hacia la compra.
+Tu rol es ayudar a los clientes a encontrar el equipo que buscan, responder preguntas sobre precios y guiarlos hacia la compra.
 
 Reglas:
 - Sé conciso y amable
+- Tratá todos los productos publicados del catálogo como disponibles
 - No inventes precios o datos que no tienes
 - Si no sabes algo, di que vas a consultar
 - Mantén el tono profesional pero cercano
@@ -463,6 +466,10 @@ function buildPromptContext(context: TurnContext, router: RouterOutput): string 
   // Router context
   if (router.route_key !== "unknown") {
     lines.push(`\nIntento detectado: ${router.route_key}`);
+  }
+
+  if (PUBLISHED_PRODUCTS_ALWAYS_AVAILABLE) {
+    lines.push("\nRegla comercial: tratá todos los productos publicados como disponibles.");
   }
   
   return lines.join("\n");
@@ -611,7 +618,7 @@ export async function fetchTurnContext(params: {
     recentMessages = msgResult.rows.reverse();
   }
   
-  // Fetch candidate products (active, in stock)
+  // Fetch candidate products (all active published products)
   const productResult = await pool.query(
     `
     SELECT id, sku, slug, brand, model, title, description, condition, price_amount, currency_code, active, created_at, updated_at
@@ -629,7 +636,7 @@ export async function fetchTurnContext(params: {
   );
   const store: StoreSettings = settingsResult.rows[0]?.value || {
     name: "TechnoStore",
-    storefront_url: "https://puntotechno.com",
+    storefront_url: "https://technostoresalta.com",
     ops_host: "https://aldegol.com",
   };
   
