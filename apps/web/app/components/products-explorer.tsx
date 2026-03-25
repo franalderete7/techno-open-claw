@@ -8,6 +8,13 @@ type ProductsExplorerProps = {
   items: ProductRecord[];
 };
 
+type FieldRow = {
+  label: string;
+  value: string;
+  mono?: boolean;
+  href?: string | null;
+};
+
 function formatMoney(amount: number | null, currency: string) {
   if (amount == null) return "Price not loaded";
   return new Intl.NumberFormat("es-AR", {
@@ -19,6 +26,60 @@ function formatMoney(amount: number | null, currency: string) {
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString("es-AR", { dateStyle: "medium" });
+}
+
+function formatNullable(value: unknown) {
+  if (value == null || value === "") return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function buildProductFields(product: ProductRecord): FieldRow[] {
+  return [
+    { label: "id", value: String(product.id), mono: true },
+    { label: "legacy_source_id", value: formatNullable(product.legacy_source_id), mono: true },
+    { label: "sku", value: product.sku, mono: true },
+    { label: "slug", value: product.slug, mono: true },
+    { label: "brand", value: product.brand },
+    { label: "model", value: product.model },
+    { label: "title", value: product.title },
+    { label: "description", value: formatNullable(product.description) },
+    { label: "category", value: formatNullable(product.category) },
+    { label: "condition", value: product.condition },
+    { label: "active", value: formatNullable(product.active) },
+    { label: "in_stock", value: formatNullable(product.in_stock) },
+    { label: "price_amount", value: formatNullable(product.price_amount) },
+    { label: "promo_price_ars", value: formatNullable(product.promo_price_ars) },
+    { label: "price_usd", value: formatNullable(product.price_usd) },
+    { label: "currency_code", value: product.currency_code, mono: true },
+    { label: "cost_usd", value: formatNullable(product.cost_usd) },
+    { label: "logistics_usd", value: formatNullable(product.logistics_usd) },
+    { label: "total_cost_usd", value: formatNullable(product.total_cost_usd) },
+    { label: "margin_pct", value: formatNullable(product.margin_pct) },
+    { label: "usd_rate", value: formatNullable(product.usd_rate) },
+    { label: "bancarizada_total", value: formatNullable(product.bancarizada_total) },
+    { label: "bancarizada_cuota", value: formatNullable(product.bancarizada_cuota) },
+    { label: "bancarizada_interest", value: formatNullable(product.bancarizada_interest) },
+    { label: "macro_total", value: formatNullable(product.macro_total) },
+    { label: "macro_cuota", value: formatNullable(product.macro_cuota) },
+    { label: "macro_interest", value: formatNullable(product.macro_interest) },
+    { label: "cuotas_qty", value: formatNullable(product.cuotas_qty) },
+    { label: "delivery_type", value: formatNullable(product.delivery_type) },
+    { label: "delivery_days", value: formatNullable(product.delivery_days) },
+    { label: "ram_gb", value: formatNullable(product.ram_gb) },
+    { label: "storage_gb", value: formatNullable(product.storage_gb) },
+    { label: "network", value: formatNullable(product.network) },
+    { label: "color", value: formatNullable(product.color) },
+    { label: "battery_health", value: formatNullable(product.battery_health) },
+    { label: "image_url", value: formatNullable(product.image_url), mono: true, href: product.image_url },
+    { label: "stock_units_total", value: String(product.stock_units_total), mono: true },
+    { label: "stock_units_available", value: String(product.stock_units_available), mono: true },
+    { label: "stock_units_reserved", value: String(product.stock_units_reserved), mono: true },
+    { label: "stock_units_sold", value: String(product.stock_units_sold), mono: true },
+    { label: "created_at", value: product.created_at, mono: true },
+    { label: "updated_at", value: product.updated_at, mono: true },
+  ];
 }
 
 function ProductThumbnail({ product }: { product: ProductRecord }) {
@@ -90,8 +151,11 @@ export function ProductsExplorer({ items }: ProductsExplorerProps) {
         </section>
       ) : (
         <section className="product-list reveal-grid">
-          {filteredItems.map((product) => (
-            <article key={product.id} className="product-card">
+          {filteredItems.map((product) => {
+            const fields = buildProductFields(product);
+
+            return (
+              <article key={product.id} className="product-card">
               <div className="product-thumb">
                 <ProductThumbnail product={product} />
               </div>
@@ -105,6 +169,7 @@ export function ProductsExplorer({ items }: ProductsExplorerProps) {
 
                 <div className="chip-row">
                   <span className="chip accent mono">{product.sku}</span>
+                  <span className="chip mono">{product.slug}</span>
                   <span className={`chip ${product.active ? "good" : "warn"}`}>
                     {product.active ? "Active" : "Inactive"}
                   </span>
@@ -149,9 +214,30 @@ export function ProductsExplorer({ items }: ProductsExplorerProps) {
                     <strong className="metric-value">{product.price_usd == null ? "-" : `$${product.price_usd}`}</strong>
                   </div>
                 </div>
+
+                <details className="field-details">
+                  <summary className="field-summary">Full row · {fields.length} fields</summary>
+                  <dl className="field-grid">
+                    {fields.map((field) => (
+                      <div key={field.label} className="field-row">
+                        <dt>{field.label}</dt>
+                        <dd className={field.mono ? "mono" : undefined}>
+                          {field.href ? (
+                            <a className="field-link" href={field.href} target="_blank" rel="noreferrer">
+                              {field.value}
+                            </a>
+                          ) : (
+                            field.value
+                          )}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
               </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </section>
       )}
     </div>

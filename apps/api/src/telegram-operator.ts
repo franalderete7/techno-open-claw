@@ -80,6 +80,8 @@ const listStockSchema = z.object({
 const createStockSchema = z.object({
   product_ref: z.string().trim().min(1),
   serial_number: z.string().trim().optional().nullable(),
+  imei_1: z.string().trim().optional().nullable(),
+  imei_2: z.string().trim().optional().nullable(),
   color: z.string().trim().optional().nullable(),
   battery_health: z.coerce.number().int().min(0).max(100).optional().nullable(),
   status: z.enum(stockStatusValues).optional(),
@@ -96,6 +98,8 @@ const updateStockSchema = z.object({
     .object({
       product_ref: z.string().trim().optional(),
       serial_number: z.string().trim().nullable().optional(),
+      imei_1: z.string().trim().nullable().optional(),
+      imei_2: z.string().trim().nullable().optional(),
       color: z.string().trim().nullable().optional(),
       battery_health: z.coerce.number().int().min(0).max(100).nullable().optional(),
       status: z.enum(stockStatusValues).optional(),
@@ -264,6 +268,8 @@ type StockRow = QueryResultRow & {
   model: string;
   title: string;
   serial_number: string | null;
+  imei_1: string | null;
+  imei_2: string | null;
   status: string;
   location_code: string | null;
 };
@@ -489,7 +495,7 @@ export async function renderOperatorChatReply(params: {
 const OPERATOR_SCHEMA_GUIDE = [
   "Operational schema contract:",
   "- public.products stores catalog rows. Stable refs: id, sku, slug. Required for creation: sku and title. Common editable fields: brand, model, title, description, condition, active, price_amount, currency_code, category, cost_usd, logistics_usd, total_cost_usd, margin_pct, price_usd, promo_price_ars, bancarizada_total, bancarizada_cuota, bancarizada_interest, macro_total, macro_cuota, macro_interest, cuotas_qty, in_stock, delivery_type, delivery_days, usd_rate, image_url, ram_gb, storage_gb, network, color, battery_health.",
-  "- public.stock_units stores physical inventory. Stable refs: id, serial_number. Required for creation: product_ref. Common editable fields: serial_number, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, sold_at, metadata.",
+  "- public.stock_units stores physical inventory. Stable refs: id, serial_number, imei_1, imei_2. Required for creation: product_ref. Common editable fields: serial_number, imei_1, imei_2, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, sold_at, metadata.",
   "- public.settings stores key/value configuration. Stable ref: key. update_setting requires key and value. delete_setting removes the key.",
   "- public.customers stores operator and customer contacts. Stable refs: id, external_ref, phone, email. create_customer requires at least one of external_ref, phone, or email.",
   "- public.conversations stores thread headers by channel_thread_key. public.messages stores the actual interaction timeline. Each Telegram inbound and outbound message is saved in public.messages.",
@@ -611,20 +617,24 @@ async function resolveStock(stockRef: string) {
   const exactId = /^\d+$/.test(trimmed) ? Number(trimmed) : null;
   const rows = await query<StockRow>(
     `
-      select su.id, su.product_id, su.serial_number, su.status, su.location_code, p.sku, p.brand, p.model, p.title
+      select su.id, su.product_id, su.serial_number, su.imei_1, su.imei_2, su.status, su.location_code, p.sku, p.brand, p.model, p.title
       from public.stock_units su
       join public.products p on p.id = su.product_id
       where
         ($1::bigint is not null and su.id = $1)
         or coalesce(lower(su.serial_number), '') = lower($2)
+        or coalesce(lower(su.imei_1), '') = lower($2)
+        or coalesce(lower(su.imei_2), '') = lower($2)
         or lower(p.sku) = lower($2)
         or p.title ilike $3
       order by
         case
           when ($1::bigint is not null and su.id = $1) then 0
           when coalesce(lower(su.serial_number), '') = lower($2) then 1
-          when lower(p.sku) = lower($2) then 2
-          else 3
+          when coalesce(lower(su.imei_1), '') = lower($2) then 2
+          when coalesce(lower(su.imei_2), '') = lower($2) then 3
+          when lower(p.sku) = lower($2) then 4
+          else 5
         end,
         su.updated_at desc,
         su.id desc
@@ -638,7 +648,12 @@ async function resolveStock(stockRef: string) {
   }
 
   const exactRows = rows.filter(
-    (row) => row.id === exactId || row.serial_number?.toLowerCase() === trimmed.toLowerCase() || row.sku.toLowerCase() === trimmed.toLowerCase()
+    (row) =>
+      row.id === exactId ||
+      row.serial_number?.toLowerCase() === trimmed.toLowerCase() ||
+      row.imei_1?.toLowerCase() === trimmed.toLowerCase() ||
+      row.imei_2?.toLowerCase() === trimmed.toLowerCase() ||
+      row.sku.toLowerCase() === trimmed.toLowerCase()
   );
 
   if (exactRows.length === 1) {
@@ -649,7 +664,7 @@ async function resolveStock(stockRef: string) {
     throw new Error(
       `La unidad es ambigua. Coincidencias: ${rows
         .slice(0, 3)
-        .map((row) => `#${row.id} ${row.serial_number || row.sku}`)
+        .map((row) => `#${row.id} ${row.serial_number || row.imei_1 || row.imei_2 || row.sku}`)
         .join(" | ")}`
     );
   }
@@ -837,7 +852,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       if (parsed.query) {
         values.push(`%${parsed.query}%`);
         where.push(
-          `(coalesce(su.serial_number, '') ilike $${values.length} or p.sku ilike $${values.length} or p.title ilike $${values.length})`
+          `(coalesce(su.serial_number, '') ilike $${values.length} or coalesce(su.imei_1, '') ilike $${values.length} or coalesce(su.imei_2, '') ilike $${values.length} or p.sku ilike $${values.length} or p.title ilike $${values.length})`
         );
       }
 
@@ -848,7 +863,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
 
       const rows = await query<StockRow>(
         `
-          select su.id, su.product_id, su.serial_number, su.status, su.location_code, p.sku, p.brand, p.model, p.title
+          select su.id, su.product_id, su.serial_number, su.imei_1, su.imei_2, su.status, su.location_code, p.sku, p.brand, p.model, p.title
           from public.stock_units su
           join public.products p on p.id = su.product_id
           ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
@@ -864,7 +879,10 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
 
       return [
         "Stock reciente:",
-        ...rows.map((row) => `• #${row.id} · ${row.sku} · ${row.status} · ${row.serial_number || "sin serial"}`),
+        ...rows.map(
+          (row) =>
+            `• #${row.id} · ${row.sku} · ${row.status} · ${row.serial_number || row.imei_1 || row.imei_2 || "sin serial/imei"}`
+        ),
       ].join("\n");
     }
     case "list_settings": {
@@ -1040,6 +1058,8 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
           `Crear unidad de stock para ${product.sku}`,
           `• Producto: ${product.title}`,
           parsed.serial_number ? `• Serial: ${parsed.serial_number}` : "",
+          parsed.imei_1 ? `• IMEI 1: ${parsed.imei_1}` : "",
+          parsed.imei_2 ? `• IMEI 2: ${parsed.imei_2}` : "",
           parsed.status ? `• Estado: ${parsed.status}` : "",
           parsed.location_code ? `• Ubicación: ${parsed.location_code}` : "",
         ]
@@ -1070,7 +1090,7 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
         command,
         summary: [
           `Actualizar stock #${stock.id}`,
-          `• Referencia actual: ${stock.serial_number || stock.sku}`,
+          `• Referencia actual: ${stock.serial_number || stock.imei_1 || stock.imei_2 || stock.sku}`,
           `• Cambios: ${Object.entries(parsed.changes)
             .map(([key, value]) => `${key}=${formatJsonPreview(value)}`)
             .join(", ")}`,
@@ -1272,13 +1292,15 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       const result = await client.query(
         `
           insert into public.stock_units (
-            product_id, serial_number, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, metadata
-          ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            product_id, serial_number, imei_1, imei_2, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, metadata
+          ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           returning id
         `,
         [
           parsed.product_id,
           parsed.serial_number ?? null,
+          parsed.imei_1 ?? null,
+          parsed.imei_2 ?? null,
           parsed.color ?? null,
           parsed.battery_health ?? null,
           parsed.status || "in_stock",

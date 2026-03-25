@@ -60,6 +60,10 @@ export type ProductRecord = {
   category?: string | null;
   condition: string;
   price_amount: number | null;
+  cost_usd?: number | null;
+  logistics_usd?: number | null;
+  total_cost_usd?: number | null;
+  margin_pct?: number | null;
   price_usd?: number | null;
   currency_code: string;
   active: boolean;
@@ -71,7 +75,16 @@ export type ProductRecord = {
   stock_units_reserved: number;
   stock_units_sold: number;
   promo_price_ars: number | null;
+  bancarizada_total?: number | null;
+  bancarizada_cuota?: number | null;
+  bancarizada_interest?: number | null;
+  macro_total?: number | null;
+  macro_cuota?: number | null;
+  macro_interest?: number | null;
+  cuotas_qty?: number | null;
+  delivery_type?: string | null;
   delivery_days?: number | null;
+  usd_rate?: number | null;
   image_url: string | null;
   ram_gb: number | null;
   storage_gb: number | null;
@@ -83,6 +96,8 @@ export type ProductRecord = {
 export type StockRecord = {
   id: number;
   serial_number: string | null;
+  imei_1: string | null;
+  imei_2: string | null;
   color: string | null;
   battery_health: number | null;
   status: string;
@@ -91,6 +106,7 @@ export type StockRecord = {
   currency_code: string;
   acquired_at: string | null;
   sold_at: string | null;
+  metadata: Record<string, unknown>;
   product_id: number;
   sku: string;
   brand: string;

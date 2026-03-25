@@ -836,6 +836,8 @@ app.register(async (protectedApp) => {
         select
           su.id,
           su.serial_number,
+          su.imei_1,
+          su.imei_2,
           su.color,
           su.battery_health,
           su.status,
@@ -868,6 +870,8 @@ app.register(async (protectedApp) => {
     const schema = z.object({
       product_id: z.coerce.number().int().positive(),
       serial_number: z.string().trim().optional().nullable(),
+      imei_1: z.string().trim().optional().nullable(),
+      imei_2: z.string().trim().optional().nullable(),
       color: z.string().trim().optional().nullable(),
       battery_health: z.coerce.number().int().min(0).max(100).optional().nullable(),
       status: z.enum(stockStatusValues).default("in_stock"),
@@ -884,6 +888,8 @@ app.register(async (protectedApp) => {
         insert into public.stock_units (
           product_id,
           serial_number,
+          imei_1,
+          imei_2,
           color,
           battery_health,
           status,
@@ -892,12 +898,14 @@ app.register(async (protectedApp) => {
           currency_code,
           acquired_at,
           metadata
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         returning *
       `,
       [
         body.product_id,
         body.serial_number ?? null,
+        body.imei_1 ?? null,
+        body.imei_2 ?? null,
         body.color ?? null,
         body.battery_health ?? null,
         body.status,
@@ -924,6 +932,8 @@ app.register(async (protectedApp) => {
     const bodySchema = z.object({
       product_id: z.coerce.number().int().positive().optional(),
       serial_number: z.string().trim().nullable().optional(),
+      imei_1: z.string().trim().nullable().optional(),
+      imei_2: z.string().trim().nullable().optional(),
       color: z.string().trim().nullable().optional(),
       battery_health: z.coerce.number().int().min(0).max(100).nullable().optional(),
       status: z.enum(stockStatusValues).optional(),

@@ -538,6 +538,58 @@ nav a:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.field-details {
+  padding: 12px;
+  border: 0.5px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.field-summary {
+  cursor: pointer;
+  color: var(--soft-text);
+  font-size: 0.84rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  list-style: none;
+}
+
+.field-summary::-webkit-details-marker {
+  display: none;
+}
+
+.field-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 12px 0 0;
+}
+
+.field-row {
+  padding-top: 10px;
+  border-top: 0.5px solid var(--line);
+}
+
+.field-row dt {
+  margin: 0 0 4px;
+  color: var(--soft-text);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.field-row dd {
+  margin: 0;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.field-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .metric {
   padding: 10px;
   border: 0.5px solid var(--line);
@@ -1281,6 +1333,7 @@ nav a:hover {
 
   .catalog-meta,
   .metric-grid,
+  .field-grid,
   .record-meta-grid,
   .setting-feature .setting-list {
     grid-template-columns: 1fr;

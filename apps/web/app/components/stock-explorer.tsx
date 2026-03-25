@@ -8,9 +8,45 @@ type StockExplorerProps = {
   items: StockRecord[];
 };
 
+type FieldRow = {
+  label: string;
+  value: string;
+  mono?: boolean;
+};
+
 function formatDate(value: string | null) {
   if (!value) return "-";
   return new Date(value).toLocaleDateString("es-AR", { dateStyle: "medium" });
+}
+
+function formatNullable(value: unknown) {
+  if (value == null || value === "") return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function buildStockFields(unit: StockRecord): FieldRow[] {
+  return [
+    { label: "id", value: String(unit.id), mono: true },
+    { label: "product_id", value: String(unit.product_id), mono: true },
+    { label: "sku", value: unit.sku, mono: true },
+    { label: "serial_number", value: formatNullable(unit.serial_number), mono: true },
+    { label: "imei_1", value: formatNullable(unit.imei_1), mono: true },
+    { label: "imei_2", value: formatNullable(unit.imei_2), mono: true },
+    { label: "status", value: unit.status },
+    { label: "color", value: formatNullable(unit.color) },
+    { label: "battery_health", value: formatNullable(unit.battery_health) },
+    { label: "location_code", value: formatNullable(unit.location_code) },
+    { label: "cost_amount", value: formatNullable(unit.cost_amount) },
+    { label: "currency_code", value: unit.currency_code, mono: true },
+    { label: "acquired_at", value: formatNullable(unit.acquired_at), mono: true },
+    { label: "sold_at", value: formatNullable(unit.sold_at), mono: true },
+    { label: "metadata", value: formatNullable(unit.metadata), mono: true },
+    { label: "brand", value: unit.brand },
+    { label: "model", value: unit.model },
+    { label: "title", value: unit.title },
+  ];
 }
 
 export function StockExplorer({ items }: StockExplorerProps) {
@@ -28,6 +64,8 @@ export function StockExplorer({ items }: StockExplorerProps) {
         item.model,
         item.title,
         item.serial_number ?? "",
+        item.imei_1 ?? "",
+        item.imei_2 ?? "",
         item.location_code ?? "",
         item.color ?? "",
       ]
@@ -45,7 +83,7 @@ export function StockExplorer({ items }: StockExplorerProps) {
     <div className="page-stack">
       <SearchToolbar
         label="Search stock units"
-        placeholder="Search by SKU, serial, title, color, or location"
+        placeholder="Search by SKU, serial, IMEI, title, color, or location"
         query={query}
         onQueryChange={setQuery}
         totalCount={items.length}
@@ -65,8 +103,11 @@ export function StockExplorer({ items }: StockExplorerProps) {
         </section>
       ) : (
         <section className="record-grid reveal-grid">
-          {filteredItems.map((unit) => (
-            <article key={unit.id} className="record-card">
+          {filteredItems.map((unit) => {
+            const fields = buildStockFields(unit);
+
+            return (
+              <article key={unit.id} className="record-card">
               <div className="record-header">
                 <div>
                   <p className="catalog-kicker">Unit #{unit.id}</p>
@@ -93,6 +134,8 @@ export function StockExplorer({ items }: StockExplorerProps) {
               <div className="chip-row">
                 <span className="chip accent mono">{unit.sku}</span>
                 {unit.serial_number ? <span className="chip mono">{unit.serial_number}</span> : null}
+                {unit.imei_1 ? <span className="chip mono">IMEI1 {unit.imei_1}</span> : null}
+                {unit.imei_2 ? <span className="chip mono">IMEI2 {unit.imei_2}</span> : null}
                 {unit.color ? <span className="chip">{unit.color}</span> : null}
                 {unit.battery_health != null ? (
                   <span className={`chip ${unit.battery_health >= 85 ? "good" : "warn"}`}>{unit.battery_health}% battery</span>
@@ -119,8 +162,21 @@ export function StockExplorer({ items }: StockExplorerProps) {
                   </dd>
                 </div>
               </dl>
-            </article>
-          ))}
+
+              <details className="field-details">
+                <summary className="field-summary">Full row · {fields.length} fields</summary>
+                <dl className="field-grid">
+                  {fields.map((field) => (
+                    <div key={field.label} className="field-row">
+                      <dt>{field.label}</dt>
+                      <dd className={field.mono ? "mono" : undefined}>{field.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
+              </article>
+            );
+          })}
         </section>
       )}
     </div>
