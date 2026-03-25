@@ -238,6 +238,7 @@ export type ActorContext = {
   chatIdNumber: number;
   userId: string | null;
   userMessage: string;
+  conversationId?: number;
   imageBase64?: string;
   attachedImageUrl?: string;
 };
@@ -247,6 +248,7 @@ type OperatorTurnStartResult =
   | {
       kind: "needs_ai";
       snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
+      conversationMemory: string;
       draftSystemPrompt: string;
       draftPrompt: string;
     };
@@ -326,6 +328,15 @@ type CustomerRow = QueryResultRow & {
   email: string | null;
 };
 
+type ConversationMemoryRow = QueryResultRow & {
+  direction: "inbound" | "outbound";
+  sender_kind: "customer" | "tool";
+  message_type: "text" | "audio" | "image" | "video" | "file";
+  text_body: string | null;
+  transcript: string | null;
+  media_url: string | null;
+};
+
 function asText(value: unknown) {
   if (value == null) {
     return "null";
@@ -355,6 +366,46 @@ function formatRecordDump(label: string, row: Record<string, unknown>) {
     label,
     ...Object.entries(row).map(([key, value]) => `• ${key}: ${formatJsonPreview(value)}`),
   ].join("\n");
+}
+
+function formatConversationMemory(rows: ConversationMemoryRow[]) {
+  if (rows.length === 0) {
+    return "No recent thread history.";
+  }
+
+  return rows
+    .map((row) => {
+      const speaker = row.sender_kind === "tool" ? "Bot" : "Operator";
+      const text =
+        row.text_body?.trim() ||
+        row.transcript?.trim() ||
+        (row.message_type === "image"
+          ? "[image]"
+          : row.message_type === "audio"
+            ? "[audio]"
+            : `[${row.message_type}]`);
+      return `${speaker}: ${text}`;
+    })
+    .join("\n");
+}
+
+async function loadConversationMemory(conversationId?: number, limit = 12) {
+  if (!conversationId) {
+    return "No recent thread history.";
+  }
+
+  const rows = await query<ConversationMemoryRow>(
+    `
+      select direction, sender_kind, message_type, text_body, transcript, media_url
+      from public.messages
+      where conversation_id = $1
+      order by created_at desc, id desc
+      limit $2
+    `,
+    [conversationId, limit]
+  );
+
+  return formatConversationMemory(rows.reverse());
 }
 
 function formatMoney(amount: string | number | null, currency = "ARS") {
@@ -500,6 +551,7 @@ async function generateDraft(params: {
   text: string;
   imageBase64?: string;
   attachedImageUrl?: string;
+  conversationMemory: string;
   snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
 }): Promise<Draft> {
   const { systemPrompt, prompt } = buildDraftPrompts(params);
@@ -565,6 +617,7 @@ function buildDraftPrompts(params: {
   text: string;
   imageBase64?: string;
   attachedImageUrl?: string;
+  conversationMemory: string;
   snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
 }) {
   const systemPrompt = [
@@ -579,6 +632,8 @@ function buildDraftPrompts(params: {
     "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
     "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
     "If the user asks for full row, all columns, entire row, toda la fila, or all information about a product/stock/customer/setting, prefer the matching get_*_details read command instead of any list_* command.",
+    "Use recent thread history to resolve follow-up references like 'that one', 'same product', 'that SKU', 'those settings', or 'do it now'.",
+    "If the reference is clear from recent thread history, do not ask the operator to repeat it.",
     "Never invent IDs. Keep product_ref, stock_ref, customer_ref and setting keys as plain text from the user's request.",
     "For update commands, only include the fields the user explicitly wants to change.",
     "For delete commands, only use them if the user explicitly asked to delete or remove.",
@@ -587,6 +642,9 @@ function buildDraftPrompts(params: {
   ].join("\n");
 
   const prompt = [
+    "Recent thread history:",
+    params.conversationMemory,
+    "",
     "Current app snapshot:",
     JSON.stringify(params.snapshot, null, 2),
     "",
@@ -1758,6 +1816,7 @@ async function cancelPendingAction(actor: ActorContext, token: string) {
 function buildChatPrompts(params: {
   actor: ActorContext;
   snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
+  conversationMemory: string;
 }) {
   const systemPrompt = [
     "You are the trusted operator assistant for TechnoStore Ops.",
@@ -1768,6 +1827,9 @@ function buildChatPrompts(params: {
     OPERATOR_SKILL_GUIDE,
     "You must never claim a mutation happened unless the deterministic command layer executed it.",
     "If the user asks for a mutation but there is not enough information, ask for the missing field or exact reference.",
+    "Use recent thread history to resolve follow-up references and preserve conversational continuity.",
+    "Recent thread history:",
+    params.conversationMemory,
     "Current live snapshot:",
     JSON.stringify(params.snapshot, null, 2),
   ].join("\n");
@@ -1932,14 +1994,15 @@ export async function handleTelegramOperatorMessage(actor: ActorContext): Promis
       text: actor.userMessage,
       imageBase64: actor.imageBase64,
       attachedImageUrl: actor.attachedImageUrl,
+      conversationMemory: start.conversationMemory,
       snapshot: start.snapshot,
     });
   } catch {
-    const chat = buildChatPrompts({ actor, snapshot: start.snapshot });
+    const chat = buildChatPrompts({ actor, snapshot: start.snapshot, conversationMemory: start.conversationMemory });
     return { kind: "chat", ...chat };
   }
 
-  return resolveTelegramOperatorDraft(actor, draft, start.snapshot);
+  return resolveTelegramOperatorDraft(actor, draft, start.snapshot, start.conversationMemory);
 }
 
 export async function startTelegramOperatorTurn(actor: ActorContext): Promise<OperatorTurnStartResult> {
@@ -1959,16 +2022,19 @@ export async function startTelegramOperatorTurn(actor: ActorContext): Promise<Op
   }
 
   const snapshot = await buildOperatorSnapshot();
+  const conversationMemory = await loadConversationMemory(actor.conversationId);
   const prompts = buildDraftPrompts({
     text: actor.userMessage,
     imageBase64: actor.imageBase64,
     attachedImageUrl: actor.attachedImageUrl,
+    conversationMemory,
     snapshot,
   });
 
   return {
     kind: "needs_ai",
     snapshot,
+    conversationMemory,
     draftSystemPrompt: prompts.systemPrompt,
     draftPrompt: prompts.prompt,
   };
@@ -1977,21 +2043,23 @@ export async function startTelegramOperatorTurn(actor: ActorContext): Promise<Op
 export async function resolveTelegramOperatorDraft(
   actor: ActorContext,
   draft: Draft,
-  snapshot?: Awaited<ReturnType<typeof buildOperatorSnapshot>>
+  snapshot?: Awaited<ReturnType<typeof buildOperatorSnapshot>>,
+  conversationMemory?: string
 ): Promise<OperatorMessageResult> {
   const liveSnapshot = snapshot ?? (await buildOperatorSnapshot());
+  const liveConversationMemory = conversationMemory ?? (await loadConversationMemory(actor.conversationId));
 
   if (draft.mode === "clarify") {
     return { kind: "reply", text: draft.reply || "Necesito un poco más de detalle para hacer eso." };
   }
 
   if (draft.mode === "chat") {
-    const chat = buildChatPrompts({ actor, snapshot: liveSnapshot });
+    const chat = buildChatPrompts({ actor, snapshot: liveSnapshot, conversationMemory: liveConversationMemory });
     return { kind: "chat", ...chat };
   }
 
   if (!draft.command) {
-    const chat = buildChatPrompts({ actor, snapshot: liveSnapshot });
+    const chat = buildChatPrompts({ actor, snapshot: liveSnapshot, conversationMemory: liveConversationMemory });
     return { kind: "chat", ...chat };
   }
 

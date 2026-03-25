@@ -180,6 +180,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
         chatIdNumber: message.chat.id,
         userId: message.from ? String(message.from.id) : null,
         userMessage,
+        conversationId,
         imageBase64,
         attachedImageUrl,
       });
