@@ -1,6 +1,9 @@
 import { getConversations, getCustomers, getDashboard, getProducts, getSettings } from "../lib/api";
+import { getSiteMode } from "../lib/site-mode";
+import { buildStorefrontProducts, buildStorefrontProfile } from "../lib/storefront";
 import { DashboardSearch } from "./components/dashboard-search";
 import { SettingView } from "./components/setting-view";
+import { StorefrontCatalog } from "./components/storefront-catalog";
 
 function formatDate(value: string | null) {
   if (!value) return "No activity yet";
@@ -11,6 +14,41 @@ function formatDate(value: string | null) {
 }
 
 export default async function HomePage() {
+  const siteMode = await getSiteMode();
+
+  if (siteMode === "storefront") {
+    let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
+    let settings = [] as Awaited<ReturnType<typeof getSettings>>["items"];
+    let error: string | null = null;
+
+    try {
+      const [productResponse, settingsResponse] = await Promise.all([getProducts(120, { active: true }), getSettings()]);
+      products = productResponse.items;
+      settings = settingsResponse.items;
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : "Failed to load storefront";
+    }
+
+    const store = buildStorefrontProfile(settings);
+    const storefrontProducts = buildStorefrontProducts(products);
+
+    return error ? (
+      <div className="page-stack">
+        <section className="panel">
+          <p className="empty">{error}</p>
+        </section>
+      </div>
+    ) : (
+      <StorefrontCatalog
+        store={store}
+        products={storefrontProducts}
+        eyebrow="TechnoStore Salta"
+        title="Celulares listos para consultar y coordinar por WhatsApp."
+        lead="Precios en pesos, capacidad, red, color y tiempos de entrega claros. Sin datos internos, sin ruido."
+      />
+    );
+  }
+
   let dashboard = null;
   let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
   let customers = [] as Awaited<ReturnType<typeof getCustomers>>["items"];

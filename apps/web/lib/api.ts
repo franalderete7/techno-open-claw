@@ -228,8 +228,13 @@ export async function getDashboard() {
   return apiFetch<DashboardResponse>("/v1/dashboard");
 }
 
-export async function getProducts(limit = 50) {
-  return apiFetch<ListResponse<ProductRecord>>(`/v1/products?limit=${limit}`);
+export async function getProducts(limit = 50, options?: { active?: boolean }) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (options?.active != null) {
+    params.set("active", String(options.active));
+  }
+
+  return apiFetch<ListResponse<ProductRecord>>(`/v1/products?${params.toString()}`);
 }
 
 export async function getStock(limit = 50) {
