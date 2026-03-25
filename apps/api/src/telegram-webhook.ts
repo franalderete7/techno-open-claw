@@ -21,7 +21,8 @@ import {
   sendTelegramTextMessage,
 } from "./telegram.js";
 import { transcribeAudio } from "./sales-agent.js";
-import { handleTelegramOperatorMessage } from "./telegram-operator.js";
+import { handleTelegramOperatorMessage, renderOperatorChatReply } from "./telegram-operator.js";
+import { sendThinkingMessage, streamTelegramResponse } from "./telegram-streaming.js";
 import {
   saveConversationMessage,
   saveTelegramInboundMessage,
@@ -167,14 +168,50 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
         imageBase64,
       });
 
-      const responseText = operatorResult.text.trim() || "No pude preparar una respuesta útil.";
+      let responseText = "";
+      let telegramMessageId: number | null = null;
 
-      const telegramResponse = await sendTelegramTextMessage({
-        botToken: config.TELEGRAM_BOT_TOKEN,
-        chatId: message.chat.id,
-        text: responseText,
-        replyToMessageId: message.message_id,
-      });
+      if (operatorResult.kind === "chat") {
+        const thinkingMessageId = await sendThinkingMessage(
+          message.chat.id,
+          config.TELEGRAM_BOT_TOKEN,
+          message.message_id
+        );
+
+        if (thinkingMessageId) {
+          telegramMessageId = thinkingMessageId;
+          responseText = await streamTelegramResponse({
+            chatId: message.chat.id,
+            messageId: thinkingMessageId,
+            botToken: config.TELEGRAM_BOT_TOKEN,
+            prompt: operatorResult.prompt,
+            systemPrompt: operatorResult.systemPrompt,
+            imageUrl: imageBase64,
+          });
+        } else {
+          responseText = await renderOperatorChatReply({
+            systemPrompt: operatorResult.systemPrompt,
+            prompt: operatorResult.prompt,
+            imageBase64,
+          });
+          const telegramResponse = await sendTelegramTextMessage({
+            botToken: config.TELEGRAM_BOT_TOKEN,
+            chatId: message.chat.id,
+            text: responseText,
+            replyToMessageId: message.message_id,
+          });
+          telegramMessageId = telegramResponse.message_id;
+        }
+      } else {
+        responseText = operatorResult.text.trim() || "No pude preparar una respuesta útil.";
+        const telegramResponse = await sendTelegramTextMessage({
+          botToken: config.TELEGRAM_BOT_TOKEN,
+          chatId: message.chat.id,
+          text: responseText,
+          replyToMessageId: message.message_id,
+        });
+        telegramMessageId = telegramResponse.message_id;
+      }
 
       await saveConversationMessage({
         conversationId,
@@ -183,8 +220,8 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
         messageType: "text",
         textBody: responseText,
         payload: {
-          source: "telegram-operator",
-          telegramMessageId: telegramResponse.message_id,
+          source: operatorResult.kind === "chat" ? "telegram-stream" : "telegram-operator",
+          telegramMessageId: telegramMessageId,
         },
       });
 
@@ -192,7 +229,8 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
         {
           chatId: message.chat.id,
           inboundMessageId: inbound.id,
-          outboundTelegramMessageId: telegramResponse.message_id,
+          outboundTelegramMessageId: telegramMessageId,
+          streamed: operatorResult.kind === "chat",
         },
         "Telegram operator reply sent"
       );

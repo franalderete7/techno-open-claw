@@ -216,7 +216,9 @@ type PreparedMutation = {
   payload: Record<string, unknown>;
 };
 
-type OperatorMessageResult = { kind: "reply"; text: string };
+type OperatorMessageResult =
+  | { kind: "reply"; text: string }
+  | { kind: "chat"; systemPrompt: string; prompt: string };
 
 type ReadCommandName =
   | "help"
@@ -474,6 +476,30 @@ async function generateChatReply(params: {
   return raw.response.trim();
 }
 
+export async function renderOperatorChatReply(params: {
+  systemPrompt: string;
+  prompt: string;
+  imageBase64?: string;
+}) {
+  return generateChatReply(params);
+}
+
+const OPERATOR_SCHEMA_GUIDE = [
+  "Operational schema contract:",
+  "- public.products stores catalog rows. Stable refs: id, sku, slug. Required for creation: sku and title. Common editable fields: brand, model, title, description, condition, active, price_amount, currency_code, category, cost_usd, logistics_usd, total_cost_usd, margin_pct, price_usd, promo_price_ars, bancarizada_total, bancarizada_cuota, bancarizada_interest, macro_total, macro_cuota, macro_interest, cuotas_qty, in_stock, delivery_type, delivery_days, usd_rate, image_url, ram_gb, storage_gb, network, color, battery_health.",
+  "- public.stock_units stores physical inventory. Stable refs: id, serial_number. Required for creation: product_ref. Common editable fields: serial_number, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, sold_at, metadata.",
+  "- public.settings stores key/value configuration. Stable ref: key. update_setting requires key and value. delete_setting removes the key.",
+  "- public.customers stores operator and customer contacts. Stable refs: id, external_ref, phone, email. create_customer requires at least one of external_ref, phone, or email.",
+  "- public.conversations stores thread headers by channel_thread_key. public.messages stores the actual interaction timeline. Each Telegram inbound and outbound message is saved in public.messages.",
+  "- public.operator_confirmations stores pending write actions that require CONFIRM <TOKEN> or CANCEL <TOKEN>.",
+  "- public.audit_logs stores executed mutations and important operator actions.",
+  "- public.orders and public.order_items store commercial orders. They are readable in the operator chat even if writes are not yet exposed there.",
+  "Mutation rules:",
+  "- Never invent IDs or hidden fields.",
+  "- Use product_ref, stock_ref, customer_ref, and setting key exactly from the operator request until deterministic resolution happens.",
+  "- Never claim a row was created, updated, or deleted unless the deterministic command layer executed it.",
+].join("\n");
+
 function buildDraftPrompts(params: {
   text: string;
   imageBase64?: string;
@@ -481,6 +507,8 @@ function buildDraftPrompts(params: {
 }) {
   const systemPrompt = [
     "You are OpenClaw, the Telegram operator model for TechnoStore Ops.",
+    "You know the actual PostgreSQL public schema at the operational level summarized below.",
+    OPERATOR_SCHEMA_GUIDE,
     "Convert the operator request into a strict JSON decision for the automation flow.",
     "Return JSON only. No prose. No markdown.",
     "Allowed read commands: help, health_check, list_workflows, list_products, list_stock, list_settings, list_customers, list_orders, list_conversations.",
@@ -1458,7 +1486,8 @@ function buildChatPrompts(params: {
     "You are the trusted operator assistant for TechnoStore Ops.",
     "Respond in the same language the operator uses.",
     "Be concise, exact, and technical when needed.",
-    "You know the app entities: products, stock units, settings, customers, conversations, orders, audit logs, Telegram, and n8n.",
+    "You know the operator schema contract below and should answer like an internal system operator, not like a generic chatbot.",
+    OPERATOR_SCHEMA_GUIDE,
     "You must never claim a mutation happened unless the deterministic command layer executed it.",
     "If the user asks for a mutation but there is not enough information, ask for the missing field or exact reference.",
     "Current live snapshot:",
@@ -1513,16 +1542,7 @@ export async function handleTelegramOperatorMessage(actor: ActorContext): Promis
     });
   } catch {
     const chat = buildChatPrompts({ actor, snapshot: start.snapshot });
-    const replyText = await generateChatReply({
-      systemPrompt: chat.systemPrompt,
-      prompt: chat.prompt,
-      imageBase64: actor.imageBase64,
-    });
-
-    return {
-      kind: "reply",
-      text: replyText || "No pude preparar una respuesta útil.",
-    };
+    return { kind: "chat", ...chat };
   }
 
   return resolveTelegramOperatorDraft(actor, draft, start.snapshot);
@@ -1571,27 +1591,13 @@ export async function resolveTelegramOperatorDraft(
   }
 
   if (draft.mode === "chat") {
-    if (draft.reply?.trim()) {
-      return { kind: "reply", text: draft.reply.trim() };
-    }
-
     const chat = buildChatPrompts({ actor, snapshot: liveSnapshot });
-    const replyText = await generateChatReply({
-      systemPrompt: chat.systemPrompt,
-      prompt: chat.prompt,
-      imageBase64: actor.imageBase64,
-    });
-    return { kind: "reply", text: replyText || "No pude preparar una respuesta útil." };
+    return { kind: "chat", ...chat };
   }
 
   if (!draft.command) {
     const chat = buildChatPrompts({ actor, snapshot: liveSnapshot });
-    const replyText = await generateChatReply({
-      systemPrompt: chat.systemPrompt,
-      prompt: chat.prompt,
-      imageBase64: actor.imageBase64,
-    });
-    return { kind: "reply", text: replyText || "No pude preparar una respuesta útil." };
+    return { kind: "chat", ...chat };
   }
 
   const params = draft.params || {};
