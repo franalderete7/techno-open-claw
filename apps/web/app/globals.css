@@ -447,6 +447,18 @@ nav a:hover {
   align-items: start;
 }
 
+.product-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.product-header-row {
+  display: grid;
+  gap: 14px;
+  align-items: start;
+}
+
 .product-thumb {
   display: grid;
   place-items: center;
@@ -506,7 +518,6 @@ nav a:hover {
   display: grid;
   gap: 12px;
   align-content: start;
-  grid-column: 1 / -1;
 }
 
 .price-stack {
@@ -597,12 +608,13 @@ nav a:hover {
 .product-section-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
 .product-section-card {
   display: grid;
   gap: 10px;
+  align-content: start;
 }
 
 .product-field-grid {
@@ -1358,6 +1370,10 @@ nav a:hover {
     grid-template-columns: 1fr;
   }
 
+  .product-section-grid {
+    grid-template-columns: 1fr;
+  }
+
   .setting-entry-head {
     flex-direction: column;
   }
@@ -1378,12 +1394,13 @@ nav a:hover {
   }
 
   .product-card {
-    grid-template-columns: 96px minmax(0, 1fr) 172px;
+    grid-template-columns: 96px minmax(0, 1fr);
     gap: 16px;
   }
 
-  .product-side {
-    grid-column: auto;
+  .product-header-row {
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 18px;
   }
 
   .price-stack {

@@ -217,58 +217,62 @@ export function ProductsExplorer({ items }: ProductsExplorerProps) {
                   <ProductThumbnail product={product} />
                 </div>
 
-                <div className="product-main">
-                  <div>
-                    <p className="catalog-kicker">{product.brand}</p>
-                    <h3 className="product-heading">{product.title}</h3>
-                    <p className="product-subline">{product.model}</p>
-                  </div>
+                <div className="product-body">
+                  <div className="product-header-row">
+                    <div className="product-main">
+                      <div>
+                        <p className="catalog-kicker">{product.brand}</p>
+                        <h3 className="product-heading">{product.title}</h3>
+                        <p className="product-subline">{product.model}</p>
+                      </div>
 
-                  <div className="chip-row">
-                    <span className="chip accent mono">{product.sku}</span>
-                    <span className="chip mono">{product.slug}</span>
-                    <span className={`chip ${product.active ? "good" : "warn"}`}>
-                      {product.active ? "Active" : "Inactive"}
-                    </span>
-                    <span className={`chip ${product.in_stock ? "good" : "danger"}`}>
-                      {product.in_stock ? "In stock" : "Out"}
-                    </span>
-                    {product.ram_gb ? <span className="chip">{product.ram_gb}GB RAM</span> : null}
-                    {product.storage_gb ? <span className="chip">{product.storage_gb}GB</span> : null}
-                    {product.network ? <span className="chip">{product.network.toUpperCase()}</span> : null}
-                    {product.color ? <span className="chip">{product.color}</span> : null}
-                  </div>
+                      <div className="chip-row">
+                        <span className="chip accent mono">{product.sku}</span>
+                        <span className="chip mono">{product.slug}</span>
+                        <span className={`chip ${product.active ? "good" : "warn"}`}>
+                          {product.active ? "Active" : "Inactive"}
+                        </span>
+                        <span className={`chip ${product.in_stock ? "good" : "danger"}`}>
+                          {product.in_stock ? "In stock" : "Out"}
+                        </span>
+                        {product.ram_gb ? <span className="chip">{product.ram_gb}GB RAM</span> : null}
+                        {product.storage_gb ? <span className="chip">{product.storage_gb}GB</span> : null}
+                        {product.network ? <span className="chip">{product.network.toUpperCase()}</span> : null}
+                        {product.color ? <span className="chip">{product.color}</span> : null}
+                      </div>
 
-                  {product.description ? <p className="product-copy">{product.description}</p> : null}
-                </div>
-
-                <div className="product-side">
-                  <div className="price-stack">
-                    <span>Promo</span>
-                    <strong>{formatMoney(product.promo_price_ars ?? product.price_amount, product.currency_code)}</strong>
-                    {product.promo_price_ars && product.price_amount && product.promo_price_ars !== product.price_amount ? (
-                      <span className="price-note">List {formatMoney(product.price_amount, product.currency_code)}</span>
-                    ) : (
-                      <span className="price-note">Updated {formatDate(product.updated_at)}</span>
-                    )}
-                  </div>
-
-                  <div className="metric-grid">
-                    <div className="metric">
-                      <span className="metric-label">Available</span>
-                      <strong className="metric-value">{product.stock_units_available}</strong>
+                      {product.description ? <p className="product-copy">{product.description}</p> : null}
                     </div>
-                    <div className="metric">
-                      <span className="metric-label">Total</span>
-                      <strong className="metric-value">{product.stock_units_total}</strong>
-                    </div>
-                    <div className="metric">
-                      <span className="metric-label">Sold</span>
-                      <strong className="metric-value">{product.stock_units_sold}</strong>
-                    </div>
-                    <div className="metric">
-                      <span className="metric-label">USD</span>
-                      <strong className="metric-value">{product.price_usd == null ? "-" : `$${product.price_usd}`}</strong>
+
+                    <div className="product-side">
+                      <div className="price-stack">
+                        <span>Promo</span>
+                        <strong>{formatMoney(product.promo_price_ars ?? product.price_amount, product.currency_code)}</strong>
+                        {product.promo_price_ars && product.price_amount && product.promo_price_ars !== product.price_amount ? (
+                          <span className="price-note">List {formatMoney(product.price_amount, product.currency_code)}</span>
+                        ) : (
+                          <span className="price-note">Updated {formatDate(product.updated_at)}</span>
+                        )}
+                      </div>
+
+                      <div className="metric-grid">
+                        <div className="metric">
+                          <span className="metric-label">Available</span>
+                          <strong className="metric-value">{product.stock_units_available}</strong>
+                        </div>
+                        <div className="metric">
+                          <span className="metric-label">Total</span>
+                          <strong className="metric-value">{product.stock_units_total}</strong>
+                        </div>
+                        <div className="metric">
+                          <span className="metric-label">Sold</span>
+                          <strong className="metric-value">{product.stock_units_sold}</strong>
+                        </div>
+                        <div className="metric">
+                          <span className="metric-label">USD</span>
+                          <strong className="metric-value">{product.price_usd == null ? "-" : `$${product.price_usd}`}</strong>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
