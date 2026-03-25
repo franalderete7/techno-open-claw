@@ -5,6 +5,7 @@ import type { PoolClient, QueryResultRow } from "pg";
 import { z } from "zod";
 import { pool, query } from "./db.js";
 import { ollamaGenerate } from "./ollama.js";
+import { buildOperatorHelpText, buildOperatorSkillGuide, buildOperatorSkillListText } from "./operator-skills.js";
 
 const exec = promisify(execCallback);
 
@@ -166,11 +167,24 @@ const listConversationsSchema = z.object({
   query: z.string().trim().optional(),
 });
 
+const listOperatorSkillsSchema = z.object({});
+
+const bulkUpdateProductsSchema = z.object({
+  product_refs: z.array(z.string().trim().min(1)).min(1).max(24),
+  changes: updateProductSchema.shape.changes,
+});
+
+const bulkUpdateStockSchema = z.object({
+  stock_refs: z.array(z.string().trim().min(1)).min(1).max(24),
+  changes: updateStockSchema.shape.changes,
+});
+
 export const draftSchema = z.object({
   mode: z.enum(["read", "write", "clarify", "chat"]),
   command: z
     .enum([
       "help",
+      "list_operator_skills",
       "health_check",
       "list_workflows",
       "list_products",
@@ -181,9 +195,11 @@ export const draftSchema = z.object({
       "list_conversations",
       "create_product",
       "update_product",
+      "bulk_update_products",
       "delete_product",
       "create_stock_unit",
       "update_stock_unit",
+      "bulk_update_stock_units",
       "update_setting",
       "delete_setting",
       "create_customer",
@@ -227,6 +243,7 @@ type OperatorMessageResult =
 
 type ReadCommandName =
   | "help"
+  | "list_operator_skills"
   | "health_check"
   | "list_workflows"
   | "list_products"
@@ -239,9 +256,11 @@ type ReadCommandName =
 type WriteCommandName =
   | "create_product"
   | "update_product"
+  | "bulk_update_products"
   | "delete_product"
   | "create_stock_unit"
   | "update_stock_unit"
+  | "bulk_update_stock_units"
   | "update_setting"
   | "delete_setting"
   | "create_customer"
@@ -509,6 +528,8 @@ const OPERATOR_SCHEMA_GUIDE = [
   "- Never claim a row was created, updated, or deleted unless the deterministic command layer executed it.",
 ].join("\n");
 
+const OPERATOR_SKILL_GUIDE = buildOperatorSkillGuide();
+
 function buildDraftPrompts(params: {
   text: string;
   imageBase64?: string;
@@ -519,10 +540,11 @@ function buildDraftPrompts(params: {
     "You are OpenClaw, the Telegram operator model for TechnoStore Ops.",
     "You know the actual PostgreSQL public schema at the operational level summarized below.",
     OPERATOR_SCHEMA_GUIDE,
+    OPERATOR_SKILL_GUIDE,
     "Convert the operator request into a strict JSON decision for the automation flow.",
     "Return JSON only. No prose. No markdown.",
-    "Allowed read commands: help, health_check, list_workflows, list_products, list_stock, list_settings, list_customers, list_orders, list_conversations.",
-    "Allowed write commands: create_product, update_product, delete_product, create_stock_unit, update_stock_unit, update_setting, delete_setting, create_customer, update_customer.",
+    "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, list_stock, list_settings, list_customers, list_orders, list_conversations.",
+    "Allowed write commands: create_product, update_product, bulk_update_products, delete_product, create_stock_unit, update_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
     "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
     "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
     "Never invent IDs. Keep product_ref, stock_ref, customer_ref and setting keys as plain text from the user's request.",
@@ -784,26 +806,10 @@ async function storeConfirmation(actor: ActorContext, prepared: PreparedMutation
 async function executeReadCommand(command: ReadCommandName, params: Record<string, unknown>) {
   switch (command) {
     case "help":
-      return [
-        "TechnoStore Ops via Telegram",
-        "",
-        "Consultas:",
-        "• workflows",
-        "• productos",
-        "• stock",
-        "• settings",
-        "• clientes",
-        "• conversaciones",
-        "• orders",
-        "",
-        "Mutaciones seguras:",
-        "• crear / editar / borrar producto",
-        "• crear / editar stock",
-        "• editar / borrar setting",
-        "• crear / editar cliente",
-        "",
-        "Toda mutación requiere CONFIRM <TOKEN>.",
-      ].join("\n");
+      return buildOperatorHelpText();
+    case "list_operator_skills":
+      listOperatorSkillsSchema.parse(params);
+      return buildOperatorSkillListText();
     case "health_check": {
       const snapshot = await buildOperatorSnapshot();
       return [
@@ -1036,6 +1042,27 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
         },
       };
     }
+    case "bulk_update_products": {
+      const parsed = bulkUpdateProductsSchema.parse(rawParams);
+      const resolved = await Promise.all(parsed.product_refs.map((productRef) => resolveProduct(productRef)));
+      const uniqueProducts = Array.from(new Map(resolved.map((product) => [product.id, product])).values());
+
+      return {
+        command,
+        summary: [
+          `Actualizar ${uniqueProducts.length} productos`,
+          `• Productos: ${uniqueProducts.map((product) => product.sku).join(", ")}`,
+          `• Cambios: ${Object.entries(parsed.changes)
+            .map(([key, value]) => `${key}=${formatJsonPreview(value)}`)
+            .join(", ")}`,
+        ].join("\n"),
+        payload: {
+          product_ids: uniqueProducts.map((product) => product.id),
+          skus: uniqueProducts.map((product) => product.sku),
+          changes: parsed.changes,
+        },
+      };
+    }
     case "delete_product": {
       const parsed = deleteProductSchema.parse(rawParams);
       const product = await resolveProduct(parsed.product_ref);
@@ -1098,6 +1125,38 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
         payload: {
           stock_unit_id: stock.id,
           current_sku: stock.sku,
+          changes: parsed.changes,
+          product_id: nextProductId,
+          next_sku: nextSku,
+        },
+      };
+    }
+    case "bulk_update_stock_units": {
+      const parsed = bulkUpdateStockSchema.parse(rawParams);
+      const resolved = await Promise.all(parsed.stock_refs.map((stockRef) => resolveStock(stockRef)));
+      const uniqueStock = Array.from(new Map(resolved.map((stock) => [stock.id, stock])).values());
+      let nextProductId: number | null = null;
+      let nextSku: string | null = null;
+
+      if (parsed.changes.product_ref) {
+        const product = await resolveProduct(parsed.changes.product_ref);
+        nextProductId = product.id;
+        nextSku = product.sku;
+      }
+
+      return {
+        command,
+        summary: [
+          `Actualizar ${uniqueStock.length} unidades de stock`,
+          `• Referencias: ${uniqueStock
+            .map((stock) => stock.serial_number || stock.imei_1 || stock.imei_2 || `#${stock.id}`)
+            .join(", ")}`,
+          `• Cambios: ${Object.entries(parsed.changes)
+            .map(([key, value]) => `${key}=${formatJsonPreview(value)}`)
+            .join(", ")}`,
+        ].join("\n"),
+        payload: {
+          stock_unit_ids: uniqueStock.map((stock) => stock.id),
           changes: parsed.changes,
           product_id: nextProductId,
           next_sku: nextSku,
@@ -1256,6 +1315,32 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       await writeAudit(client, actor, "telegram.product.updated", "product", String(product.id), parsed.changes);
       return `Producto actualizado.\n• ID: ${product.id}\n• SKU: ${product.sku}\n• Título: ${product.title}`;
     }
+    case "bulk_update_products": {
+      const parsed = z
+        .object({
+          product_ids: z.array(z.coerce.number().int().positive()).min(1),
+          skus: z.array(z.string()).min(1),
+          changes: updateProductSchema.shape.changes,
+        })
+        .parse(payload);
+
+      const entries = Object.entries(parsed.changes);
+      const sql = entries.map(([key], index) => `${key} = $${index + 1}`).join(", ");
+      const values = entries.map(([, value]) => value);
+      const result = await client.query<{ id: number; sku: string }>(
+        `update public.products set ${sql} where id = any($${values.length + 1}::bigint[]) returning id, sku`,
+        [...values, parsed.product_ids]
+      );
+
+      for (const row of result.rows) {
+        await writeAudit(client, actor, "telegram.product.bulk_updated", "product", String(row.id), parsed.changes);
+      }
+
+      return [
+        `Productos actualizados: ${result.rowCount ?? result.rows.length}`,
+        ...result.rows.map((row) => `• ${row.sku}`),
+      ].join("\n");
+    }
     case "delete_product": {
       const parsed = z
         .object({
@@ -1346,6 +1431,38 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       const stockUnit = result.rows[0];
       await writeAudit(client, actor, "telegram.stock.updated", "stock_unit", String(stockUnit.id), nextChanges);
       return `Unidad actualizada.\n• Stock ID: ${stockUnit.id}\n• Estado: ${stockUnit.status}`;
+    }
+    case "bulk_update_stock_units": {
+      const parsed = z
+        .object({
+          stock_unit_ids: z.array(z.coerce.number().int().positive()).min(1),
+          changes: updateStockSchema.shape.changes,
+          product_id: z.coerce.number().int().positive().nullable().optional(),
+        })
+        .parse(payload);
+
+      const nextChanges = { ...parsed.changes } as Record<string, unknown>;
+      delete nextChanges.product_ref;
+      if (parsed.product_id != null) {
+        nextChanges.product_id = parsed.product_id;
+      }
+
+      const entries = Object.entries(nextChanges);
+      const sql = entries.map(([key], index) => `${key} = $${index + 1}`).join(", ");
+      const values = entries.map(([, value]) => value);
+      const result = await client.query<{ id: number; status: string }>(
+        `update public.stock_units set ${sql} where id = any($${values.length + 1}::bigint[]) returning id, status`,
+        [...values, parsed.stock_unit_ids]
+      );
+
+      for (const row of result.rows) {
+        await writeAudit(client, actor, "telegram.stock.bulk_updated", "stock_unit", String(row.id), nextChanges);
+      }
+
+      return [
+        `Unidades actualizadas: ${result.rowCount ?? result.rows.length}`,
+        ...result.rows.map((row) => `• #${row.id} · ${row.status}`),
+      ].join("\n");
     }
     case "update_setting": {
       const parsed = updateSettingSchema.parse(payload);
@@ -1519,6 +1636,7 @@ function buildChatPrompts(params: {
     "Be concise, exact, and technical when needed.",
     "You know the operator schema contract below and should answer like an internal system operator, not like a generic chatbot.",
     OPERATOR_SCHEMA_GUIDE,
+    OPERATOR_SKILL_GUIDE,
     "You must never claim a mutation happened unless the deterministic command layer executed it.",
     "If the user asks for a mutation but there is not enough information, ask for the missing field or exact reference.",
     "Current live snapshot:",
@@ -1546,6 +1664,10 @@ function parseQuickReadCommand(text: string): { command: ReadCommandName; params
 
   if (trimmed === "/help" || trimmed === "help" || trimmed === "ayuda") {
     return { command: "help", params: {} };
+  }
+
+  if (trimmed === "skills" || trimmed === "skill" || trimmed === "capacidades" || trimmed === "habilidades") {
+    return { command: "list_operator_skills", params: {} };
   }
 
   if (trimmed === "/health" || trimmed === "health" || trimmed === "status" || trimmed === "estado") {
@@ -1639,6 +1761,7 @@ export async function startTelegramOperatorTurn(actor: ActorContext): Promise<Op
   const prompts = buildDraftPrompts({
     text: actor.userMessage,
     imageBase64: actor.imageBase64,
+    attachedImageUrl: actor.attachedImageUrl,
     snapshot,
   });
 
@@ -1673,23 +1796,30 @@ export async function resolveTelegramOperatorDraft(
 
   const params = applyAttachedImageDefaults(actor, draft.command, draft.params || {});
 
-  if (draft.mode === "read") {
+  try {
+    if (draft.mode === "read") {
+      return {
+        kind: "reply",
+        text: await executeReadCommand(draft.command as ReadCommandName, params),
+      };
+    }
+
+    const prepared = await prepareWriteCommand(draft.command as WriteCommandName, params);
+    const token = await storeConfirmation(actor, prepared);
+
     return {
       kind: "reply",
-      text: await executeReadCommand(draft.command as ReadCommandName, params),
+      text: [
+        prepared.summary,
+        "",
+        `Confirmá con: CONFIRM ${token}`,
+        `Cancelá con: CANCEL ${token}`,
+      ].join("\n"),
+    };
+  } catch (error) {
+    return {
+      kind: "reply",
+      text: error instanceof Error ? error.message : "No pude preparar esa acción. Revisá la referencia y los campos.",
     };
   }
-
-  const prepared = await prepareWriteCommand(draft.command as WriteCommandName, params);
-  const token = await storeConfirmation(actor, prepared);
-
-  return {
-    kind: "reply",
-    text: [
-      prepared.summary,
-      "",
-      `Confirmá con: CONFIRM ${token}`,
-      `Cancelá con: CANCEL ${token}`,
-    ].join("\n"),
-  };
 }

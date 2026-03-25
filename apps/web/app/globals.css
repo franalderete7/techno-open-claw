@@ -166,6 +166,10 @@ nav a:hover {
   gap: 18px;
 }
 
+.storefront-section {
+  scroll-margin-top: 110px;
+}
+
 .storefront-navbar {
   position: sticky;
   top: 12px;
@@ -447,7 +451,7 @@ nav a:hover {
 .storefront-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .storefront-card {
@@ -569,10 +573,15 @@ nav a:hover {
 
 .storefront-card-footer {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   margin-top: auto;
   padding-top: 14px;
   border-top: 0.5px solid var(--line);
+}
+
+.storefront-card-action-stack {
+  display: grid;
+  gap: 14px;
 }
 
 .storefront-price-stack {
@@ -651,13 +660,19 @@ nav a:hover {
   flex: 0 0 auto;
 }
 
-.storefront-load-more {
+.storefront-pagination {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  padding: 2px 0 0;
+}
+
+.storefront-pagination-actions {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 2px 0 0;
 }
 
 .storefront-load-more-copy {
@@ -2040,6 +2055,10 @@ nav a:hover {
   .storefront-location-details {
     grid-template-columns: 1fr;
   }
+
+  .storefront-pagination-actions {
+    width: 100%;
+  }
 }
 
 @media (min-width: 860px) {
@@ -2078,14 +2097,9 @@ nav a:hover {
     align-items: end;
   }
 
-  .storefront-card-footer {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: end;
-  }
-
   .storefront-card-actions {
-    justify-items: end;
-    min-width: 240px;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+    align-items: center;
   }
 
   .storefront-location {

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { StorefrontProduct, StorefrontProfile } from "../../lib/storefront";
 
 type StorefrontCatalogProps = {
@@ -13,8 +13,7 @@ type StorefrontCatalogProps = {
   lead: string;
 };
 
-const INITIAL_BATCH_SIZE = 8;
-const BATCH_SIZE = 8;
+const PAGE_SIZE = 12;
 const FAQ_ITEMS = [
   {
     question: "Como funciona la compra?",
@@ -120,10 +119,9 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
   const [ramFilter, setRamFilter] = useState("all");
   const [storageFilter, setStorageFilter] = useState("all");
   const [sort, setSort] = useState("featured");
-  const [visibleCount, setVisibleCount] = useState(INITIAL_BATCH_SIZE);
+  const [page, setPage] = useState(1);
   const [pendingPayProductId, setPendingPayProductId] = useState<number | null>(null);
   const deferredQuery = useDeferredValue(query);
-  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const needle = deferredQuery.trim().toLowerCase();
 
   const ramOptions = useMemo(
@@ -192,34 +190,16 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
 
   useEffect(() => {
     startTransition(() => {
-      setVisibleCount(INITIAL_BATCH_SIZE);
+      setPage(1);
     });
   }, [availability, needle, products.length, ramFilter, sort, storageFilter]);
 
-  useEffect(() => {
-    const node = loadMoreRef.current;
-    if (!node || visibleCount >= filteredProducts.length) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-
-        startTransition(() => {
-          setVisibleCount((current) => Math.min(current + BATCH_SIZE, filteredProducts.length));
-        });
-      },
-      { rootMargin: "280px 0px" }
-    );
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [filteredProducts.length, visibleCount]);
-
   const availableCount = products.filter((product) => product.in_stock).length;
-  const visibleProducts = filteredProducts.slice(0, visibleCount);
-  const hasMoreProducts = visibleCount < filteredProducts.length;
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedProducts = filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const pageStart = filteredProducts.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredProducts.length);
   const generalWhatsAppUrl = buildWhatsAppUrl(
     store.whatsapp_url,
     "Hola! Quiero comprar un equipo en TechnoStore Salta."
@@ -228,6 +208,15 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
     store.whatsapp_url,
     "Hola! Quiero avanzar con un pago y recibir el link del equipo que elija."
   );
+
+  function goToPage(nextPage: number) {
+    const bounded = Math.max(1, Math.min(totalPages, nextPage));
+    setPage(bounded);
+
+    if (typeof window !== "undefined") {
+      document.getElementById("modelos")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
 
   async function handlePayNow(product: StorefrontProduct) {
     const fallbackUrl = buildProductPaymentFallbackUrl(store.whatsapp_url, product);
@@ -282,11 +271,11 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
         </div>
 
         <div className="storefront-navbar-actions">
+          <a href="#inicio" className="storefront-navbar-link">
+            Inicio
+          </a>
           <a href="#modelos" className="storefront-navbar-link">
             Equipos
-          </a>
-          <a href="#pago" className="storefront-navbar-link">
-            Pago simple
           </a>
           <a href="#preguntas" className="storefront-navbar-link">
             FAQ
@@ -297,7 +286,7 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
         </div>
       </header>
 
-      <section className="storefront-hero">
+      <section className="storefront-hero storefront-section" id="inicio">
         <div className="storefront-hero-copy">
           <div className="storefront-topline">
             <span className="eyebrow">{eyebrow}</span>
@@ -334,7 +323,7 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
         </aside>
       </section>
 
-      <section className="storefront-toolbar" id="modelos">
+      <section className="storefront-toolbar storefront-section" id="modelos">
         <label className="storefront-search">
           <span className="storefront-search-label">Buscar equipo</span>
           <input
@@ -405,7 +394,7 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
       ) : (
         <>
           <section className="storefront-grid">
-            {visibleProducts.map((product) => {
+            {pagedProducts.map((product) => {
               const consultUrl = buildProductConsultUrl(store.whatsapp_url, product);
               const specSummary = buildSpecSummary(product);
               const shouldShowDescription =
@@ -444,33 +433,35 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
                     {shouldShowDescription ? <p className="storefront-card-copy">{product.description}</p> : null}
 
                     <div className="storefront-card-footer">
-                      <div className="storefront-price-stack">
-                        <p className="storefront-price-label">Precio final</p>
-                        <strong className="storefront-price">{formatMoney(product.public_price_ars)}</strong>
-                        <p className="storefront-price-note">
-                          {product.delivery_days
-                            ? `Entrega estimada en ${product.delivery_days} días`
-                            : "Retiro o entrega coordinada"}
-                        </p>
-                      </div>
+                      <div className="storefront-card-action-stack">
+                        <div className="storefront-price-stack">
+                          <p className="storefront-price-label">Precio final</p>
+                          <strong className="storefront-price">{formatMoney(product.public_price_ars)}</strong>
+                          <p className="storefront-price-note">
+                            {product.delivery_days
+                              ? `Entrega estimada en ${product.delivery_days} días`
+                              : "Retiro o entrega coordinada"}
+                          </p>
+                        </div>
 
-                      <div className="storefront-card-actions">
-                        <button
-                          type="button"
-                          className="storefront-pay-button"
-                          disabled={!payEnabled || pendingPayProductId === product.id}
-                          onClick={() => void handlePayNow(product)}
-                        >
-                          {pendingPayProductId === product.id ? "Preparando..." : "Quiero pagarlo ahora"}
-                        </button>
-                        {consultUrl ? (
-                          <a className="storefront-secondary-button" href={consultUrl} target="_blank" rel="noreferrer">
-                            <WhatsAppIcon />
-                            Consultar
-                          </a>
-                        ) : null}
-                        <p className="storefront-card-action-note">Abrimos WhatsApp con este modelo ya cargado.</p>
+                        <div className="storefront-card-actions">
+                          <button
+                            type="button"
+                            className="storefront-pay-button"
+                            disabled={!payEnabled || pendingPayProductId === product.id}
+                            onClick={() => void handlePayNow(product)}
+                          >
+                            {pendingPayProductId === product.id ? "Preparando..." : "Quiero pagarlo ahora"}
+                          </button>
+                          {consultUrl ? (
+                            <a className="storefront-secondary-button" href={consultUrl} target="_blank" rel="noreferrer">
+                              <WhatsAppIcon />
+                              Consultar
+                            </a>
+                          ) : null}
+                        </div>
                       </div>
+                      <p className="storefront-card-action-note">Abrimos WhatsApp con este modelo ya cargado.</p>
                     </div>
                   </div>
                 </article>
@@ -478,26 +469,43 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
             })}
           </section>
 
-          <div ref={loadMoreRef} className="storefront-load-more" aria-hidden={!hasMoreProducts}>
-            {hasMoreProducts ? (
-              <>
-                <span className="storefront-load-more-copy">Seguimos mostrando más modelos a medida que avanzás.</span>
+          <div className="storefront-pagination">
+            <span className="storefront-load-more-copy">
+              Mostrando {pageStart}-{pageEnd} de {filteredProducts.length} equipos.
+            </span>
+            <div className="storefront-pagination-actions">
+              <button
+                type="button"
+                className="storefront-filter"
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage === 1}
+              >
+                Anterior
+              </button>
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
                 <button
+                  key={pageNumber}
                   type="button"
-                  className="storefront-filter"
-                  onClick={() => setVisibleCount((current) => Math.min(current + BATCH_SIZE, filteredProducts.length))}
+                  className={`storefront-filter ${pageNumber === currentPage ? "is-active" : ""}`}
+                  onClick={() => goToPage(pageNumber)}
                 >
-                  Cargar más
+                  {pageNumber}
                 </button>
-              </>
-            ) : (
-              <span className="storefront-load-more-copy">Mostrando {filteredProducts.length} equipos.</span>
-            )}
+              ))}
+              <button
+                type="button"
+                className="storefront-filter"
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={currentPage === totalPages}
+              >
+                Siguiente
+              </button>
+            </div>
           </div>
         </>
       )}
 
-      <section className="storefront-faq" id="preguntas">
+      <section className="storefront-faq storefront-section" id="preguntas">
         <div className="storefront-faq-copy">
           <span className="eyebrow">FAQ</span>
           <h2 className="storefront-location-title">Compra clara y directa.</h2>
@@ -517,7 +525,7 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
         </div>
       </section>
 
-      <section className="storefront-location" id="ubicacion">
+      <section className="storefront-location storefront-section" id="ubicacion">
         <div className="storefront-location-copy">
           <span className="eyebrow">Visitanos</span>
           <h2 className="storefront-location-title">Atención presencial en Salta</h2>

@@ -1,0 +1,364 @@
+type OperatorSkillDefinition = {
+  id: string;
+  label: string;
+  mode: "read" | "write";
+  entity: string;
+  summary: string;
+  requiredInputs: string[];
+  optionalInputs: string[];
+  guardrails: string[];
+  bulkSupport: "none" | "same-change-multi-row";
+  examples: string[];
+};
+
+const SKILLS: OperatorSkillDefinition[] = [
+  {
+    id: "help",
+    label: "Ayuda operatoria",
+    mode: "read",
+    entity: "system",
+    summary: "Resume lo que el bot puede hacer y como confirmar mutaciones.",
+    requiredInputs: [],
+    optionalInputs: [],
+    guardrails: ["No muta datos."],
+    bulkSupport: "none",
+    examples: ["ayuda", "que sabes hacer"],
+  },
+  {
+    id: "list_operator_skills",
+    label: "Listar skills",
+    mode: "read",
+    entity: "system",
+    summary: "Expone las capacidades operativas y sus reglas de uso.",
+    requiredInputs: [],
+    optionalInputs: [],
+    guardrails: ["No muta datos."],
+    bulkSupport: "none",
+    examples: ["skills", "capacidades del bot"],
+  },
+  {
+    id: "health_check",
+    label: "Estado del sistema",
+    mode: "read",
+    entity: "system",
+    summary: "Muestra volumen operativo basico: productos, stock, clientes, ordenes y conversaciones.",
+    requiredInputs: [],
+    optionalInputs: [],
+    guardrails: ["No muta datos."],
+    bulkSupport: "none",
+    examples: ["estado", "health"],
+  },
+  {
+    id: "list_products",
+    label: "Listar productos",
+    mode: "read",
+    entity: "products",
+    summary: "Busca productos por sku, titulo, marca o modelo.",
+    requiredInputs: [],
+    optionalInputs: ["query"],
+    guardrails: ["Solo lectura."],
+    bulkSupport: "none",
+    examples: ["productos samsung", "buscar s25 ultra"],
+  },
+  {
+    id: "create_product",
+    label: "Crear producto",
+    mode: "write",
+    entity: "products",
+    summary: "Crea una fila de catalogo. Idealmente con sku, title, brand, model, precio y image_url.",
+    requiredInputs: ["sku", "title"],
+    optionalInputs: [
+      "brand",
+      "model",
+      "description",
+      "price_amount",
+      "promo_price_ars",
+      "currency_code",
+      "category",
+      "image_url",
+      "ram_gb",
+      "storage_gb",
+      "network",
+      "color",
+      "delivery_type",
+      "delivery_days",
+      "in_stock",
+      "active",
+    ],
+    guardrails: [
+      "Si falta sku o title, pedir aclaracion.",
+      "No inventar precio ni imagen.",
+      "Si viene una imagen adjunta, puede usarse como image_url.",
+    ],
+    bulkSupport: "none",
+    examples: [
+      "crear producto sku xiaomi-15t-pro-12-512 titulo Xiaomi 15T Pro 12/512 precio 1159000",
+      "crear producto sku iphone-16-128 titulo iPhone 16 128 image_url https://...",
+    ],
+  },
+  {
+    id: "update_product",
+    label: "Editar producto",
+    mode: "write",
+    entity: "products",
+    summary: "Actualiza un producto existente usando product_ref por id, sku o slug.",
+    requiredInputs: ["product_ref", "changes"],
+    optionalInputs: [
+      "title",
+      "brand",
+      "model",
+      "description",
+      "price_amount",
+      "promo_price_ars",
+      "image_url",
+      "ram_gb",
+      "storage_gb",
+      "network",
+      "color",
+      "delivery_days",
+      "in_stock",
+      "active",
+    ],
+    guardrails: [
+      "Nunca inventar product_ref.",
+      "Si hay multiples coincidencias, detener y pedir referencia exacta.",
+      "Solo tocar campos mencionados por el operador.",
+    ],
+    bulkSupport: "none",
+    examples: [
+      "cambia el precio del samsung-s25-ultra-12-512 a 1799000",
+      "actualiza la imagen del iphone-16-128 con esta foto",
+    ],
+  },
+  {
+    id: "bulk_update_products",
+    label: "Edicion masiva de productos",
+    mode: "write",
+    entity: "products",
+    summary: "Aplica el mismo cambio a varios productos en una sola operacion.",
+    requiredInputs: ["product_refs[]", "changes"],
+    optionalInputs: ["promo_price_ars", "active", "delivery_days", "image_url", "category", "network"],
+    guardrails: [
+      "Todos los productos deben resolverse sin ambiguedad.",
+      "Un solo bloque de cambios compartido para todas las filas.",
+      "Toda la mutacion va con confirmacion previa.",
+    ],
+    bulkSupport: "same-change-multi-row",
+    examples: [
+      "subi 3 dias de entrega a iphone-16-128, iphone-16-256 y iphone-16-plus-128",
+      "desactiva samsung-a36-5g-8-256 y samsung-a07-4-128",
+    ],
+  },
+  {
+    id: "delete_product",
+    label: "Borrar producto",
+    mode: "write",
+    entity: "products",
+    summary: "Elimina un producto solo si no tiene stock asociado.",
+    requiredInputs: ["product_ref"],
+    optionalInputs: [],
+    guardrails: [
+      "Bloquear si el producto tiene stock.",
+      "Pedir confirmacion siempre.",
+    ],
+    bulkSupport: "none",
+    examples: ["borra el producto sku redmi-a5-4-128"],
+  },
+  {
+    id: "list_stock",
+    label: "Listar stock",
+    mode: "read",
+    entity: "stock_units",
+    summary: "Busca unidades por serial, imei, sku o titulo de producto.",
+    requiredInputs: [],
+    optionalInputs: ["query", "status"],
+    guardrails: ["Solo lectura."],
+    bulkSupport: "none",
+    examples: ["stock del s25 ultra", "buscar imei 356..."],
+  },
+  {
+    id: "create_stock_unit",
+    label: "Crear unidad de stock",
+    mode: "write",
+    entity: "stock_units",
+    summary: "Registra una unidad fisica vinculada a un producto.",
+    requiredInputs: ["product_ref"],
+    optionalInputs: [
+      "serial_number",
+      "imei_1",
+      "imei_2",
+      "status",
+      "location_code",
+      "cost_amount",
+      "currency_code",
+      "color",
+      "battery_health",
+      "metadata",
+    ],
+    guardrails: [
+      "Resolver producto exacto antes de crear.",
+      "Usar IMEI 1 e IMEI 2 para telefonos dual-SIM.",
+    ],
+    bulkSupport: "none",
+    examples: [
+      "crear stock para samsung-s25-ultra-12-512 imei1 123 imei2 456",
+      "crear unidad para iphone-16-128 serial SN001 location_code SALTA",
+    ],
+  },
+  {
+    id: "update_stock_unit",
+    label: "Editar unidad de stock",
+    mode: "write",
+    entity: "stock_units",
+    summary: "Actualiza una unidad por id, serial, imei o sku.",
+    requiredInputs: ["stock_ref", "changes"],
+    optionalInputs: ["status", "location_code", "imei_1", "imei_2", "serial_number", "cost_amount", "sold_at"],
+    guardrails: [
+      "Si el stock_ref es ambiguo, detener.",
+      "Solo editar campos pedidos por el operador.",
+    ],
+    bulkSupport: "none",
+    examples: ["marca como vendido el imei 356...", "mueve el stock 44 a local SALTA"],
+  },
+  {
+    id: "bulk_update_stock_units",
+    label: "Edicion masiva de stock",
+    mode: "write",
+    entity: "stock_units",
+    summary: "Aplica el mismo cambio a varias unidades de stock.",
+    requiredInputs: ["stock_refs[]", "changes"],
+    optionalInputs: ["status", "location_code", "sold_at", "cost_amount"],
+    guardrails: [
+      "Todas las unidades deben resolverse de forma exacta.",
+      "Un unico set de cambios por lote.",
+    ],
+    bulkSupport: "same-change-multi-row",
+    examples: [
+      "mueve a SALTA los stock 41, 42 y 43",
+      "marca como reserved los imei 123 y 456",
+    ],
+  },
+  {
+    id: "list_settings",
+    label: "Listar settings",
+    mode: "read",
+    entity: "settings",
+    summary: "Busca claves de configuracion por key.",
+    requiredInputs: [],
+    optionalInputs: ["query"],
+    guardrails: ["Solo lectura."],
+    bulkSupport: "none",
+    examples: ["settings store", "buscar whatsapp"],
+  },
+  {
+    id: "update_setting",
+    label: "Guardar setting",
+    mode: "write",
+    entity: "settings",
+    summary: "Crea o actualiza una key/value en settings.",
+    requiredInputs: ["key", "value"],
+    optionalInputs: ["description"],
+    guardrails: [
+      "No borrar ni sobreescribir store sin confirmacion consciente.",
+      "El value debe ser JSON valido.",
+    ],
+    bulkSupport: "none",
+    examples: ["setea store_whatsapp a 543875319940", "actualiza pricing_default_usd_rate a 1460"],
+  },
+  {
+    id: "delete_setting",
+    label: "Borrar setting",
+    mode: "write",
+    entity: "settings",
+    summary: "Elimina una key especifica de settings.",
+    requiredInputs: ["key"],
+    optionalInputs: [],
+    guardrails: [
+      "No borrar la key store.",
+      "Confirmacion obligatoria.",
+    ],
+    bulkSupport: "none",
+    examples: ["borra el setting customer_cards_blocked"],
+  },
+  {
+    id: "create_customer",
+    label: "Crear cliente",
+    mode: "write",
+    entity: "customers",
+    summary: "Crea un cliente con external_ref, telefono o email.",
+    requiredInputs: ["external_ref | phone | email"],
+    optionalInputs: ["first_name", "last_name", "notes"],
+    guardrails: ["Debe existir al menos un identificador externo."],
+    bulkSupport: "none",
+    examples: ["crear cliente Francisco Alderete telefono 387..."],
+  },
+  {
+    id: "update_customer",
+    label: "Editar cliente",
+    mode: "write",
+    entity: "customers",
+    summary: "Actualiza un cliente por id, telefono, email o external_ref.",
+    requiredInputs: ["customer_ref", "changes"],
+    optionalInputs: ["first_name", "last_name", "phone", "email", "notes"],
+    guardrails: ["Si hay varias coincidencias, pedir referencia exacta."],
+    bulkSupport: "none",
+    examples: ["actualiza el telefono del cliente 43 a 387..."],
+  },
+];
+
+function renderSkill(skill: OperatorSkillDefinition) {
+  return [
+    `${skill.id} (${skill.mode}, ${skill.entity})`,
+    `- ${skill.summary}`,
+    skill.requiredInputs.length > 0 ? `- required: ${skill.requiredInputs.join(", ")}` : "",
+    skill.optionalInputs.length > 0 ? `- optional: ${skill.optionalInputs.join(", ")}` : "",
+    skill.guardrails.length > 0 ? `- guardrails: ${skill.guardrails.join(" | ")}` : "",
+    skill.bulkSupport !== "none" ? `- bulk: ${skill.bulkSupport}` : "",
+    `- examples: ${skill.examples.join(" || ")}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function buildOperatorSkillGuide() {
+  return [
+    "Operator skill registry:",
+    "The model must choose only from the skills below.",
+    "Every write skill is deterministic, validated, and requires confirmation before execution.",
+    "If required inputs are missing, the model must ask only for the missing fields.",
+    "If a reference is ambiguous, the model must stop and ask for the exact sku / slug / id / serial / imei / key.",
+    ...SKILLS.map(renderSkill),
+  ].join("\n");
+}
+
+export function buildOperatorSkillListText() {
+  const sections = [
+    "Skills activas del bot:",
+    ...SKILLS.map((skill) => `• ${skill.id}: ${skill.summary}`),
+    "",
+    "Todas las mutaciones quedan sujetas a CONFIRM <TOKEN>.",
+  ];
+
+  return sections.join("\n");
+}
+
+export function buildOperatorHelpText() {
+  const reads = SKILLS.filter((skill) => skill.mode === "read").map((skill) => `• ${skill.id}`);
+  const writes = SKILLS.filter((skill) => skill.mode === "write").map((skill) => `• ${skill.id}`);
+
+  return [
+    "TechnoStore Ops via Telegram",
+    "",
+    "Lectura:",
+    ...reads,
+    "",
+    "Mutaciones seguras:",
+    ...writes,
+    "",
+    "Reglas:",
+    "• Todo write requiere CONFIRM <TOKEN>.",
+    "• Si falta un dato, el bot tiene que pedirlo.",
+    "• Si una referencia es ambigua, el bot se detiene.",
+    "• Los cambios masivos aplican el mismo cambio a varias filas.",
+  ].join("\n");
+}
