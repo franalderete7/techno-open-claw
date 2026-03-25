@@ -327,8 +327,8 @@
       }
     },
     {
-      "id": "needs-ai-draft",
-      "name": "Needs AI Draft?",
+      "id": "needs-ai",
+      "name": "Needs AI?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -344,7 +344,7 @@
           },
           "conditions": [
             {
-              "id": "needs-ai-draft-condition",
+              "id": "needs-ai-condition",
               "leftValue": "={{ $json.kind }}",
               "rightValue": "needs_ai",
               "operator": {
@@ -359,8 +359,8 @@
       }
     },
     {
-      "id": "ollama-draft",
-      "name": "Ollama Draft",
+      "id": "openclaw-turn",
+      "name": "OpenClaw Turn",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -369,7 +369,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.OLLAMA_BASE_URL.replace(/\\/$/, '') + '/api/generate' }}",
+        "url": "={{ ($env.OLLAMA_BASE_URL || '').replace(/\\/$/, '') + '/api/generate' }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3.5:cloud', stream: false, format: 'json', system: $('Run Operator Turn').first().json.draftSystemPrompt || '', prompt: $('Run Operator Turn').first().json.draftPrompt || '', images: $('Compose Operator Input').first().json.image_base64 ? [String($('Compose Operator Input').first().json.image_base64).split(',').pop()] : undefined, options: { temperature: 0.1, top_p: 0.9 } }) }}",
@@ -380,8 +380,8 @@
       "continueOnFail": true
     },
     {
-      "id": "parse-ai-draft",
-      "name": "Parse AI Draft",
+      "id": "parse-ai-decision",
+      "name": "Parse AI Decision",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -389,7 +389,48 @@
         120
       ],
       "parameters": {
-        "jsCode": "const raw = $('Ollama Draft').first().json || {};\nlet draft = { mode: 'chat' };\n\nif (typeof raw.response === 'string' && raw.response.trim()) {\n  try {\n    draft = JSON.parse(raw.response);\n  } catch (error) {\n    draft = { mode: 'chat' };\n  }\n}\n\nreturn [{ json: draft }];"
+        "jsCode": "const raw = $('OpenClaw Turn').first().json || {};\nlet draft = { mode: 'chat', reply: '' };\n\nif (typeof raw.response === 'string' && raw.response.trim()) {\n  try {\n    draft = JSON.parse(raw.response);\n  } catch (error) {\n    draft = { mode: 'chat', reply: '' };\n  }\n}\n\nreturn [{ json: draft }];"
+      }
+    },
+    {
+      "id": "needs-resolution",
+      "name": "Needs Draft Resolution?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2980,
+        120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "needs-resolution-condition-read",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "read",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "needs-resolution-condition-write",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "write",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
       }
     },
     {
@@ -398,8 +439,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2980,
-        120
+        3240,
+        20
       ],
       "parameters": {
         "method": "POST",
@@ -426,69 +467,16 @@
       }
     },
     {
-      "id": "needs-ai-chat",
-      "name": "Needs AI Chat?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        3240,
-        120
-      ],
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "needs-ai-chat-condition",
-              "leftValue": "={{ $json.kind }}",
-              "rightValue": "chat",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "ollama-chat",
-      "name": "Ollama Chat",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        3500,
-        20
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.OLLAMA_BASE_URL.replace(/\\/$/, '') + '/api/generate' }}",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3.5:cloud', stream: false, system: $('Resolve Operator Draft').first().json.systemPrompt || '', prompt: $('Resolve Operator Draft').first().json.prompt || '', options: { temperature: 0.2, top_p: 0.9 } }) }}",
-        "options": {
-          "timeout": 45000
-        }
-      },
-      "continueOnFail": true
-    },
-    {
       "id": "finalize-reply",
       "name": "Finalize Reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3760,
+        3500,
         220
       ],
       "parameters": {
-        "jsCode": "const start = $('Run Operator Turn').first().json || {};\nconst base = $('Compose Operator Input').first().json || {};\nlet resolved = {};\n\ntry {\n  resolved = $('Resolve Operator Draft').first().json || {};\n} catch (error) {}\n\nlet replyText = String(start.text || '').trim();\n\nif (start.kind === 'needs_ai') {\n  if (resolved.kind === 'chat') {\n    try {\n      const llm = $('Ollama Chat').first().json || {};\n      replyText = String(llm.response || '').trim();\n    } catch (error) {\n      replyText = '';\n    }\n  } else {\n    replyText = String(resolved.text || '').trim();\n  }\n}\n\nif (!replyText && start.kind === 'chat') {\n  try {\n    const llm = $('Ollama Chat').first().json || {};\n    replyText = String(llm.response || '').trim();\n  } catch (error) {\n    replyText = '';\n  }\n}\n\nif (!replyText) {\n  replyText = 'No pude preparar una respuesta útil. Revisá la ejecución en n8n.';\n}\n\nreturn [{\n  json: {\n    chat_id: Number(base.chat_id_number || 0),\n    reply_to_message_id: base.reply_to_message_id || null,\n    text: replyText.slice(0, 4000),\n    conversation_id: start.conversation_id || null,\n    payload: {\n      telegramChatId: base.chat_id || null,\n      inboundMessageId: start.inbound_message_id || null,\n      source: 'n8n-telegram-operator-v1',\n    },\n  },\n}];"
+        "jsCode": "const start = $('Run Operator Turn').first().json || {};\nconst base = $('Compose Operator Input').first().json || {};\nlet ai = {};\nlet resolved = {};\n\ntry {\n  ai = $('Parse AI Decision').first().json || {};\n} catch (error) {}\n\ntry {\n  resolved = $('Resolve Operator Draft').first().json || {};\n} catch (error) {}\n\nlet replyText = String(start.text || '').trim();\n\nif (start.kind === 'needs_ai') {\n  replyText = String(resolved.text || ai.reply || '').trim();\n}\n\nif (!replyText) {\n  replyText = 'No pude preparar una respuesta útil. Revisá la ejecución en n8n.';\n}\n\nreturn [{\n  json: {\n    chat_id: Number(base.chat_id_number || 0),\n    reply_to_message_id: base.reply_to_message_id || null,\n    text: replyText.slice(0, 4000),\n    conversation_id: start.conversation_id || null,\n    payload: {\n      telegramChatId: base.chat_id || null,\n      inboundMessageId: start.inbound_message_id || null,\n      source: 'n8n-telegram-operator-v1',\n    },\n  },\n}];"
       }
     },
     {
@@ -497,12 +485,12 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        4020,
+        3760,
         220
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/sendMessage' }}",
+        "url": "={{ 'https://api.telegram.org/bot' + ($env.TELEGRAM_BOT_TOKEN || '') + '/sendMessage' }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ chat_id: $json.chat_id, text: $json.text, reply_to_message_id: $json.reply_to_message_id || undefined }) }}",
@@ -517,7 +505,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4280,
+        4020,
         220
       ],
       "parameters": {
@@ -530,7 +518,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        4540,
+        4280,
         220
       ],
       "parameters": {
@@ -717,18 +705,18 @@
       "main": [
         [
           {
-            "node": "Needs AI Draft?",
+            "node": "Needs AI?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Needs AI Draft?": {
+    "Needs AI?": {
       "main": [
         [
           {
-            "node": "Ollama Draft",
+            "node": "OpenClaw Turn",
             "type": "main",
             "index": 0
           }
@@ -742,18 +730,29 @@
         ]
       ]
     },
-    "Ollama Draft": {
+    "OpenClaw Turn": {
       "main": [
         [
           {
-            "node": "Parse AI Draft",
+            "node": "Parse AI Decision",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Parse AI Draft": {
+    "Parse AI Decision": {
+      "main": [
+        [
+          {
+            "node": "Needs Draft Resolution?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Draft Resolution?": {
       "main": [
         [
           {
@@ -761,28 +760,6 @@
             "type": "main",
             "index": 0
           }
-        ]
-      ]
-    },
-    "Resolve Operator Draft": {
-      "main": [
-        [
-          {
-            "node": "Needs AI Chat?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Needs AI Chat?": {
-      "main": [
-        [
-          {
-            "node": "Ollama Chat",
-            "type": "main",
-            "index": 0
-          }
         ],
         [
           {
@@ -793,7 +770,7 @@
         ]
       ]
     },
-    "Ollama Chat": {
+    "Resolve Operator Draft": {
       "main": [
         [
           {

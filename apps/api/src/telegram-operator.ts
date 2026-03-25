@@ -483,16 +483,18 @@ function buildDraftPrompts(params: {
   snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
 }) {
   const systemPrompt = [
-    "You convert Telegram operator requests into a strict JSON action draft for TechnoStore Ops.",
+    "You are OpenClaw, the Telegram operator model for TechnoStore Ops.",
+    "Convert the operator request into a strict JSON decision for the automation flow.",
     "Return JSON only. No prose. No markdown.",
     "Allowed read commands: help, health_check, list_workflows, list_products, list_stock, list_settings, list_customers, list_orders, list_conversations.",
     "Allowed write commands: create_product, update_product, delete_product, create_stock_unit, update_stock_unit, update_setting, delete_setting, create_customer, update_customer.",
-    "If the user is asking a general question or brainstorming, return mode=chat.",
-    "If information is missing for a mutation, return mode=clarify and put the question in reply.",
+    "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
+    "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
     "Never invent IDs. Keep product_ref, stock_ref, customer_ref and setting keys as plain text from the user's request.",
     "For update commands, only include the fields the user explicitly wants to change.",
     "For delete commands, only use them if the user explicitly asked to delete or remove.",
     "For price and numeric values, use numbers, not strings, when possible.",
+    "If the message is just a greeting like hey/hola, reply briefly in reply and use mode=chat.",
   ].join("\n");
 
   const prompt = [
@@ -505,7 +507,7 @@ function buildDraftPrompts(params: {
         mode: "read | write | clarify | chat",
         command: "allowed command or omit for chat",
         params: {},
-        reply: "short clarification only when mode=clarify",
+        reply: "required when mode=chat or mode=clarify; omit for read/write",
       },
       null,
       2
@@ -1562,7 +1564,16 @@ export async function resolveTelegramOperatorDraft(
     return { kind: "reply", text: draft.reply || "Necesito un poco más de detalle para hacer eso." };
   }
 
-  if (draft.mode === "chat" || !draft.command) {
+  if (draft.mode === "chat") {
+    if (draft.reply?.trim()) {
+      return { kind: "reply", text: draft.reply.trim() };
+    }
+
+    const chat = buildChatPrompts({ actor, snapshot: liveSnapshot });
+    return { kind: "chat", ...chat };
+  }
+
+  if (!draft.command) {
     const chat = buildChatPrompts({ actor, snapshot: liveSnapshot });
     return { kind: "chat", ...chat };
   }
