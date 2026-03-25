@@ -402,6 +402,35 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     const textBody = String(body.message ?? body.text ?? "").trim() || null;
     const transcript = String(body.audio_transcription ?? "").trim() || null;
 
+    // ManyChat can occasionally deliver the same inbound event more than once
+    // within a very short window. Reuse the recent identical inbound row so the
+    // debounce RPC doesn't see the duplicate as a newer customer message.
+    if (direction === "inbound" && senderKind === "customer") {
+      const duplicateRows = await query<{ id: number; created_at: string }>(
+        `
+          select id, created_at
+          from public.messages
+          where conversation_id = $1
+            and direction = 'inbound'
+            and sender_kind = 'customer'
+            and message_type = $2
+            and text_body is not distinct from $3
+            and transcript is not distinct from $4
+            and created_at >= now() - interval '5 seconds'
+          order by created_at desc, id desc
+          limit 1
+        `,
+        [conversationId, messageType, textBody, transcript]
+      );
+
+      if (duplicateRows[0]) {
+        return reply.send({
+          id: duplicateRows[0].id,
+          conversation_id: conversationId,
+        });
+      }
+    }
+
     const rows = await query<{ id: number; created_at: string }>(
       `
         insert into public.messages (
