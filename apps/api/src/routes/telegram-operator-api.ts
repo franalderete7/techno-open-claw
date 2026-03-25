@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
-import { handleTelegramOperatorMessage } from "../telegram-operator.js";
+import { draftSchema, resolveTelegramOperatorDraft, startTelegramOperatorTurn } from "../telegram-operator.js";
 import { saveConversationMessage, upsertTelegramConversation, upsertTelegramCustomer } from "../telegram-storage.js";
 
 const inboundTurnSchema = z.object({
@@ -32,6 +32,15 @@ const outboundMessageSchema = z.object({
   payload: z.record(z.string(), z.unknown()).optional(),
 });
 
+const resolveDraftSchema = z.object({
+  actor_ref: z.string().trim().min(1),
+  chat_id: z.string().trim().min(1),
+  chat_id_number: z.coerce.number().int(),
+  user_id: z.string().trim().optional().nullable(),
+  user_message: z.string().trim().min(1),
+  draft: draftSchema,
+});
+
 export const telegramOperatorApiRoutes: FastifyPluginAsync = async (app) => {
   app.post("/v1/operator/telegram/turn", async (request) => {
     const body = inboundTurnSchema.parse(request.body);
@@ -61,7 +70,7 @@ export const telegramOperatorApiRoutes: FastifyPluginAsync = async (app) => {
       payload: body.payload ?? {},
     });
 
-    const result = await handleTelegramOperatorMessage({
+    const result = await startTelegramOperatorTurn({
       actorRef: body.actor_ref,
       chatId: body.chat_id,
       chatIdNumber: body.chat_id_number,
@@ -76,6 +85,21 @@ export const telegramOperatorApiRoutes: FastifyPluginAsync = async (app) => {
       conversation_id: conversationId,
       inbound_message_id: inboundMessageId,
     };
+  });
+
+  app.post("/v1/operator/telegram/draft", async (request) => {
+    const body = resolveDraftSchema.parse(request.body);
+
+    return resolveTelegramOperatorDraft(
+      {
+        actorRef: body.actor_ref,
+        chatId: body.chat_id,
+        chatIdNumber: body.chat_id_number,
+        userId: body.user_id ?? null,
+        userMessage: body.user_message,
+      },
+      body.draft
+    );
   });
 
   app.post("/v1/operator/telegram/messages", async (request) => {

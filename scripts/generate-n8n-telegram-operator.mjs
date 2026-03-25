@@ -380,12 +380,12 @@ return [{
         sendBody: true,
         specifyBody: "json",
         jsonBody: "={{ JSON.stringify($json) }}",
-        options: { timeout: 20000 },
+        options: { timeout: 10000 },
       },
     }),
     node({
-      id: "needs-ai",
-      name: "Needs AI Chat?",
+      id: "needs-ai-draft",
+      name: "Needs AI Draft?",
       type: "n8n-nodes-base.if",
       typeVersion: 2.2,
       position: [2200, 220],
@@ -394,7 +394,92 @@ return [{
           options: { caseSensitive: true, typeValidation: "strict", version: 2 },
           conditions: [
             {
-              id: "needs-ai-condition",
+              id: "needs-ai-draft-condition",
+              leftValue: "={{ $json.kind }}",
+              rightValue: "needs_ai",
+              operator: { type: "string", operation: "equals" },
+            },
+          ],
+          combinator: "and",
+        },
+        options: {},
+      },
+    }),
+    node({
+      id: "ollama-draft",
+      name: "Ollama Draft",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.2,
+      position: [2460, 120],
+      continueOnFail: true,
+      parameters: {
+        method: "POST",
+        url: "={{ $env.OLLAMA_BASE_URL.replace(/\\/$/, '') + '/api/generate' }}",
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3.5:cloud', stream: false, format: 'json', system: $('Run Operator Turn').first().json.draftSystemPrompt || '', prompt: $('Run Operator Turn').first().json.draftPrompt || '', images: $('Compose Operator Input').first().json.image_base64 ? [String($('Compose Operator Input').first().json.image_base64).split(',').pop()] : undefined, options: { temperature: 0.1, top_p: 0.9 } }) }}",
+        options: { timeout: 45000 },
+      },
+    }),
+    node({
+      id: "parse-ai-draft",
+      name: "Parse AI Draft",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [2720, 120],
+      parameters: {
+        jsCode: `
+const raw = $('Ollama Draft').first().json || {};
+let draft = { mode: 'chat' };
+
+if (typeof raw.response === 'string' && raw.response.trim()) {
+  try {
+    draft = JSON.parse(raw.response);
+  } catch (error) {
+    draft = { mode: 'chat' };
+  }
+}
+
+return [{ json: draft }];
+        `.trim(),
+      },
+    }),
+    node({
+      id: "resolve-draft",
+      name: "Resolve Operator Draft",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.2,
+      position: [2980, 120],
+      parameters: {
+        method: "POST",
+        url: "={{ $env.OPENCLAW_API_BASE_URL + '/v1/operator/telegram/draft' }}",
+        sendHeaders: true,
+        headerParameters: {
+          parameters: [
+            { name: "Authorization", value: "=Bearer {{ $env.OPENCLAW_API_TOKEN }}" },
+            { name: "Content-Type", value: "application/json" },
+          ],
+        },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          "={{ JSON.stringify({ actor_ref: $('Compose Operator Input').first().json.actor_ref, chat_id: $('Compose Operator Input').first().json.chat_id, chat_id_number: $('Compose Operator Input').first().json.chat_id_number, user_id: $('Compose Operator Input').first().json.user_id, user_message: $('Compose Operator Input').first().json.user_message, draft: $json }) }}",
+        options: { timeout: 15000 },
+      },
+    }),
+    node({
+      id: "needs-ai-chat",
+      name: "Needs AI Chat?",
+      type: "n8n-nodes-base.if",
+      typeVersion: 2.2,
+      position: [3240, 120],
+      parameters: {
+        conditions: {
+          options: { caseSensitive: true, typeValidation: "strict", version: 2 },
+          conditions: [
+            {
+              id: "needs-ai-chat-condition",
               leftValue: "={{ $json.kind }}",
               rightValue: "chat",
               operator: { type: "string", operation: "equals" },
@@ -406,11 +491,11 @@ return [{
       },
     }),
     node({
-      id: "ollama-generate",
-      name: "Ollama Generate",
+      id: "ollama-chat",
+      name: "Ollama Chat",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [2460, 120],
+      position: [3500, 20],
       continueOnFail: true,
       parameters: {
         method: "POST",
@@ -418,7 +503,7 @@ return [{
         sendBody: true,
         specifyBody: "json",
         jsonBody:
-          "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3.5:cloud', stream: false, system: $('Run Operator Turn').first().json.systemPrompt || '', prompt: $('Run Operator Turn').first().json.prompt || '', options: { temperature: 0.2, top_p: 0.9 } }) }}",
+          "={{ JSON.stringify({ model: $env.OLLAMA_MODEL || 'qwen3.5:cloud', stream: false, system: $('Resolve Operator Draft').first().json.systemPrompt || '', prompt: $('Resolve Operator Draft').first().json.prompt || '', options: { temperature: 0.2, top_p: 0.9 } }) }}",
         options: { timeout: 45000 },
       },
     }),
@@ -427,17 +512,35 @@ return [{
       name: "Finalize Reply",
       type: "n8n-nodes-base.code",
       typeVersion: 2,
-      position: [2720, 220],
+      position: [3760, 220],
       parameters: {
         jsCode: `
-const turn = $('Run Operator Turn').first().json || {};
+const start = $('Run Operator Turn').first().json || {};
 const base = $('Compose Operator Input').first().json || {};
+let resolved = {};
 
-let replyText = String(turn.text || '').trim();
+try {
+  resolved = $('Resolve Operator Draft').first().json || {};
+} catch (error) {}
 
-if (turn.kind === 'chat') {
+let replyText = String(start.text || '').trim();
+
+if (start.kind === 'needs_ai') {
+  if (resolved.kind === 'chat') {
+    try {
+      const llm = $('Ollama Chat').first().json || {};
+      replyText = String(llm.response || '').trim();
+    } catch (error) {
+      replyText = '';
+    }
+  } else {
+    replyText = String(resolved.text || '').trim();
+  }
+}
+
+if (!replyText && start.kind === 'chat') {
   try {
-    const llm = $('Ollama Generate').first().json || {};
+    const llm = $('Ollama Chat').first().json || {};
     replyText = String(llm.response || '').trim();
   } catch (error) {
     replyText = '';
@@ -453,10 +556,10 @@ return [{
     chat_id: Number(base.chat_id_number || 0),
     reply_to_message_id: base.reply_to_message_id || null,
     text: replyText.slice(0, 4000),
-    conversation_id: turn.conversation_id || null,
+    conversation_id: start.conversation_id || null,
     payload: {
       telegramChatId: base.chat_id || null,
-      inboundMessageId: turn.inbound_message_id || null,
+      inboundMessageId: start.inbound_message_id || null,
       source: 'n8n-telegram-operator-v1',
     },
   },
@@ -469,7 +572,7 @@ return [{
       name: "Send Telegram Message",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [2980, 220],
+      position: [4020, 220],
       parameters: {
         method: "POST",
         url: "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/sendMessage' }}",
@@ -485,7 +588,7 @@ return [{
       name: "Build Outbound Save",
       type: "n8n-nodes-base.code",
       typeVersion: 2,
-      position: [3240, 220],
+      position: [4280, 220],
       parameters: {
         jsCode: `
 const reply = $('Finalize Reply').first().json || {};
@@ -510,7 +613,7 @@ return [{
       name: "Persist Outbound Message",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [3500, 220],
+      position: [4540, 220],
       continueOnFail: true,
       parameters: {
         method: "POST",
@@ -557,14 +660,23 @@ return [{
     "Download Image": { main: [[{ node: "Encode Image", type: "main", index: 0 }]] },
     "Encode Image": { main: [[{ node: "Compose Operator Input", type: "main", index: 0 }]] },
     "Compose Operator Input": { main: [[{ node: "Run Operator Turn", type: "main", index: 0 }]] },
-    "Run Operator Turn": { main: [[{ node: "Needs AI Chat?", type: "main", index: 0 }]] },
-    "Needs AI Chat?": {
+    "Run Operator Turn": { main: [[{ node: "Needs AI Draft?", type: "main", index: 0 }]] },
+    "Needs AI Draft?": {
       main: [
-        [{ node: "Ollama Generate", type: "main", index: 0 }],
+        [{ node: "Ollama Draft", type: "main", index: 0 }],
         [{ node: "Finalize Reply", type: "main", index: 0 }],
       ],
     },
-    "Ollama Generate": { main: [[{ node: "Finalize Reply", type: "main", index: 0 }]] },
+    "Ollama Draft": { main: [[{ node: "Parse AI Draft", type: "main", index: 0 }]] },
+    "Parse AI Draft": { main: [[{ node: "Resolve Operator Draft", type: "main", index: 0 }]] },
+    "Resolve Operator Draft": { main: [[{ node: "Needs AI Chat?", type: "main", index: 0 }]] },
+    "Needs AI Chat?": {
+      main: [
+        [{ node: "Ollama Chat", type: "main", index: 0 }],
+        [{ node: "Finalize Reply", type: "main", index: 0 }],
+      ],
+    },
+    "Ollama Chat": { main: [[{ node: "Finalize Reply", type: "main", index: 0 }]] },
     "Finalize Reply": { main: [[{ node: "Send Telegram Message", type: "main", index: 0 }]] },
     "Send Telegram Message": { main: [[{ node: "Build Outbound Save", type: "main", index: 0 }]] },
     "Build Outbound Save": { main: [[{ node: "Persist Outbound Message", type: "main", index: 0 }]] },

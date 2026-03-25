@@ -12,8 +12,11 @@ This workflow moves the Telegram operator chatbot entrypoint into n8n while keep
   - images via base64 handoff
 - Calls the app API for:
   - Telegram customer/conversation/message persistence
-  - safe operator command drafting/confirmation
-- Calls Ollama only when the app says the turn is general chat, not a direct deterministic reply
+  - fast operator turn bootstrap
+  - deterministic command validation / confirmation / execution
+- Calls Ollama in n8n for:
+  - action draft generation
+  - general chat replies when the resolved draft says the turn is conversational
 - Sends the final reply back to Telegram
 - Persists the outbound reply to the app database
 
@@ -75,6 +78,6 @@ Use the same `TELEGRAM_WEBHOOK_SECRET` value when registering the webhook.
 
 ## Notes
 
-- The app still owns the trusted operator logic and DB writes.
-- n8n owns the Telegram entrypoint, media preprocessing, and execution visibility.
-- This is the pragmatic split for easier debugging without re-implementing the whole trust layer inside n8n.
+- The app owns the trusted operator logic and DB writes.
+- n8n owns the Telegram entrypoint, media preprocessing, draft generation, and final chat generation.
+- This split keeps the slow model calls visible in n8n while the API stays deterministic and fast.

@@ -162,7 +162,7 @@ const listConversationsSchema = z.object({
   query: z.string().trim().optional(),
 });
 
-const draftSchema = z.object({
+export const draftSchema = z.object({
   mode: z.enum(["read", "write", "clarify", "chat"]),
   command: z
     .enum([
@@ -192,7 +192,7 @@ const draftSchema = z.object({
 
 type Draft = z.infer<typeof draftSchema>;
 
-type ActorContext = {
+export type ActorContext = {
   actorRef: string;
   chatId: string;
   chatIdNumber: number;
@@ -200,6 +200,15 @@ type ActorContext = {
   userMessage: string;
   imageBase64?: string;
 };
+
+type OperatorTurnStartResult =
+  | { kind: "reply"; text: string }
+  | {
+      kind: "needs_ai";
+      snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
+      draftSystemPrompt: string;
+      draftPrompt: string;
+    };
 
 type PreparedMutation = {
   command: WriteCommandName;
@@ -398,7 +407,7 @@ async function listN8nWorkflows() {
   }
 }
 
-async function buildOperatorSnapshot() {
+export async function buildOperatorSnapshot() {
   const [products] = await query<{ count: string }>("select count(*)::text as count from public.products where active = true");
   const [stock] = await query<{ count: string }>("select count(*)::text as count from public.stock_units where status = 'in_stock'");
   const [customers] = await query<{ count: string }>("select count(*)::text as count from public.customers");
@@ -435,6 +444,44 @@ async function generateDraft(params: {
   imageBase64?: string;
   snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
 }): Promise<Draft> {
+  const { systemPrompt, prompt } = buildDraftPrompts(params);
+
+  const body: Record<string, unknown> = {
+    model: config.OLLAMA_MODEL,
+    stream: false,
+    format: "json",
+    system: systemPrompt,
+    prompt,
+    options: {
+      temperature: 0.1,
+      top_p: 0.9,
+    },
+  };
+
+  if (params.imageBase64) {
+    body.images = [params.imageBase64.split(",").pop()];
+  }
+
+  const response = await fetch(`${config.OLLAMA_BASE_URL.replace(/\/$/, "")}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`operator draft failed: ${response.status}`);
+  }
+
+  const raw = (await response.json()) as { response?: string };
+  const draft = JSON.parse(raw.response || "{}");
+  return draftSchema.parse(draft);
+}
+
+function buildDraftPrompts(params: {
+  text: string;
+  imageBase64?: string;
+  snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
+}) {
   const systemPrompt = [
     "You convert Telegram operator requests into a strict JSON action draft for TechnoStore Ops.",
     "Return JSON only. No prose. No markdown.",
@@ -467,35 +514,7 @@ async function generateDraft(params: {
     `User request: ${params.text}`,
   ].join("\n");
 
-  const body: Record<string, unknown> = {
-    model: config.OLLAMA_MODEL,
-    stream: false,
-    format: "json",
-    system: systemPrompt,
-    prompt,
-    options: {
-      temperature: 0.1,
-      top_p: 0.9,
-    },
-  };
-
-  if (params.imageBase64) {
-    body.images = [params.imageBase64.split(",").pop()];
-  }
-
-  const response = await fetch(`${config.OLLAMA_BASE_URL.replace(/\/$/, "")}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    throw new Error(`operator draft failed: ${response.status}`);
-  }
-
-  const raw = (await response.json()) as { response?: string };
-  const draft = JSON.parse(raw.response || "{}");
-  return draftSchema.parse(draft);
+  return { systemPrompt, prompt };
 }
 
 async function resolveProduct(productRef: string) {
@@ -1479,6 +1498,29 @@ function parseQuickReadCommand(text: string): { command: ReadCommandName; params
 }
 
 export async function handleTelegramOperatorMessage(actor: ActorContext): Promise<OperatorMessageResult> {
+  const start = await startTelegramOperatorTurn(actor);
+
+  if (start.kind === "reply") {
+    return start;
+  }
+
+  let draft: Draft;
+
+  try {
+    draft = await generateDraft({
+      text: actor.userMessage,
+      imageBase64: actor.imageBase64,
+      snapshot: start.snapshot,
+    });
+  } catch {
+    const chat = buildChatPrompts({ actor, snapshot: start.snapshot });
+    return { kind: "chat", ...chat };
+  }
+
+  return resolveTelegramOperatorDraft(actor, draft, start.snapshot);
+}
+
+export async function startTelegramOperatorTurn(actor: ActorContext): Promise<OperatorTurnStartResult> {
   const control = parseControlMessage(actor.userMessage);
 
   if (control) {
@@ -1495,25 +1537,33 @@ export async function handleTelegramOperatorMessage(actor: ActorContext): Promis
   }
 
   const snapshot = await buildOperatorSnapshot();
-  let draft: Draft;
+  const prompts = buildDraftPrompts({
+    text: actor.userMessage,
+    imageBase64: actor.imageBase64,
+    snapshot,
+  });
 
-  try {
-    draft = await generateDraft({
-      text: actor.userMessage,
-      imageBase64: actor.imageBase64,
-      snapshot,
-    });
-  } catch {
-    const chat = buildChatPrompts({ actor, snapshot });
-    return { kind: "chat", ...chat };
-  }
+  return {
+    kind: "needs_ai",
+    snapshot,
+    draftSystemPrompt: prompts.systemPrompt,
+    draftPrompt: prompts.prompt,
+  };
+}
+
+export async function resolveTelegramOperatorDraft(
+  actor: ActorContext,
+  draft: Draft,
+  snapshot?: Awaited<ReturnType<typeof buildOperatorSnapshot>>
+): Promise<OperatorMessageResult> {
+  const liveSnapshot = snapshot ?? (await buildOperatorSnapshot());
 
   if (draft.mode === "clarify") {
     return { kind: "reply", text: draft.reply || "Necesito un poco más de detalle para hacer eso." };
   }
 
   if (draft.mode === "chat" || !draft.command) {
-    const chat = buildChatPrompts({ actor, snapshot });
+    const chat = buildChatPrompts({ actor, snapshot: liveSnapshot });
     return { kind: "chat", ...chat };
   }
 
