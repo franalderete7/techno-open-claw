@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useDeferredValue, useState } from "react";
 import type { ConversationRecord } from "../../lib/api";
 import { SearchToolbar } from "./search-toolbar";
@@ -92,6 +93,12 @@ export function ConversationsExplorer({ items }: ConversationsExplorerProps) {
                   <dd>{formatDate(conversation.created_at)}</dd>
                 </div>
               </dl>
+
+              <div className="record-actions">
+                <Link href={`/conversations/${conversation.id}`} className="chip accent action-link">
+                  Open thread
+                </Link>
+              </div>
             </article>
           ))}
         </section>

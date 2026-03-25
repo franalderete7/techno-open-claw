@@ -319,6 +319,10 @@ nav a:hover {
   font-size: 0.82rem;
 }
 
+.action-link {
+  text-decoration: none;
+}
+
 .chip.good,
 .pill.good {
   background: var(--good-soft);
@@ -591,6 +595,12 @@ nav a:hover {
   border-bottom: none;
 }
 
+.record-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 6px;
+}
+
 .value-stack {
   display: grid;
   gap: 4px;
@@ -756,6 +766,57 @@ nav a:hover {
 .setting-list {
   display: grid;
   gap: 10px;
+}
+
+.message-timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.message-bubble {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 0.5px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.message-bubble.inbound {
+  border-color: rgba(191, 111, 77, 0.22);
+  background: rgba(191, 111, 77, 0.08);
+}
+
+.message-bubble.outbound {
+  border-color: rgba(62, 106, 47, 0.2);
+  background: rgba(233, 241, 220, 0.72);
+}
+
+.message-bubble.system {
+  border-color: rgba(31, 30, 29, 0.16);
+  background: rgba(245, 244, 237, 0.92);
+}
+
+.message-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.message-body {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.message-support {
+  margin: 0;
+  color: var(--soft-text);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .setting-row {

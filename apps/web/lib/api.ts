@@ -124,6 +124,18 @@ export type ConversationRecord = {
   phone: string | null;
 };
 
+export type ConversationMessageRecord = {
+  id: number;
+  direction: string;
+  sender_kind: string;
+  message_type: string;
+  text_body: string | null;
+  media_url: string | null;
+  transcript: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
 export type OrderRecord = {
   id: number;
   order_number: string;
@@ -218,6 +230,10 @@ export async function getCustomers(limit = 50) {
 
 export async function getConversations(limit = 50) {
   return apiFetch<ListResponse<ConversationRecord>>(`/v1/conversations?limit=${limit}`);
+}
+
+export async function getConversationMessages(conversationId: number) {
+  return apiFetch<ListResponse<ConversationMessageRecord>>(`/v1/conversations/${conversationId}/messages`);
 }
 
 export async function getSettings() {
