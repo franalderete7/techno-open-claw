@@ -546,15 +546,19 @@ nav a:hover {
 }
 
 .field-summary {
-  cursor: pointer;
   color: var(--soft-text);
   font-size: 0.84rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  margin: 0;
+}
+
+.field-details > summary.field-summary {
+  cursor: pointer;
   list-style: none;
 }
 
-.field-summary::-webkit-details-marker {
+.field-details > summary.field-summary::-webkit-details-marker {
   display: none;
 }
 
@@ -588,6 +592,21 @@ nav a:hover {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.product-section-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.product-section-card {
+  display: grid;
+  gap: 10px;
+}
+
+.product-field-grid {
+  margin-top: 0;
 }
 
 .metric {
