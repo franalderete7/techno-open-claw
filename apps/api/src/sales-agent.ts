@@ -14,8 +14,9 @@
  * 10. Outbound response delivery
  */
 
-import { pool, query } from "./db.js";
 import { config } from "./config.js";
+import { pool, query } from "./db.js";
+import { ollamaGenerate } from "./ollama.js";
 
 // ============ Types ============
 
@@ -347,9 +348,6 @@ export async function routeTurn(context: TurnContext): Promise<RouterOutput> {
  * Generate AI response using Ollama
  */
 export async function generateResponse(context: TurnContext, router: RouterOutput): Promise<ResponderOutput> {
-  const model = config.OLLAMA_MODEL || "qwen3.5:cloud";
-  const baseUrl = config.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
-  
   const systemPrompt = `Eres un asistente de ventas de TechnoStore, una tienda de teléfonos móviles en Argentina.
 Tu rol es ayudar a los clientes a encontrar el equipo que buscan, responder preguntas sobre precios y disponibilidad, y guiarlos hacia la compra.
 
@@ -373,26 +371,14 @@ Mensaje del cliente: "${context.user_message}"
 Genera una respuesta natural y útil.`;
 
   try {
-    const response = await fetch(`${baseUrl}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: model,
-        prompt: prompt,
-        stream: false,
-        options: {
-          temperature: 0.7,
-          top_p: 0.9,
-        },
-      }),
+    const data = await ollamaGenerate({
+      prompt,
+      options: {
+        temperature: 0.7,
+        top_p: 0.9,
+      },
     });
-    
-    if (!response.ok) {
-      throw new Error(`Ollama API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    const rawText = (data.response as string) || "";
+    const rawText = data.response || "";
     
     // Extract actions from response
     const actions: string[] = [];

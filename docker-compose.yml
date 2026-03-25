@@ -36,6 +36,8 @@ services:
       API_PORT: ${API_PORT}
       API_BEARER_TOKEN: ${API_BEARER_TOKEN}
       DATABASE_URL: ${DATABASE_URL}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${API_PORT:-4000}:4000"
 

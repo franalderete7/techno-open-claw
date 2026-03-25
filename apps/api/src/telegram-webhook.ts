@@ -20,7 +20,6 @@ import {
   getTelegramFileUrl,
   sendTelegramTextMessage,
 } from "./telegram.js";
-import { streamTelegramResponse, sendThinkingMessage } from "./telegram-streaming.js";
 import { transcribeAudio } from "./sales-agent.js";
 import { handleTelegramOperatorMessage } from "./telegram-operator.js";
 import { saveConversationMessage, upsertTelegramConversation, upsertTelegramCustomer } from "./telegram-storage.js";
@@ -147,65 +146,30 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
       imageBase64,
     });
 
-    if (operatorResult.kind === "reply") {
-      await sendTelegramTextMessage({
-        botToken: config.TELEGRAM_BOT_TOKEN,
-        chatId: message.chat.id,
-        text: operatorResult.text,
-        replyToMessageId: message.message_id,
-      });
+    const responseText = operatorResult.text.trim() || "No pude preparar una respuesta útil.";
 
-      await saveConversationMessage({
-        conversationId,
-        direction: "outbound",
-        senderKind: "tool",
-        messageType: "text",
-        textBody: operatorResult.text,
-        payload: {
-          source: "telegram-operator",
-        },
-      });
-
-      return {
-        ok: true,
-        replied: true,
-        mode: "operator",
-      };
-    }
-
-    // Send thinking message first
-    const thinkingMsgId = await sendThinkingMessage(
-      message.chat.id,
-      config.TELEGRAM_BOT_TOKEN,
-      message.message_id
-    );
-
-    const responseText = await streamTelegramResponse({
-      chatId: message.chat.id,
-      messageId: thinkingMsgId || message.message_id,
+    await sendTelegramTextMessage({
       botToken: config.TELEGRAM_BOT_TOKEN,
-      prompt: operatorResult.prompt,
-      systemPrompt: operatorResult.systemPrompt,
-      imageUrl: imageBase64,
+      chatId: message.chat.id,
+      text: responseText,
+      replyToMessageId: message.message_id,
     });
 
-    if (responseText.trim()) {
-      await saveConversationMessage({
-        conversationId,
-        direction: "outbound",
-        senderKind: "tool",
-        messageType: "text",
-        textBody: responseText,
-        payload: {
-          source: "telegram-chat",
-        },
-      });
-    }
+    await saveConversationMessage({
+      conversationId,
+      direction: "outbound",
+      senderKind: "tool",
+      messageType: "text",
+      textBody: responseText,
+      payload: {
+        source: "telegram-operator",
+      },
+    });
 
     return {
       ok: true,
       replied: true,
-      responseText,
+      mode: "operator",
     };
   } catch (error) {
     request.log.error({ error }, "Telegram operator flow failed");

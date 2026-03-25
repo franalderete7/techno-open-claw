@@ -3,8 +3,8 @@ import { exec as execCallback } from "node:child_process";
 import { promisify } from "node:util";
 import type { PoolClient, QueryResultRow } from "pg";
 import { z } from "zod";
-import { config } from "./config.js";
 import { pool, query } from "./db.js";
+import { ollamaGenerate } from "./ollama.js";
 
 const exec = promisify(execCallback);
 
@@ -216,9 +216,7 @@ type PreparedMutation = {
   payload: Record<string, unknown>;
 };
 
-type OperatorMessageResult =
-  | { kind: "reply"; text: string }
-  | { kind: "chat"; systemPrompt: string; prompt: string };
+type OperatorMessageResult = { kind: "reply"; text: string };
 
 type ReadCommandName =
   | "help"
@@ -445,36 +443,35 @@ async function generateDraft(params: {
   snapshot: Awaited<ReturnType<typeof buildOperatorSnapshot>>;
 }): Promise<Draft> {
   const { systemPrompt, prompt } = buildDraftPrompts(params);
-
-  const body: Record<string, unknown> = {
-    model: config.OLLAMA_MODEL,
-    stream: false,
+  const raw = await ollamaGenerate({
     format: "json",
     system: systemPrompt,
     prompt,
+    images: params.imageBase64 ? [params.imageBase64.split(",").pop() || ""] : undefined,
     options: {
       temperature: 0.1,
       top_p: 0.9,
     },
-  };
-
-  if (params.imageBase64) {
-    body.images = [params.imageBase64.split(",").pop()];
-  }
-
-  const response = await fetch(`${config.OLLAMA_BASE_URL.replace(/\/$/, "")}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
   });
-
-  if (!response.ok) {
-    throw new Error(`operator draft failed: ${response.status}`);
-  }
-
-  const raw = (await response.json()) as { response?: string };
   const draft = JSON.parse(raw.response || "{}");
   return draftSchema.parse(draft);
+}
+
+async function generateChatReply(params: {
+  systemPrompt: string;
+  prompt: string;
+  imageBase64?: string;
+}): Promise<string> {
+  const raw = await ollamaGenerate({
+    system: params.systemPrompt,
+    prompt: params.prompt,
+    images: params.imageBase64 ? [params.imageBase64.split(",").pop() || ""] : undefined,
+    options: {
+      temperature: 0.2,
+      top_p: 0.9,
+    },
+  });
+  return raw.response.trim();
 }
 
 function buildDraftPrompts(params: {
@@ -1516,7 +1513,16 @@ export async function handleTelegramOperatorMessage(actor: ActorContext): Promis
     });
   } catch {
     const chat = buildChatPrompts({ actor, snapshot: start.snapshot });
-    return { kind: "chat", ...chat };
+    const replyText = await generateChatReply({
+      systemPrompt: chat.systemPrompt,
+      prompt: chat.prompt,
+      imageBase64: actor.imageBase64,
+    });
+
+    return {
+      kind: "reply",
+      text: replyText || "No pude preparar una respuesta útil.",
+    };
   }
 
   return resolveTelegramOperatorDraft(actor, draft, start.snapshot);
@@ -1570,12 +1576,22 @@ export async function resolveTelegramOperatorDraft(
     }
 
     const chat = buildChatPrompts({ actor, snapshot: liveSnapshot });
-    return { kind: "chat", ...chat };
+    const replyText = await generateChatReply({
+      systemPrompt: chat.systemPrompt,
+      prompt: chat.prompt,
+      imageBase64: actor.imageBase64,
+    });
+    return { kind: "reply", text: replyText || "No pude preparar una respuesta útil." };
   }
 
   if (!draft.command) {
     const chat = buildChatPrompts({ actor, snapshot: liveSnapshot });
-    return { kind: "chat", ...chat };
+    const replyText = await generateChatReply({
+      systemPrompt: chat.systemPrompt,
+      prompt: chat.prompt,
+      imageBase64: actor.imageBase64,
+    });
+    return { kind: "reply", text: replyText || "No pude preparar una respuesta útil." };
   }
 
   const params = draft.params || {};
