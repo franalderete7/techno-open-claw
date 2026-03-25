@@ -159,6 +159,43 @@ export type AuditRecord = {
   created_at: string;
 };
 
+export type SchemaRelationshipRecord = {
+  constraint_name: string;
+  source_table: string;
+  source_column: string;
+  target_table: string;
+  target_column: string;
+  update_rule: string;
+  delete_rule: string;
+};
+
+export type SchemaColumnRecord = {
+  name: string;
+  data_type: string;
+  is_nullable: boolean;
+  default_value: string | null;
+  is_primary_key: boolean;
+  references: {
+    constraint_name: string | null;
+    table: string | null;
+    column: string | null;
+    update_rule: string | null;
+    delete_rule: string | null;
+  } | null;
+};
+
+export type SchemaTableRecord = {
+  name: string;
+  row_estimate: number;
+  relationship_count: number;
+  columns: SchemaColumnRecord[];
+};
+
+export type SchemaResponse = {
+  tables: SchemaTableRecord[];
+  relationships: SchemaRelationshipRecord[];
+};
+
 export async function getDashboard() {
   return apiFetch<DashboardResponse>("/v1/dashboard");
 }
@@ -189,4 +226,8 @@ export async function getSettings() {
 
 export async function getAudit(limit = 100) {
   return apiFetch<ListResponse<AuditRecord>>(`/v1/audit?limit=${limit}`);
+}
+
+export async function getSchema() {
+  return apiFetch<SchemaResponse>("/v1/schema");
 }

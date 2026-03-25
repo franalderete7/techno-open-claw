@@ -275,6 +275,215 @@ app.register(async (protectedApp) => {
     };
   });
 
+  protectedApp.get("/v1/schema", async () => {
+    const tableRows = await query<{ table_name: string; row_estimate: string }>(
+      `
+        select
+          c.relname as table_name,
+          greatest(c.reltuples::bigint, 0)::text as row_estimate
+        from pg_class c
+        join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'public'
+          and c.relkind = 'r'
+        order by c.relname asc
+      `
+    );
+
+    const columnRows = await query<{
+      table_name: string;
+      column_name: string;
+      data_type: string;
+      udt_name: string;
+      is_nullable: "YES" | "NO";
+      column_default: string | null;
+      ordinal_position: number;
+      is_primary_key: boolean;
+      constraint_name: string | null;
+      foreign_table_name: string | null;
+      foreign_column_name: string | null;
+      update_rule: string | null;
+      delete_rule: string | null;
+    }>(
+      `
+        with primary_keys as (
+          select tc.table_name, kcu.column_name
+          from information_schema.table_constraints tc
+          join information_schema.key_column_usage kcu
+            on tc.constraint_name = kcu.constraint_name
+           and tc.table_schema = kcu.table_schema
+          where tc.table_schema = 'public'
+            and tc.constraint_type = 'PRIMARY KEY'
+        ),
+        foreign_keys as (
+          select
+            tc.table_name,
+            kcu.column_name,
+            tc.constraint_name,
+            ccu.table_name as foreign_table_name,
+            ccu.column_name as foreign_column_name,
+            rc.update_rule,
+            rc.delete_rule
+          from information_schema.table_constraints tc
+          join information_schema.key_column_usage kcu
+            on tc.constraint_name = kcu.constraint_name
+           and tc.table_schema = kcu.table_schema
+          join information_schema.constraint_column_usage ccu
+            on tc.constraint_name = ccu.constraint_name
+           and tc.table_schema = ccu.table_schema
+          join information_schema.referential_constraints rc
+            on tc.constraint_name = rc.constraint_name
+           and tc.table_schema = rc.constraint_schema
+          where tc.table_schema = 'public'
+            and tc.constraint_type = 'FOREIGN KEY'
+        )
+        select
+          c.table_name,
+          c.column_name,
+          c.data_type,
+          c.udt_name,
+          c.is_nullable,
+          c.column_default,
+          c.ordinal_position,
+          (pk.column_name is not null) as is_primary_key,
+          fk.constraint_name,
+          fk.foreign_table_name,
+          fk.foreign_column_name,
+          fk.update_rule,
+          fk.delete_rule
+        from information_schema.columns c
+        left join primary_keys pk
+          on pk.table_name = c.table_name
+         and pk.column_name = c.column_name
+        left join foreign_keys fk
+          on fk.table_name = c.table_name
+         and fk.column_name = c.column_name
+        where c.table_schema = 'public'
+        order by c.table_name asc, c.ordinal_position asc
+      `
+    );
+
+    const relationshipRows = await query<{
+      constraint_name: string;
+      source_table: string;
+      source_column: string;
+      target_table: string;
+      target_column: string;
+      update_rule: string;
+      delete_rule: string;
+    }>(
+      `
+        select
+          tc.constraint_name,
+          tc.table_name as source_table,
+          kcu.column_name as source_column,
+          ccu.table_name as target_table,
+          ccu.column_name as target_column,
+          rc.update_rule,
+          rc.delete_rule
+        from information_schema.table_constraints tc
+        join information_schema.key_column_usage kcu
+          on tc.constraint_name = kcu.constraint_name
+         and tc.table_schema = kcu.table_schema
+        join information_schema.constraint_column_usage ccu
+          on tc.constraint_name = ccu.constraint_name
+         and tc.table_schema = ccu.table_schema
+        join information_schema.referential_constraints rc
+          on tc.constraint_name = rc.constraint_name
+         and tc.table_schema = rc.constraint_schema
+        where tc.table_schema = 'public'
+          and tc.constraint_type = 'FOREIGN KEY'
+        order by tc.table_name asc, kcu.column_name asc
+      `
+    );
+
+    const rowEstimateByTable = new Map(tableRows.map((row) => [row.table_name, Number(row.row_estimate ?? 0)]));
+    const relationships = relationshipRows.map((row) => ({
+      constraint_name: row.constraint_name,
+      source_table: row.source_table,
+      source_column: row.source_column,
+      target_table: row.target_table,
+      target_column: row.target_column,
+      update_rule: row.update_rule,
+      delete_rule: row.delete_rule,
+    }));
+
+    const relationshipCountByTable = new Map<string, number>();
+    for (const relationship of relationships) {
+      relationshipCountByTable.set(
+        relationship.source_table,
+        (relationshipCountByTable.get(relationship.source_table) ?? 0) + 1
+      );
+      relationshipCountByTable.set(
+        relationship.target_table,
+        (relationshipCountByTable.get(relationship.target_table) ?? 0) + 1
+      );
+    }
+
+    const tables = Array.from(
+      columnRows.reduce(
+        (accumulator, row) => {
+          const current =
+            accumulator.get(row.table_name) ??
+            {
+              name: row.table_name,
+              row_estimate: rowEstimateByTable.get(row.table_name) ?? 0,
+              relationship_count: relationshipCountByTable.get(row.table_name) ?? 0,
+              columns: [],
+            };
+
+          current.columns.push({
+            name: row.column_name,
+            data_type:
+              row.data_type === "USER-DEFINED"
+                ? row.udt_name
+                : row.data_type === "ARRAY"
+                  ? `${row.udt_name.replace(/^_/, "")}[]`
+                  : row.data_type,
+            is_nullable: row.is_nullable === "YES",
+            default_value: row.column_default,
+            is_primary_key: row.is_primary_key,
+            references: row.constraint_name
+              ? {
+                  constraint_name: row.constraint_name,
+                  table: row.foreign_table_name,
+                  column: row.foreign_column_name,
+                  update_rule: row.update_rule,
+                  delete_rule: row.delete_rule,
+                }
+              : null,
+          });
+
+          accumulator.set(row.table_name, current);
+          return accumulator;
+        },
+        new Map<
+          string,
+          {
+            name: string;
+            row_estimate: number;
+            relationship_count: number;
+            columns: Array<{
+              name: string;
+              data_type: string;
+              is_nullable: boolean;
+              default_value: string | null;
+              is_primary_key: boolean;
+              references: {
+                constraint_name: string | null;
+                table: string | null;
+                column: string | null;
+                update_rule: string | null;
+                delete_rule: string | null;
+              } | null;
+            }>;
+          }
+        >()
+      ).values()
+    );
+
+    return { tables, relationships };
+  });
+
   protectedApp.get("/v1/products", async (request) => {
     const schema = z.object({
       q: z.string().trim().optional(),

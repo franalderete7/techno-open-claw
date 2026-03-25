@@ -11,6 +11,7 @@ const navItems = [
   ["Orders", "/orders"],
   ["Customers", "/customers"],
   ["Conversations", "/conversations"],
+  ["Schema", "/schema"],
   ["Settings", "/settings"],
   ["Audit", "/audit"],
 ] as const;
