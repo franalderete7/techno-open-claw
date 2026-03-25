@@ -34,8 +34,8 @@ export default async function ProductsPage() {
         store={store}
         products={buildStorefrontProducts(items)}
         eyebrow="Catálogo"
-        title="Modelos disponibles para compra asistida."
-        lead="Elegí memoria, color y red. Después cerrás todo por WhatsApp con atención humana."
+        title="Catálogo TechnoStore."
+        lead="Buscá por marca, memoria o color. Cuando encontrás el modelo, seguís la consulta por WhatsApp."
       />
     );
   }

@@ -167,13 +167,13 @@ nav a:hover {
 .storefront-hero {
   position: relative;
   display: grid;
-  gap: 16px;
-  padding: 22px;
+  gap: 18px;
+  padding: 20px;
   border: 0.5px solid var(--line);
-  border-radius: 28px;
+  border-radius: 26px;
   background:
-    radial-gradient(circle at top left, rgba(191, 111, 77, 0.14), transparent 26%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.78));
+    radial-gradient(circle at top left, rgba(191, 111, 77, 0.1), transparent 22%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.84));
   box-shadow: var(--shadow);
   overflow: hidden;
 }
@@ -196,30 +196,38 @@ nav a:hover {
   flex-wrap: wrap;
 }
 
+.storefront-hero-copy {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
 .storefront-title {
   margin: 0;
   font-family: var(--font-serif), serif;
-  font-size: clamp(2.35rem, 6vw, 4.8rem);
-  line-height: 0.92;
+  font-size: clamp(2.35rem, 5.4vw, 4.4rem);
+  line-height: 0.94;
   letter-spacing: -0.05em;
+  max-width: 10ch;
 }
 
 .storefront-lead {
-  max-width: 42rem;
-  margin: 12px 0 0;
+  max-width: 35rem;
+  margin: 8px 0 0;
   color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.6;
+  font-size: 0.98rem;
+  line-height: 1.55;
 }
 
 .storefront-callout {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   align-content: start;
-  padding: 18px;
+  padding: 18px 18px 20px;
   border: 0.5px solid var(--line);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(6px);
 }
 
@@ -301,16 +309,17 @@ nav a:hover {
 
 .storefront-grid {
   display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
 .storefront-card {
   display: grid;
-  gap: 14px;
-  padding: 14px;
+  grid-template-rows: auto 1fr;
+  gap: 12px;
+  padding: 12px;
   border: 0.5px solid var(--line);
-  border-radius: 24px;
+  border-radius: 22px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.82));
   box-shadow: var(--shadow);
 }
@@ -323,17 +332,17 @@ nav a:hover {
 .storefront-product-image,
 .storefront-image-fallback {
   width: 100%;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 1 / 1;
   border: 0.5px solid var(--line);
-  border-radius: 18px;
+  border-radius: 16px;
   background:
     radial-gradient(circle at top, rgba(191, 111, 77, 0.1), transparent 36%),
     var(--surface-strong);
 }
 
 .storefront-product-image {
-  object-fit: contain;
-  padding: 12px;
+  object-fit: cover;
+  padding: 0;
 }
 
 .storefront-image-fallback {
@@ -351,36 +360,63 @@ nav a:hover {
 }
 
 .storefront-card-body {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  min-width: 0;
 }
 
 .storefront-card-title {
   margin: 0;
   font-family: var(--font-serif), serif;
-  font-size: 1.65rem;
-  line-height: 0.97;
+  font-size: 1.42rem;
+  line-height: 0.98;
   letter-spacing: -0.04em;
 }
 
 .storefront-card-subtitle {
   margin: 0;
   color: var(--soft-text);
-  font-size: 0.98rem;
+  font-size: 0.94rem;
+}
+
+.storefront-spec-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.storefront-chip-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .storefront-card-copy {
   margin: 0;
   color: var(--muted);
   line-height: 1.55;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .storefront-card-footer {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   gap: 12px;
   align-items: end;
+  margin-top: auto;
   padding-top: 12px;
   border-top: 0.5px solid var(--line);
+}
+
+.storefront-price-stack {
+  display: grid;
+  gap: 4px;
 }
 
 .storefront-price-label {
@@ -393,7 +429,7 @@ nav a:hover {
 
 .storefront-price {
   display: block;
-  font-size: 1.9rem;
+  font-size: 1.7rem;
   line-height: 0.95;
   letter-spacing: -0.04em;
 }
@@ -420,15 +456,28 @@ nav a:hover {
   white-space: nowrap;
 }
 
-.storefront-whatsapp-button.is-disabled {
-  background: rgba(37, 211, 102, 0.18);
-  color: #1d6b3b;
-}
-
 .storefront-whatsapp-icon {
   width: 18px;
   height: 18px;
   flex: 0 0 auto;
+}
+
+.storefront-load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 4px 0 0;
+}
+
+.storefront-load-more-copy {
+  color: var(--soft-text);
+  font-size: 0.9rem;
+}
+
+.storefront-empty-state {
+  padding: 24px;
 }
 
 .storefront-footer {
@@ -1716,7 +1765,7 @@ nav a:hover {
 
   .storefront-hero {
     grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
-    padding: 28px;
+    padding: 24px;
   }
 
   .storefront-toolbar {
@@ -1726,7 +1775,7 @@ nav a:hover {
   }
 
   .storefront-card-footer {
-    grid-template-columns: minmax(0, 1fr) auto;
+    flex-wrap: nowrap;
   }
 
   .record-grid {

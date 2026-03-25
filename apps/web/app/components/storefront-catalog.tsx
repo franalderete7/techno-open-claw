@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { StorefrontProduct, StorefrontProfile } from "../../lib/storefront";
 
 type StorefrontCatalogProps = {
@@ -12,6 +12,9 @@ type StorefrontCatalogProps = {
   title: string;
   lead: string;
 };
+
+const INITIAL_BATCH_SIZE = 8;
+const BATCH_SIZE = 8;
 
 function formatMoney(amount: number | null) {
   if (amount == null) return "Consultar";
@@ -28,14 +31,42 @@ function buildWhatsAppUrl(baseUrl: string | null, product: StorefrontProduct) {
   return `${baseUrl}?text=${encodeURIComponent(message)}`;
 }
 
+function buildSpecSummary(product: StorefrontProduct) {
+  const parts = [
+    product.ram_gb ? `${product.ram_gb}GB RAM` : null,
+    product.storage_gb ? `${product.storage_gb}GB` : null,
+    product.network ? product.network.toUpperCase() : null,
+    product.color,
+  ].filter(Boolean);
+
+  return parts.join(", ");
+}
+
+function normalizeComparableText(value: string | null) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\s*,\s*/g, ", ")
+    .trim();
+}
+
 function ProductImage({ product }: { product: StorefrontProduct }) {
   const initials = product.brand.slice(0, 2).toUpperCase();
+  const [failed, setFailed] = useState(false);
 
-  if (!product.image_url) {
+  if (!product.image_url || failed) {
     return <div className="storefront-image-fallback">{initials}</div>;
   }
 
-  return <img src={product.image_url} alt={product.title} loading="lazy" className="storefront-product-image" />;
+  return (
+    <img
+      src={product.image_url}
+      alt={product.title}
+      loading="lazy"
+      className="storefront-product-image"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 function WhatsAppIcon() {
@@ -52,7 +83,9 @@ function WhatsAppIcon() {
 export function StorefrontCatalog({ store, products, eyebrow, title, lead }: StorefrontCatalogProps) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(INITIAL_BATCH_SIZE);
   const deferredQuery = useDeferredValue(query);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const needle = deferredQuery.trim().toLowerCase();
 
   const filteredProducts = useMemo(() => {
@@ -81,7 +114,40 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
     });
   }, [filter, needle, products]);
 
+  useEffect(() => {
+    startTransition(() => {
+      setVisibleCount(INITIAL_BATCH_SIZE);
+    });
+  }, [filter, needle, products.length]);
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || visibleCount >= filteredProducts.length) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const shouldLoad = entries.some((entry) => entry.isIntersecting);
+        if (!shouldLoad) return;
+
+        startTransition(() => {
+          setVisibleCount((current) => Math.min(current + BATCH_SIZE, filteredProducts.length));
+        });
+      },
+      { rootMargin: "280px 0px" }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [filteredProducts.length, visibleCount]);
+
   const availableCount = products.filter((product) => product.in_stock).length;
+  const visibleProducts = filteredProducts.slice(0, visibleCount);
+  const hasMoreProducts = visibleCount < filteredProducts.length;
+  const catalogWhatsAppUrl = store.whatsapp_url
+    ? `${store.whatsapp_url}?text=${encodeURIComponent("Hola! Quiero consultar el catálogo.")}`
+    : null;
 
   return (
     <div className="storefront-stack">
@@ -95,18 +161,18 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
           <p className="storefront-lead">{lead}</p>
           <div className="chip-row">
             <span className="chip accent">{products.length} modelos</span>
-            <span className="chip good">{availableCount} con entrega</span>
+            <span className="chip good">{availableCount} disponibles</span>
             {store.address ? <span className="chip">{store.address}</span> : null}
           </div>
         </div>
 
         <aside className="storefront-callout">
-          <p className="storefront-callout-label">Atención directa</p>
+          <p className="storefront-callout-label">Contacto</p>
           <h2>{store.name}</h2>
           <p>{store.tagline}</p>
           {store.hours ? <p className="storefront-callout-meta">Horario: {store.hours}</p> : null}
-          {store.whatsapp_url ? (
-            <a className="storefront-whatsapp-button" href={`${store.whatsapp_url}?text=${encodeURIComponent("Hola! Quiero consultar el catálogo.")}`} target="_blank" rel="noreferrer">
+          {catalogWhatsAppUrl ? (
+            <a className="storefront-whatsapp-button" href={catalogWhatsAppUrl} target="_blank" rel="noreferrer">
               <WhatsAppIcon />
               WhatsApp
             </a>
@@ -144,61 +210,89 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
         </div>
       </section>
 
-      <section className="storefront-grid">
-        {filteredProducts.map((product) => {
-          const whatsappUrl = buildWhatsAppUrl(store.whatsapp_url, product);
+      {filteredProducts.length === 0 ? (
+        <section className="panel storefront-empty-state">
+          <p className="empty">No encontré modelos con ese filtro. Probá otra marca, memoria o color.</p>
+        </section>
+      ) : (
+        <>
+          <section className="storefront-grid">
+            {visibleProducts.map((product) => {
+              const whatsappUrl = buildWhatsAppUrl(store.whatsapp_url, product);
+              const specSummary = buildSpecSummary(product);
+              const shouldShowDescription =
+                Boolean(product.description) &&
+                normalizeComparableText(product.description) !== normalizeComparableText(specSummary);
 
-          return (
-            <article key={product.id} className="storefront-card">
-              <div className="storefront-card-media">
-                <ProductImage product={product} />
-                <div className="storefront-status-row">
-                  <span className={`chip ${product.in_stock ? "good" : "warn"}`}>{product.in_stock ? "Disponible" : "Consultar"}</span>
-                  <span className="chip">{product.condition === "new" ? "Nuevo" : "Usado"}</span>
-                </div>
-              </div>
-
-              <div className="storefront-card-body">
-                <p className="catalog-kicker">{product.brand}</p>
-                <h3 className="storefront-card-title">{product.title}</h3>
-                <p className="storefront-card-subtitle">{product.model}</p>
-
-                <div className="chip-row">
-                  {product.ram_gb ? <span className="chip">{product.ram_gb}GB RAM</span> : null}
-                  {product.storage_gb ? <span className="chip">{product.storage_gb}GB</span> : null}
-                  {product.network ? <span className="chip">{product.network.toUpperCase()}</span> : null}
-                  {product.color ? <span className="chip">{product.color}</span> : null}
-                  {product.delivery_days ? <span className="chip">{product.delivery_days} días</span> : null}
-                </div>
-
-                {product.description ? <p className="storefront-card-copy">{product.description}</p> : null}
-
-                <div className="storefront-card-footer">
-                  <div>
-                    <p className="storefront-price-label">Precio</p>
-                    <strong className="storefront-price">{formatMoney(product.public_price_ars)}</strong>
-                    <p className="storefront-price-note">
-                      {product.delivery_days ? `Entrega estimada en ${product.delivery_days} días` : "Consulta entrega y retiro"}
-                    </p>
+              return (
+                <article key={product.id} className="storefront-card">
+                  <div className="storefront-card-media">
+                    <ProductImage product={product} />
+                    <div className="storefront-status-row">
+                      <span className={`chip ${product.in_stock ? "good" : "warn"}`}>
+                        {product.in_stock ? "Disponible" : "Consultar"}
+                      </span>
+                      <span className="chip">{product.condition === "new" ? "Nuevo" : "Usado"}</span>
+                    </div>
                   </div>
 
-                  {whatsappUrl ? (
-                    <a className="storefront-whatsapp-button" href={whatsappUrl} target="_blank" rel="noreferrer">
-                      <WhatsAppIcon />
-                      Consultar
-                    </a>
-                  ) : (
-                    <span className="storefront-whatsapp-button is-disabled">
-                      <WhatsAppIcon />
-                      Sin WhatsApp
-                    </span>
-                  )}
-                </div>
-              </div>
-            </article>
-          );
-        })}
-      </section>
+                  <div className="storefront-card-body">
+                    <p className="catalog-kicker">{product.brand}</p>
+                    <h3 className="storefront-card-title">{product.title}</h3>
+                    <p className="storefront-card-subtitle">{product.model}</p>
+
+                    {specSummary ? <p className="storefront-spec-line">{specSummary}</p> : null}
+
+                    <div className="storefront-chip-row">
+                      {product.delivery_days ? <span className="chip">Entrega {product.delivery_days} días</span> : null}
+                      {product.color ? <span className="chip">{product.color}</span> : null}
+                      {product.battery_health ? <span className="chip">Batería {product.battery_health}%</span> : null}
+                    </div>
+
+                    {shouldShowDescription ? <p className="storefront-card-copy">{product.description}</p> : null}
+
+                    <div className="storefront-card-footer">
+                      <div className="storefront-price-stack">
+                        <p className="storefront-price-label">Precio</p>
+                        <strong className="storefront-price">{formatMoney(product.public_price_ars)}</strong>
+                        <p className="storefront-price-note">
+                          {product.delivery_days ? `Entrega estimada en ${product.delivery_days} días` : "Consultá entrega y retiro"}
+                        </p>
+                      </div>
+
+                      {whatsappUrl ? (
+                        <a className="storefront-whatsapp-button" href={whatsappUrl} target="_blank" rel="noreferrer">
+                          <WhatsAppIcon />
+                          <span>Consultar</span>
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+
+          {hasMoreProducts ? (
+            <div ref={loadMoreRef} className="storefront-load-more">
+              <button
+                type="button"
+                className="storefront-filter"
+                onClick={() =>
+                  startTransition(() => {
+                    setVisibleCount((current) => Math.min(current + BATCH_SIZE, filteredProducts.length));
+                  })
+                }
+              >
+                Cargar más
+              </button>
+              <span className="storefront-load-more-copy">
+                Mostrando {visibleProducts.length} de {filteredProducts.length}
+              </span>
+            </div>
+          ) : null}
+        </>
+      )}
 
       <footer className="storefront-footer">
         <div>
@@ -208,8 +302,8 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
         <div className="storefront-footer-links">
           <Link href="/">Inicio</Link>
           <Link href="/products">Catálogo</Link>
-          {store.whatsapp_url ? (
-            <a href={`${store.whatsapp_url}?text=${encodeURIComponent("Hola! Quiero consultar el catálogo.")}`} target="_blank" rel="noreferrer">
+          {catalogWhatsAppUrl ? (
+            <a href={catalogWhatsAppUrl} target="_blank" rel="noreferrer">
               WhatsApp
             </a>
           ) : null}

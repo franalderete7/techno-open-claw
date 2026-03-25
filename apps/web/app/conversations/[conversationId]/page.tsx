@@ -128,12 +128,21 @@ export default async function ConversationDetailPage({ params }: ConversationPag
                   : message.direction === "system"
                     ? "message-bubble system"
                     : "message-bubble inbound";
+              const speakerLabel =
+                message.direction === "outbound"
+                  ? message.sender_kind === "tool"
+                    ? "Bot"
+                    : "Operador"
+                  : message.direction === "system"
+                    ? "Sistema"
+                    : "Cliente";
 
               return (
                 <article key={message.id} className={bubbleClass}>
                   <div className="message-meta">
                     <div className="chip-row">
                       <span className="chip accent mono">#{message.id}</span>
+                      <span className="chip">{speakerLabel}</span>
                       <span className="chip">{message.direction}</span>
                       <span className="chip">{message.sender_kind}</span>
                       <span className="chip">{message.message_type}</span>

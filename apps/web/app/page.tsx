@@ -43,8 +43,8 @@ export default async function HomePage() {
         store={store}
         products={storefrontProducts}
         eyebrow="TechnoStore Salta"
-        title="Celulares listos para consultar y coordinar por WhatsApp."
-        lead="Precios en pesos, capacidad, red, color y tiempos de entrega claros. Sin datos internos, sin ruido."
+        title="Celulares en Salta."
+        lead="Precio final en pesos, memoria, color y entrega clara. Elegís el modelo y seguís por WhatsApp con atención humana."
       />
     );
   }

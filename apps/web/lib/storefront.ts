@@ -77,16 +77,26 @@ export function buildStorefrontProfile(settings: SettingRecord[]): StorefrontPro
       storeRoot,
       "store_whatsapp",
       "store_whatsapp_phone",
+      "store_whatsapp_number",
       "whatsapp",
       "whatsapp_phone",
+      "whatsapp_number",
+      "contact_whatsapp",
+      "contact_phone",
+      "store_contact_whatsapp",
+      "store_contact_phone",
       "store_phone",
-      "phone"
+      "store_phone_number",
+      "phone",
+      "telefono",
+      "telefono_whatsapp",
+      "celular"
     )
   );
 
   return {
     name,
-    tagline: "iPhone, Samsung, Xiaomi y más, con atención directa por WhatsApp.",
+    tagline: "Modelos nuevos y usados con atención directa por WhatsApp.",
     whatsapp_number: whatsappNumber,
     whatsapp_url: whatsappNumber ? `https://wa.me/${whatsappNumber}` : null,
     storefront_url: storefrontUrl,

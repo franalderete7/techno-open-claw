@@ -351,10 +351,44 @@ function patchStateUpdateWorkflow(workflow, outputFile) {
     workflow,
     "Build Update Payload",
     `const data = $input.first().json || {};
-const context = data.context || {};
-const router = data.router_output || {};
-const validator = data.validator_output || {};
-const state = validator.final_state_delta || {};
+const parseJsonish = (value) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    return value;
+  }
+};
+const asRecord = (value) => {
+  const parsed = parseJsonish(value);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+};
+const asArray = (value) => {
+  const parsed = parseJsonish(value);
+  return Array.isArray(parsed) ? parsed : [];
+};
+const toBool = (value) => {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return ['true', '1', 'yes', 'si', 'sí', 'y'].includes(normalized);
+};
+const extractReplyText = (messages) =>
+  asArray(messages)
+    .map((message) => {
+      if (!message || typeof message !== 'object') return '';
+      return String(message.text ?? message.reply_text ?? '').trim();
+    })
+    .filter(Boolean)
+    .join('\\n\\n')
+    .trim();
+
+const context = asRecord(data.context);
+const router = asRecord(data.router_output);
+const responder = asRecord(data.responder_output);
+const validator = asRecord(data.validator_output);
+const state = asRecord(validator.final_state_delta);
 
 const now = new Date().toISOString();
 const currentTags = Array.isArray(context.customer?.tags) ? context.customer.tags : [];
@@ -403,9 +437,15 @@ const conversationInsights = unique([
   ...selectedProductKeys.slice(0, 3).map((key) => 'Producto ' + key),
 ]).slice(0, 8);
 
-const shouldPersistBotMessage = data.should_send === true;
-const botMessageText = String(data.bot_message_text || '').trim();
-const sendResult = data.send_result && typeof data.send_result === 'object' ? data.send_result : null;
+const shouldPersistBotMessage = toBool(data.should_send);
+const sendResult = asRecord(data.send_result);
+const botMessageText = String(
+  data.bot_message_text ||
+    extractReplyText(data.wa_messages) ||
+    extractReplyText(validator.reply_messages) ||
+    responder.reply_text ||
+    ''
+).trim();
 
 const botMessageRow = shouldPersistBotMessage
   ? {
@@ -455,7 +495,7 @@ const turnRow = {
   state_delta: state,
   selected_product_keys: selectedProductKeys,
   validation_errors: Array.isArray(validator.validation_errors) ? validator.validation_errors.map((item) => item.code || item.message).filter(Boolean) : [],
-  success: data.should_send !== false,
+  success: toBool(data.should_send) !== false,
   failure_reason: null,
   send_result: sendResult,
 };
