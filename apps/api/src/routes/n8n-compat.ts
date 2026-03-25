@@ -481,7 +481,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: "Missing p_manychat_id or p_message_id" });
     }
 
-    const rows = await query<{ id: number }>(
+    const rows = await query<{ id: number | string }>(
       `
         select m.id
         from public.messages m
@@ -495,10 +495,19 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
       [`manychat:${manychatId}`]
     );
 
-    const latestMessageId = rows[0]?.id ?? null;
+    // bigserial / int8 columns come back from node-pg as strings; JSON p_message_id is a number.
+    // Strict === would always fail (e.g. "42" === 42), so debounce always looked "not latest".
+    const latestRaw = rows[0]?.id;
+    const latestMessageId =
+      latestRaw == null || latestRaw === "" ? null : Number(latestRaw);
+
+    const isLatest =
+      latestMessageId == null || !Number.isFinite(latestMessageId)
+        ? true
+        : latestMessageId === messageId;
 
     return reply.send({
-      check_is_latest_message: latestMessageId == null ? true : latestMessageId === messageId,
+      check_is_latest_message: isLatest,
       latest_message_id: latestMessageId,
       checked_message_id: messageId,
     });
