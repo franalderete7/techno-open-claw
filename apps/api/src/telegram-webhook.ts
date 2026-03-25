@@ -22,7 +22,12 @@ import {
 } from "./telegram.js";
 import { transcribeAudio } from "./sales-agent.js";
 import { handleTelegramOperatorMessage } from "./telegram-operator.js";
-import { saveConversationMessage, upsertTelegramConversation, upsertTelegramCustomer } from "./telegram-storage.js";
+import {
+  saveConversationMessage,
+  saveTelegramInboundMessage,
+  upsertTelegramConversation,
+  upsertTelegramCustomer,
+} from "./telegram-storage.js";
 
 export async function handleTelegramWebhook(request: FastifyRequest, reply: FastifyReply) {
   if (!config.TELEGRAM_BOT_TOKEN) {
@@ -121,10 +126,8 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
     messageAt,
   });
 
-  await saveConversationMessage({
+  const inbound = await saveTelegramInboundMessage({
     conversationId,
-    direction: "inbound",
-    senderKind: "customer",
     messageType,
     textBody: textBody || userMessage || null,
     mediaUrl,
@@ -136,68 +139,95 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
     },
   });
 
-  try {
-    const operatorResult = await handleTelegramOperatorMessage({
-      actorRef: `telegram:${message.chat.id}:${message.from?.id ?? message.chat.id}`,
-      chatId: String(message.chat.id),
-      chatIdNumber: message.chat.id,
-      userId: message.from ? String(message.from.id) : null,
-      userMessage,
-      imageBase64,
-    });
-
-    const responseText = operatorResult.text.trim() || "No pude preparar una respuesta útil.";
-
-    await sendTelegramTextMessage({
-      botToken: config.TELEGRAM_BOT_TOKEN,
-      chatId: message.chat.id,
-      text: responseText,
-      replyToMessageId: message.message_id,
-    });
-
-    await saveConversationMessage({
-      conversationId,
-      direction: "outbound",
-      senderKind: "tool",
-      messageType: "text",
-      textBody: responseText,
-      payload: {
-        source: "telegram-operator",
+  if (inbound.duplicate) {
+    request.log.info(
+      {
+        chatId: message.chat.id,
+        messageId: message.message_id,
+        conversationId,
+        inboundMessageId: inbound.id,
       },
-    });
+      "Skipping duplicate Telegram webhook update"
+    );
 
     return {
       ok: true,
-      replied: true,
-      mode: "operator",
-    };
-  } catch (error) {
-    request.log.error({ error }, "Telegram operator flow failed");
-
-    const fallbackText = error instanceof Error ? error.message : "No pude procesar esa instrucción.";
-
-    await sendTelegramTextMessage({
-      botToken: config.TELEGRAM_BOT_TOKEN,
-      chatId: message.chat.id,
-      text: fallbackText,
-      replyToMessageId: message.message_id,
-    });
-
-    await saveConversationMessage({
-      conversationId,
-      direction: "outbound",
-      senderKind: "tool",
-      messageType: "text",
-      textBody: fallbackText,
-      payload: {
-        source: "telegram-error",
-      },
-    });
-
-    return {
-      ok: true,
-      replied: true,
-      error: fallbackText,
+      duplicate: true,
     };
   }
+
+  void (async () => {
+    try {
+      const operatorResult = await handleTelegramOperatorMessage({
+        actorRef: `telegram:${message.chat.id}:${message.from?.id ?? message.chat.id}`,
+        chatId: String(message.chat.id),
+        chatIdNumber: message.chat.id,
+        userId: message.from ? String(message.from.id) : null,
+        userMessage,
+        imageBase64,
+      });
+
+      const responseText = operatorResult.text.trim() || "No pude preparar una respuesta útil.";
+
+      const telegramResponse = await sendTelegramTextMessage({
+        botToken: config.TELEGRAM_BOT_TOKEN,
+        chatId: message.chat.id,
+        text: responseText,
+        replyToMessageId: message.message_id,
+      });
+
+      await saveConversationMessage({
+        conversationId,
+        direction: "outbound",
+        senderKind: "tool",
+        messageType: "text",
+        textBody: responseText,
+        payload: {
+          source: "telegram-operator",
+          telegramMessageId: telegramResponse.message_id,
+        },
+      });
+
+      request.log.info(
+        {
+          chatId: message.chat.id,
+          inboundMessageId: inbound.id,
+          outboundTelegramMessageId: telegramResponse.message_id,
+        },
+        "Telegram operator reply sent"
+      );
+    } catch (error) {
+      request.log.error({ error }, "Telegram operator flow failed");
+
+      const fallbackText = error instanceof Error ? error.message : "No pude procesar esa instrucción.";
+
+      try {
+        const telegramResponse = await sendTelegramTextMessage({
+          botToken: config.TELEGRAM_BOT_TOKEN,
+          chatId: message.chat.id,
+          text: fallbackText,
+          replyToMessageId: message.message_id,
+        });
+
+        await saveConversationMessage({
+          conversationId,
+          direction: "outbound",
+          senderKind: "tool",
+          messageType: "text",
+          textBody: fallbackText,
+          payload: {
+            source: "telegram-error",
+            telegramMessageId: telegramResponse.message_id,
+          },
+        });
+      } catch (sendError) {
+        request.log.error({ error: sendError }, "Failed to send Telegram error reply");
+      }
+    }
+  })();
+
+  return {
+    ok: true,
+    accepted: true,
+  };
 }

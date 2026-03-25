@@ -1,7 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { draftSchema, resolveTelegramOperatorDraft, startTelegramOperatorTurn } from "../telegram-operator.js";
-import { saveConversationMessage, upsertTelegramConversation, upsertTelegramCustomer } from "../telegram-storage.js";
+import {
+  saveConversationMessage,
+  saveTelegramInboundMessage,
+  upsertTelegramConversation,
+  upsertTelegramCustomer,
+} from "../telegram-storage.js";
 
 const inboundTurnSchema = z.object({
   actor_ref: z.string().trim().min(1),
@@ -59,10 +64,8 @@ export const telegramOperatorApiRoutes: FastifyPluginAsync = async (app) => {
       messageAt,
     });
 
-    const inboundMessageId = await saveConversationMessage({
+    const inboundMessage = await saveTelegramInboundMessage({
       conversationId,
-      direction: "inbound",
-      senderKind: "customer",
       messageType: body.message_type,
       textBody: body.text_body ?? body.user_message,
       mediaUrl: body.media_url ?? null,
@@ -83,7 +86,8 @@ export const telegramOperatorApiRoutes: FastifyPluginAsync = async (app) => {
       ...result,
       customer_id: customerId,
       conversation_id: conversationId,
-      inbound_message_id: inboundMessageId,
+      inbound_message_id: inboundMessage.id,
+      duplicate: inboundMessage.duplicate,
     };
   });
 

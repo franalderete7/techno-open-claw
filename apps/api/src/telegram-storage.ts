@@ -116,3 +116,53 @@ export async function saveConversationMessage(params: {
 
   return result.rows[0].id;
 }
+
+export async function saveTelegramInboundMessage(params: {
+  conversationId: number;
+  messageType: "text" | "audio" | "image" | "video" | "file";
+  textBody?: string | null;
+  mediaUrl?: string | null;
+  transcript?: string | null;
+  payload?: Record<string, unknown>;
+}) {
+  const telegramMessageId = params.payload?.telegramMessageId;
+
+  if (telegramMessageId != null) {
+    const existing = await pool.query<{ id: number }>(
+      `
+        select id
+        from public.messages
+        where conversation_id = $1
+          and direction = 'inbound'
+          and sender_kind = 'customer'
+          and payload ->> 'telegramMessageId' = $2
+        order by id desc
+        limit 1
+      `,
+      [params.conversationId, String(telegramMessageId)]
+    );
+
+    if (existing.rows[0]) {
+      return {
+        id: existing.rows[0].id,
+        duplicate: true,
+      };
+    }
+  }
+
+  const id = await saveConversationMessage({
+    conversationId: params.conversationId,
+    direction: "inbound",
+    senderKind: "customer",
+    messageType: params.messageType,
+    textBody: params.textBody,
+    mediaUrl: params.mediaUrl,
+    transcript: params.transcript,
+    payload: params.payload,
+  });
+
+  return {
+    id,
+    duplicate: false,
+  };
+}
