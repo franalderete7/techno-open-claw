@@ -357,6 +357,14 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/conversations", async (request, reply) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
+
+    if (body.skip_save === true) {
+      return reply.send({
+        skipped: true,
+        reason: String(body.reason ?? "skip_save"),
+      });
+    }
+
     const manychatId = String(body.manychat_id ?? body.subscriber_id ?? "").trim();
 
     if (!manychatId) {
@@ -401,6 +409,10 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         : "text";
     const textBody = String(body.message ?? body.text ?? "").trim() || null;
     const transcript = String(body.audio_transcription ?? "").trim() || null;
+
+    if (role === "bot" && !textBody) {
+      return reply.code(400).send({ error: "Missing bot message text" });
+    }
 
     // ManyChat can occasionally deliver the same inbound event more than once
     // within a very short window. Reuse the recent identical inbound row so the

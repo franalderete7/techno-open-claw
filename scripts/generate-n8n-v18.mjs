@@ -342,6 +342,140 @@ return [{
   }
 }
 
+function patchStateUpdateWorkflow(workflow, outputFile) {
+  if (outputFile !== "TechnoStore_v18_state_update.json") {
+    return;
+  }
+
+  updateNodeJsCode(
+    workflow,
+    "Build Update Payload",
+    `const data = $input.first().json || {};
+const context = data.context || {};
+const router = data.router_output || {};
+const validator = data.validator_output || {};
+const state = validator.final_state_delta || {};
+
+const now = new Date().toISOString();
+const currentTags = Array.isArray(context.customer?.tags) ? context.customer.tags : [];
+const unique = (values) => [...new Set(values.filter(Boolean))];
+const mergedTags = unique([
+  ...currentTags,
+  ...(Array.isArray(state.tags_to_add) ? state.tags_to_add : []),
+]).filter((tag) => !(Array.isArray(state.tags_to_remove) ? state.tags_to_remove : []).includes(tag));
+
+const currentLeadScore = Number(context.customer?.lead_score || 0);
+const nextLeadScore = Math.max(0, Math.min(100, currentLeadScore + Number(state.lead_score_delta || 0)));
+const selectedProductKeys = Array.isArray(validator.selected_product_keys) ? validator.selected_product_keys : [];
+
+const updates = {
+  last_bot_interaction: now,
+  updated_at: now,
+  last_intent: state.intent_key || null,
+  funnel_stage: state.funnel_stage || null,
+  lead_score: nextLeadScore,
+  tags: mergedTags,
+};
+
+if (selectedProductKeys[0]) {
+  updates.interested_product = selectedProductKeys[0];
+}
+
+if (state.payment_method_key) {
+  updates.payment_method_last = state.payment_method_key;
+}
+
+const brandList = unique(selectedProductKeys
+  .map((key) => {
+    const product = (Array.isArray(context.candidate_products) ? context.candidate_products : []).find((item) => item.product_key === key);
+    return product?.brand_key || null;
+  })
+  .filter(Boolean));
+
+if (brandList.length > 0) {
+  const currentBrands = Array.isArray(context.customer?.brands_mentioned) ? context.customer.brands_mentioned : [];
+  updates.brands_mentioned = unique([...brandList, ...currentBrands]).slice(0, 10);
+}
+
+const conversationSummary = String(state.summary || router.rationale || 'Turno procesado').slice(0, 220);
+const conversationInsights = unique([
+  'Ruta ' + String(router.route_key || 'unknown'),
+  ...selectedProductKeys.slice(0, 3).map((key) => 'Producto ' + key),
+]).slice(0, 8);
+
+const shouldPersistBotMessage = data.should_send === true;
+const botMessageText = String(data.bot_message_text || '').trim();
+const sendResult = data.send_result && typeof data.send_result === 'object' ? data.send_result : null;
+
+const botMessageRow = shouldPersistBotMessage
+  ? {
+      manychat_id: data.subscriber_id,
+      customer_id: context.customer?.customer_id || null,
+      role: 'bot',
+      message: botMessageText,
+      message_type: 'text',
+      intent_detected: state.intent_key || null,
+      products_mentioned: selectedProductKeys,
+      triggered_human: false,
+      was_audio: false,
+      channel: 'manychat',
+      external_message_id: null,
+      whatsapp_phone_number_id: null,
+      applied_tags: Array.isArray(state.tags_to_add) ? state.tags_to_add : [],
+      payment_methods_detected: state.payment_method_key ? [state.payment_method_key] : [],
+      brands_detected: brandList,
+      topics_detected: [String(router.route_key || 'generic_sales')],
+      funnel_stage_after: state.funnel_stage || null,
+      conversation_summary: conversationSummary,
+      conversation_insights: conversationInsights,
+      lead_score_after: nextLeadScore,
+      workflow_version: 'v18',
+      route_key: router.route_key || 'generic_sales',
+      send_result: sendResult,
+    }
+  : {
+      skip_save: true,
+      reason: 'reply_not_sent',
+      manychat_id: data.subscriber_id,
+      workflow_version: 'v18',
+    };
+
+const turnRow = {
+  workflow_version: 'v18',
+  provider_name: data.responder_provider_name || 'deterministic',
+  model_name: data.responder_model_name || 'deterministic',
+  manychat_id: data.subscriber_id,
+  customer_id: context.customer?.customer_id || null,
+  route_key: router.route_key || 'generic_sales',
+  user_message: data.user_message || '',
+  context_payload: context,
+  router_payload: router,
+  responder_payload: data.responder_output || {},
+  validator_payload: validator,
+  state_delta: state,
+  selected_product_keys: selectedProductKeys,
+  validation_errors: Array.isArray(validator.validation_errors) ? validator.validation_errors.map((item) => item.code || item.message).filter(Boolean) : [],
+  success: data.should_send !== false,
+  failure_reason: null,
+  send_result: sendResult,
+};
+
+return [{
+  json: {
+    ...data,
+    customer_updates: updates,
+    bot_message_row: botMessageRow,
+    ai_turn_row: turnRow,
+  }
+}];`
+  );
+
+  updateNodeExecutionFlags(workflow, "Save Bot Message", {
+    continueOnFail: false,
+    alwaysOutputData: false,
+  });
+}
+
 mkdirSync(outputDir, { recursive: true });
 
 const files = readdirSync(sourceDir)
@@ -362,6 +496,7 @@ for (const file of files) {
   cleanHttpHeaders(transformed);
   const outputFile = basename(file).replace("_v17_", "_v18_");
   patchEntryWorkflow(transformed, outputFile);
+  patchStateUpdateWorkflow(transformed, outputFile);
   const outputPath = resolve(outputDir, outputFile);
   writeFileSync(outputPath, `${JSON.stringify(transformed, null, 2)}\n`);
   generated.push(outputPath);
