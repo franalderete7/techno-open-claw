@@ -439,6 +439,7 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
                         <StorefrontProductActions
                           product={product}
                           whatsappUrl={store.whatsapp_url}
+                          sourcePath="/"
                           detailHref={detailHref}
                         />
                       </div>

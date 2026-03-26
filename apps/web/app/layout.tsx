@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import Script from "next/script";
 import { Instrument_Sans, Newsreader } from "next/font/google";
 import type { ReactNode } from "react";
 import { getSiteMode } from "../lib/site-mode";
@@ -13,6 +14,9 @@ export const metadata: Metadata = {
     apple: "/apple-icon.png",
   },
 };
+
+const DATAFAST_WEBSITE_ID = "dfid_0FS4Ry9BtGqWZVGm695Zg";
+const DATAFAST_DOMAIN = "technostoresalta.com";
 
 const navItems = [
   ["Dashboard", "/"],
@@ -43,6 +47,22 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
 
   return (
     <html lang="en">
+      <head>
+        {siteMode === "storefront" ? (
+          <>
+            <Script id="datafast-queue" strategy="beforeInteractive">
+              {`window.datafast=window.datafast||function(){window.datafast.q=window.datafast.q||[];window.datafast.q.push(arguments);};`}
+            </Script>
+            <Script
+              id="datafast-script"
+              strategy="afterInteractive"
+              src="/js/script.js"
+              data-website-id={DATAFAST_WEBSITE_ID}
+              data-domain={DATAFAST_DOMAIN}
+            />
+          </>
+        ) : null}
+      </head>
       <body className={`${sans.variable} ${serif.variable}`}>
         {siteMode === "admin" ? (
           <main>

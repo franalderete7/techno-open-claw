@@ -5,7 +5,7 @@ import { useState } from "react";
 import { buildStorefrontConsultUrl, buildStorefrontPaymentFallbackUrl, type StorefrontProduct } from "../../lib/storefront";
 
 type StorefrontProductActionsProps = {
-  product: Pick<StorefrontProduct, "id" | "title" | "public_price_ars">;
+  product: Pick<StorefrontProduct, "id" | "sku" | "title" | "public_price_ars">;
   whatsappUrl: string | null;
   sourcePath?: string | null;
   note?: string | null;
@@ -72,7 +72,18 @@ export function StorefrontProductActions({
   return (
     <>
       <div className={className || "storefront-card-actions"}>
-        <button type="button" className="storefront-pay-button" disabled={!payEnabled || pending} onClick={() => void handlePayNow()}>
+        <button
+          type="button"
+          className="storefront-pay-button"
+          disabled={!payEnabled || pending}
+          onClick={() => void handlePayNow()}
+          data-fast-goal="click_pay_now"
+          data-fast-goal-product-id={String(product.id)}
+          data-fast-goal-product-sku={product.sku}
+          data-fast-goal-product-title={product.title}
+          data-fast-goal-price-ars={product.public_price_ars != null ? String(product.public_price_ars) : undefined}
+          data-fast-goal-source-path={sourcePath ?? undefined}
+        >
           {pending ? "Preparando..." : "Quiero pagarlo ahora"}
         </button>
         {detailHref ? (
@@ -81,7 +92,18 @@ export function StorefrontProductActions({
           </Link>
         ) : null}
         {consultUrl ? (
-          <a className="storefront-secondary-button" href={consultUrl} target="_blank" rel="noreferrer">
+          <a
+            className="storefront-secondary-button"
+            href={consultUrl}
+            target="_blank"
+            rel="noreferrer"
+            data-fast-goal="click_consultar"
+            data-fast-goal-product-id={String(product.id)}
+            data-fast-goal-product-sku={product.sku}
+            data-fast-goal-product-title={product.title}
+            data-fast-goal-price-ars={product.public_price_ars != null ? String(product.public_price_ars) : undefined}
+            data-fast-goal-source-path={sourcePath ?? undefined}
+          >
             <WhatsAppIcon />
             Consultar
           </a>
