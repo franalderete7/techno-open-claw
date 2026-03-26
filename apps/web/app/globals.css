@@ -469,6 +469,12 @@ nav a:hover {
   gap: 10px;
 }
 
+.storefront-card-media-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
 .storefront-product-image,
 .storefront-image-fallback {
   width: 100%;
@@ -482,6 +488,7 @@ nav a:hover {
 
 .storefront-product-image {
   object-fit: cover;
+  transition: border-color 180ms ease, transform 180ms ease;
 }
 
 .storefront-image-fallback {
@@ -492,6 +499,7 @@ nav a:hover {
   padding: 16px;
   color: var(--accent);
   text-align: center;
+  transition: border-color 180ms ease, transform 180ms ease;
 }
 
 .storefront-image-fallback-mark {
@@ -536,6 +544,22 @@ nav a:hover {
   font-size: clamp(1.4rem, 4vw, 1.9rem);
   line-height: 0.98;
   letter-spacing: -0.05em;
+}
+
+.storefront-card-title-link {
+  color: inherit;
+  text-decoration: none;
+  transition: color 180ms ease;
+}
+
+.storefront-card-media-link:hover .storefront-product-image,
+.storefront-card-media-link:hover .storefront-image-fallback {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.storefront-card-title-link:hover {
+  color: var(--accent);
 }
 
 .storefront-card-subtitle {
@@ -620,6 +644,80 @@ nav a:hover {
   color: var(--soft-text);
   font-size: 0.84rem;
   line-height: 1.45;
+}
+
+.storefront-product-page {
+  display: grid;
+  gap: 18px;
+}
+
+.storefront-product-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.storefront-product-detail {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  border: 0.5px solid var(--line);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: var(--shadow);
+}
+
+.storefront-product-visual {
+  display: grid;
+  gap: 10px;
+}
+
+.storefront-product-content {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.storefront-product-heading {
+  display: grid;
+  gap: 8px;
+}
+
+.storefront-product-title {
+  font-size: clamp(2.2rem, 5vw, 3.6rem);
+}
+
+.storefront-product-description {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.storefront-product-price-card {
+  display: grid;
+  gap: 4px;
+  padding: 18px;
+  border: 0.5px solid var(--line);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(191, 111, 77, 0.12), transparent 34%),
+    rgba(255, 255, 255, 0.78);
+}
+
+.storefront-product-share {
+  display: grid;
+  gap: 6px;
+}
+
+.storefront-inline-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.storefront-inline-link:hover {
+  text-decoration: underline;
 }
 
 .storefront-pay-button,
@@ -2061,6 +2159,11 @@ nav a:hover {
   .storefront-pagination-actions {
     width: 100%;
   }
+
+  .storefront-product-detail {
+    padding: 16px;
+    border-radius: 22px;
+  }
 }
 
 @media (min-width: 860px) {
@@ -2102,6 +2205,11 @@ nav a:hover {
   .storefront-card-actions {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .storefront-product-detail {
+    grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.05fr);
+    align-items: start;
   }
 
   .storefront-location {

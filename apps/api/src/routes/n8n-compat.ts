@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { pool, query } from "../db.js";
-import { resolveStorefrontCheckoutHandoff } from "../storefront-checkouts.js";
+import { ensureStorefrontCheckoutHandoff, resolveStorefrontCheckoutHandoff } from "../storefront-checkouts.js";
 
 type NotesState = {
   tags: string[];
@@ -40,6 +40,25 @@ type ProductRow = {
   total_units: number;
 };
 
+type CandidateProduct = {
+  score: number;
+  product_id: number;
+  product_key: string;
+  product_name: string;
+  product_url: string | null;
+  brand_key: string;
+  condition: string;
+  storage_gb: number | null;
+  color: string | null;
+  in_stock: boolean;
+  in_stock_units: number;
+  delivery_days: number | null;
+  price_ars: number | null;
+  promo_price_ars: number | null;
+  price_usd: number | null;
+  image_url: string | null;
+};
+
 function normalizeText(value: string) {
   return value
     .toLowerCase()
@@ -52,6 +71,65 @@ function normalizeText(value: string) {
 
 function normalizeBrandKey(value: string) {
   return normalizeText(value).replace(/\s+/g, "_");
+}
+
+function hostFromUrl(value: string | null | undefined) {
+  try {
+    return value ? new URL(value).host || null : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildProductUrl(storeWebsiteUrl: string | null | undefined, productKey: string) {
+  const sku = productKey.trim().toLowerCase();
+  if (!sku) {
+    return null;
+  }
+
+  if (!storeWebsiteUrl) {
+    return `/${encodeURIComponent(sku)}`;
+  }
+
+  return `${storeWebsiteUrl.replace(/\/$/, "")}/${encodeURIComponent(sku)}`;
+}
+
+function messageRequestsPaymentLink(userMessage: string) {
+  const normalized = normalizeText(userMessage);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return /(link de pago|pasame el link|pasame link|mandame el link|manda el link|quiero pagar|quiero pagarlo|lo quiero pagar|pagarlo ahora|avanzar con el pago|quiero el link)/.test(
+    normalized
+  );
+}
+
+function pickDirectPaymentProduct(params: {
+  userMessage: string;
+  interestedProductKey: string | null;
+  candidateProducts: CandidateProduct[];
+}) {
+  if (!messageRequestsPaymentLink(params.userMessage)) {
+    return null;
+  }
+
+  const [topCandidate, secondCandidate] = params.candidateProducts;
+  if (!topCandidate) {
+    return null;
+  }
+
+  const interestedProductKey = params.interestedProductKey?.trim().toLowerCase() || null;
+  if (interestedProductKey && topCandidate.product_key.trim().toLowerCase() === interestedProductKey) {
+    return topCandidate;
+  }
+
+  const secondScore = secondCandidate?.score ?? 0;
+  const hasStrongScore = topCandidate.score >= 14;
+  const hasClearMargin = !secondCandidate || topCandidate.score - secondScore >= 8 || secondScore < 8;
+
+  return hasStrongScore && hasClearMargin ? topCandidate : null;
 }
 
 function parseNotesState(notes: string | null): NotesState {
@@ -641,20 +719,22 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
 
     const interestedProductKey = customerState.interestedProduct?.trim().toLowerCase() || null;
 
-    const candidateProducts = productRows
+    const rawCandidateProducts = productRows
       .map((product) => {
         const productKey = product.sku.trim().toLowerCase();
         const interestedProductBoost = interestedProductKey && productKey === interestedProductKey ? 40 : 0;
 
         return {
           score: scoreCandidate(product, userMessage) + interestedProductBoost,
+          product_id: product.id,
           product_key: product.sku,
           product_name: product.title,
+          product_url: null,
           brand_key: normalizeBrandKey(product.brand),
           condition: product.condition,
           storage_gb: product.storage_gb ?? inferStorageGb(product),
           color: product.color ?? inferColor(product),
-          in_stock: true,
+          in_stock: product.in_stock,
           in_stock_units: product.in_stock_units,
           delivery_days: product.delivery_days,
           price_ars: product.price_amount == null ? null : Number(product.price_amount),
@@ -711,6 +791,19 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         "https://technostoresalta.com",
     };
 
+    const candidateProducts: CandidateProduct[] = rawCandidateProducts.map((product) => ({
+      ...product,
+      product_url: buildProductUrl(store.store_website_url, product.product_key),
+    }));
+
+    const customerName = customer ? [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || null : null;
+    const customerPhone = customer?.phone?.trim() || null;
+    const directPaymentProduct = pickDirectPaymentProduct({
+      userMessage,
+      interestedProductKey,
+      candidateProducts,
+    });
+
     let storefrontHandoff: Awaited<ReturnType<typeof resolveStorefrontCheckoutHandoff>> | {
       ok: false;
       order: null;
@@ -726,9 +819,6 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         storefrontHandoff = await resolveStorefrontCheckoutHandoff(storefrontOrderId, storefrontOrderToken);
 
         if (storefrontHandoff.ok && customer) {
-          const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || null;
-          const customerPhone = customer.phone?.trim() || null;
-
           await query(
             `
               update public.orders
@@ -760,6 +850,8 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
             id: storefrontOrderId,
             order_number: `TOC-${storefrontOrderId}`,
             item_count: 1,
+            product_id: 0,
+            product_key: null,
             subtotal: 0,
             total: 0,
             currency_code: "ARS",
@@ -767,6 +859,47 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
             title: "pedido web",
             image_url: null,
             delivery_days: null,
+            checkout_channel: "storefront",
+          },
+          payment: {
+            ready: false,
+            status: "failed",
+            url: null,
+            provider: "galiopay",
+            message: error instanceof Error ? error.message : "No se pudo preparar el link de pago.",
+          },
+        };
+      }
+    } else if (directPaymentProduct) {
+      try {
+        storefrontHandoff = await ensureStorefrontCheckoutHandoff({
+          productId: directPaymentProduct.product_id,
+          sourceHost: hostFromUrl(store.store_website_url),
+          sourcePath: "/whatsapp/payment-request",
+          channel: "whatsapp",
+          customerId: customer?.id ?? null,
+          customerPhone,
+          customerName,
+        });
+      } catch (error) {
+        const subtotal = directPaymentProduct.promo_price_ars ?? directPaymentProduct.price_ars ?? 0;
+
+        storefrontHandoff = {
+          ok: true,
+          order: {
+            id: 0,
+            order_number: "",
+            item_count: 1,
+            product_id: directPaymentProduct.product_id,
+            product_key: directPaymentProduct.product_key,
+            subtotal,
+            total: subtotal,
+            currency_code: "ARS",
+            status: "pending",
+            title: directPaymentProduct.product_name,
+            image_url: directPaymentProduct.image_url,
+            delivery_days: directPaymentProduct.delivery_days,
+            checkout_channel: "whatsapp",
           },
           payment: {
             ready: false,

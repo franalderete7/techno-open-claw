@@ -4,11 +4,16 @@ import { config } from "./config.js";
 import { pool } from "./db.js";
 import { createGalioPaymentLink, getGalioPayment, hasGalioPayConfig } from "./galiopay.js";
 
+type CheckoutChannel = "storefront" | "whatsapp" | "telegram" | "api";
+
 type CreateStorefrontPaymentIntentInput = {
   productId: number;
   sourceHost?: string | null;
   sourcePath?: string | null;
-  channel?: "storefront" | "whatsapp" | "telegram" | "api";
+  channel?: CheckoutChannel;
+  customerId?: number | null;
+  customerPhone?: string | null;
+  customerName?: string | null;
 };
 
 type StorefrontPaymentIntentResult = {
@@ -27,6 +32,8 @@ type StorefrontHandoffResult = {
     id: number;
     order_number: string;
     item_count: number;
+    product_id: number;
+    product_key: string | null;
     subtotal: number;
     total: number;
     currency_code: string;
@@ -34,6 +41,7 @@ type StorefrontHandoffResult = {
     title: string;
     image_url: string | null;
     delivery_days: number | null;
+    checkout_channel: CheckoutChannel;
   } | null;
   payment: {
     ready: boolean;
@@ -49,6 +57,8 @@ type CheckoutRow = {
   order_id: number;
   order_number: string;
   order_status: string;
+  product_id: number;
+  product_key: string | null;
   subtotal_amount: string | number;
   total_amount: string | number;
   currency_code: string;
@@ -62,13 +72,62 @@ type CheckoutRow = {
   galio_payment_id: string | null;
   galio_payment_status: string | null;
   checkout_status: string;
+  checkout_channel: CheckoutChannel;
   source_host: string | null;
   metadata: Record<string, unknown> | null;
+};
+
+type ReusableCheckoutRow = {
+  order_id: number;
+  token: string;
+};
+
+type EnsureStorefrontCheckoutHandoffInput = {
+  productId: number;
+  sourceHost?: string | null;
+  sourcePath?: string | null;
+  channel?: CheckoutChannel;
+  customerId?: number | null;
+  customerPhone?: string | null;
+  customerName?: string | null;
 };
 
 function toNumber(value: string | number | null | undefined) {
   const amount = Number(value ?? NaN);
   return Number.isFinite(amount) ? amount : null;
+}
+
+function normalizePhoneDigits(value: string | null | undefined) {
+  const digits = String(value ?? "").replace(/\D+/g, "");
+  return digits || null;
+}
+
+function orderSourceForChannel(channel: CheckoutChannel) {
+  switch (channel) {
+    case "whatsapp":
+      return "whatsapp" as const;
+    case "telegram":
+      return "telegram" as const;
+    case "api":
+      return "api" as const;
+    case "storefront":
+    default:
+      return "web" as const;
+  }
+}
+
+function orderNotePrefixForChannel(channel: CheckoutChannel) {
+  switch (channel) {
+    case "whatsapp":
+      return "WhatsApp checkout";
+    case "telegram":
+      return "Telegram checkout";
+    case "api":
+      return "API checkout";
+    case "storefront":
+    default:
+      return "Storefront checkout";
+  }
 }
 
 function absolutePublicUrl(value: string | null) {
@@ -123,6 +182,8 @@ async function getCheckoutRowForUpdate(client: PoolClient, orderId: number, toke
         sci.order_id,
         o.order_number,
         o.status as order_status,
+        sci.product_id,
+        p.sku as product_key,
         o.subtotal_amount,
         o.total_amount,
         sci.currency_code,
@@ -136,16 +197,107 @@ async function getCheckoutRowForUpdate(client: PoolClient, orderId: number, toke
         sci.galio_payment_id,
         sci.galio_payment_status,
         sci.status as checkout_status,
+        sci.channel as checkout_channel,
         sci.source_host,
         sci.metadata
       from public.storefront_checkout_intents sci
       join public.orders o on o.id = sci.order_id
+      left join public.products p on p.id = sci.product_id
       where sci.order_id = $1
         and sci.token = $2
       limit 1
       for update
     `,
     [orderId, token]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function attachCheckoutCustomerContext(params: {
+  orderId: number;
+  token: string;
+  customerId?: number | null;
+  customerPhone?: string | null;
+  customerName?: string | null;
+}) {
+  const customerPhone = params.customerPhone?.trim() || null;
+  const customerName = params.customerName?.trim() || null;
+  const hasContext = params.customerId != null || customerPhone || customerName;
+
+  if (!hasContext) {
+    return;
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    await client.query(
+      `
+        update public.orders
+        set
+          customer_id = coalesce(customer_id, $2),
+          updated_at = now()
+        where id = $1
+      `,
+      [params.orderId, params.customerId ?? null]
+    );
+
+    await client.query(
+      `
+        update public.storefront_checkout_intents
+        set
+          customer_phone = coalesce(nullif(customer_phone, ''), $3),
+          customer_name = coalesce(nullif(customer_name, ''), $4),
+          updated_at = now()
+        where order_id = $1
+          and token = $2
+      `,
+      [params.orderId, params.token, customerPhone, customerName]
+    );
+
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function findReusableCheckoutIntent(params: {
+  productId: number;
+  customerId?: number | null;
+  customerPhone?: string | null;
+}) {
+  const phoneDigits = normalizePhoneDigits(params.customerPhone);
+
+  if (params.customerId == null && !phoneDigits) {
+    return null;
+  }
+
+  const result = await pool.query<ReusableCheckoutRow>(
+    `
+      select sci.order_id, sci.token
+      from public.storefront_checkout_intents sci
+      join public.orders o on o.id = sci.order_id
+      where sci.product_id = $1
+        and sci.status in ('created', 'link_created')
+        and o.status in ('draft', 'pending')
+        and (
+          ($2::bigint is not null and o.customer_id = $2)
+          or (
+            $3::text is not null
+            and $3 <> ''
+            and regexp_replace(coalesce(sci.customer_phone, ''), '\D', '', 'g') = $3
+          )
+        )
+      order by sci.updated_at desc, sci.id desc
+      limit 1
+    `,
+    [params.productId, params.customerId ?? null, phoneDigits]
   );
 
   return result.rows[0] ?? null;
@@ -180,6 +332,9 @@ export async function createStorefrontPaymentIntent({
   sourceHost,
   sourcePath,
   channel = "storefront",
+  customerId,
+  customerPhone,
+  customerName,
 }: CreateStorefrontPaymentIntentInput): Promise<StorefrontPaymentIntentResult> {
   const client = await pool.connect();
 
@@ -229,19 +384,22 @@ export async function createStorefrontPaymentIntent({
     const orderResult = await client.query<{ id: number; order_number: string }>(
       `
         insert into public.orders (
+          customer_id,
           source,
           status,
           currency_code,
           subtotal_amount,
           total_amount,
           notes
-        ) values ('web', 'draft', $1, $2, $2, $3)
+        ) values ($1, $2, 'draft', $3, $4, $4, $5)
         returning id, order_number
       `,
       [
+        customerId ?? null,
+        orderSourceForChannel(channel),
         product.currency_code || "ARS",
         publicPrice,
-        `Storefront checkout for ${product.title}${sourcePath ? ` (${sourcePath})` : ""}`,
+        `${orderNotePrefixForChannel(channel)} for ${product.title}${sourcePath ? ` (${sourcePath})` : ""}`,
       ]
     );
 
@@ -271,13 +429,15 @@ export async function createStorefrontPaymentIntent({
           token,
           channel,
           source_host,
+          customer_phone,
+          customer_name,
           title_snapshot,
           unit_price_amount,
           currency_code,
           image_url_snapshot,
           delivery_days_snapshot,
           metadata
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       `,
       [
         order.id,
@@ -285,6 +445,8 @@ export async function createStorefrontPaymentIntent({
         token,
         channel,
         sourceHost ?? null,
+        customerPhone?.trim() || null,
+        customerName?.trim() || null,
         product.title,
         publicPrice,
         product.currency_code || "ARS",
@@ -397,6 +559,8 @@ export async function resolveStorefrontCheckoutHandoff(orderId: number, token: s
         id: checkout.order_id,
         order_number: checkout.order_number,
         item_count: 1,
+        product_id: checkout.product_id,
+        product_key: checkout.product_key,
         subtotal,
         total,
         currency_code: checkout.currency_code,
@@ -404,6 +568,7 @@ export async function resolveStorefrontCheckoutHandoff(orderId: number, token: s
         title: checkout.title_snapshot,
         image_url: absolutePublicUrl(checkout.image_url_snapshot),
         delivery_days: checkout.delivery_days_snapshot,
+        checkout_channel: checkout.checkout_channel,
       },
       payment: {
         ready: Boolean(paymentUrl),
@@ -419,6 +584,46 @@ export async function resolveStorefrontCheckoutHandoff(orderId: number, token: s
   } finally {
     client.release();
   }
+}
+
+export async function ensureStorefrontCheckoutHandoff({
+  productId,
+  sourceHost,
+  sourcePath,
+  channel = "api",
+  customerId,
+  customerPhone,
+  customerName,
+}: EnsureStorefrontCheckoutHandoffInput): Promise<StorefrontHandoffResult> {
+  const reusable = await findReusableCheckoutIntent({
+    productId,
+    customerId,
+    customerPhone,
+  });
+
+  if (reusable) {
+    await attachCheckoutCustomerContext({
+      orderId: reusable.order_id,
+      token: reusable.token,
+      customerId,
+      customerPhone,
+      customerName,
+    });
+
+    return resolveStorefrontCheckoutHandoff(reusable.order_id, reusable.token);
+  }
+
+  const created = await createStorefrontPaymentIntent({
+    productId,
+    sourceHost,
+    sourcePath,
+    channel,
+    customerId,
+    customerPhone,
+    customerName,
+  });
+
+  return resolveStorefrontCheckoutHandoff(created.order_id, created.token);
 }
 
 function mapWebhookStatus(status: string | null) {

@@ -35,8 +35,8 @@ const stringReplacements = [
   ["puntotechno\\\\.com", "technostoresalta\\\\.com"],
   ["puntotechno\\\\\\\\.com", "technostoresalta\\\\\\\\.com"],
   ["No inventes stock, precios, cuotas, links ni modelos.", "Tratá todos los productos publicados como disponibles. No inventes precios, cuotas, links ni modelos."],
-  ["Si querés, te confirmo disponibilidad y vemos cuál te conviene más.", "Si querés, te paso el link de pago o vemos cuál te conviene más."],
-  ["Si querés, te confirmo disponibilidad y te digo cuál te conviene más.", "Si querés, te paso el link de pago o te digo cuál te conviene más."],
+  ["Si querés, te confirmo disponibilidad y vemos cuál te conviene más.", "Si querés, te cuento cómo avanzar con la compra o vemos cuál te conviene más."],
+  ["Si querés, te confirmo disponibilidad y te digo cuál te conviene más.", "Si querés, te cuento cómo avanzar con la compra o te digo cuál te conviene más."],
   ["responder preguntas sobre precios y disponibilidad", "responder preguntas sobre precios"],
 ];
 
@@ -903,6 +903,9 @@ const prompt = [
   'Respondé al siguiente turno comercial usando SOLO los datos provistos.',
   'Usá recent_thread y focused_product_key para sostener el contexto del hilo.',
   'Si el usuario hace referencia a "ese", "el anterior", "y en cuotas?", "y la entrega?" o similares, continuá sobre el último producto relevante del hilo.',
+  'Formateá todos los precios en ARS con separadores argentinos, por ejemplo ARS 1.165.080.',
+  'No prometas ni ofrezcas un link de pago directo en una consulta normal de producto. Solo mencioná un link real si ya existe en el contexto del pedido web. Si no, explicá el proceso para avanzar con la compra.',
+  'Si preguntan por pago, link de pago, transferencia o cómo comprar, explicá que en technostoresalta.com avanzan en pocos clics, reciben el link de pago por WhatsApp y pagan transfiriendo al alias que figura en ese link. La entrega o el retiro se coordinan por este mismo chat.',
   'Devolvé SOLO JSON válido.',
   'Esquema esperado:',
   JSON.stringify({
@@ -930,6 +933,86 @@ return [{
     ...data,
     responder_model_name: String($env.GEMINI_MODEL_SALES || 'models/gemini-2.5-flash'),
     chatInput: prompt,
+  }
+}];`
+  );
+
+  updateNodeJsCode(
+    workflow,
+    "Normalize Sales Response",
+    `const base = $('Build Sales Prompt').first().json || {};
+const raw = $input.first().json || {};
+
+const fallbackExactCandidate = Array.isArray(base.context?.candidate_products) ? base.context.candidate_products[0] : null;
+const rawText = String(raw.output || raw.text || '').trim();
+
+let parsed = null;
+try {
+  parsed = JSON.parse(rawText);
+} catch (error) {
+  const match = rawText.match(/\\{[\\s\\S]*\\}/);
+  if (match) {
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch (innerError) {
+      parsed = null;
+    }
+  }
+}
+
+const formatArs = (value) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(amount);
+};
+
+const fallbackReply = (() => {
+  if (base.router_output?.route_key === 'exact_product_quote' && fallbackExactCandidate) {
+    const priceArs = formatArs(fallbackExactCandidate.promo_price_ars || fallbackExactCandidate.price_ars);
+    return 'Sí, tengo ' + fallbackExactCandidate.product_name + '. Queda en ARS ' + priceArs + '. Si querés, te cuento cómo avanzar con la compra o vemos si es el modelo que más te conviene.';
+  }
+  return 'Sí, te ayudo por acá. Si querés también podés mirar todo el catálogo en https://technostoresalta.com. ¿Qué modelo o presupuesto tenés en mente?';
+})();
+
+const selected = Array.isArray(parsed?.selected_product_keys) ? parsed.selected_product_keys : [];
+const actions = Array.isArray(parsed?.actions) ? parsed.actions : [];
+const stateDelta = parsed?.state_delta && typeof parsed.state_delta === 'object' ? parsed.state_delta : {};
+let replyText = String(parsed?.reply_text || fallbackReply).replace(/\\s+/g, ' ').trim();
+
+const priceCandidates = Array.isArray(base.context?.candidate_products) ? base.context.candidate_products : [];
+for (const product of priceCandidates) {
+  for (const rawPrice of [product?.promo_price_ars, product?.price_ars]) {
+    const numericPrice = Number(rawPrice);
+    const formattedPrice = formatArs(numericPrice);
+    if (!Number.isFinite(numericPrice) || !formattedPrice) continue;
+    const rawString = String(Math.trunc(numericPrice));
+    replyText = replyText
+      .replace(new RegExp(\`ARS\\\\s*\${rawString}(?!\\\\d)\`, 'g'), \`ARS \${formattedPrice}\`)
+      .replace(new RegExp(\`\\\\$\\\\s*\${rawString}(?!\\\\d)\`, 'g'), \`ARS \${formattedPrice}\`)
+      .replace(new RegExp(\`(?<!\\\\d)\${rawString}(?!\\\\d)\`, 'g'), formattedPrice);
+  }
+}
+
+if (base.router_output?.route_key === 'exact_product_quote') {
+  replyText = replyText.replace(
+    /Si quer[eé]s,\\s*te paso el link de pago[^.]*\\.?/gi,
+    'Si querés, te cuento cómo avanzar con la compra.'
+  );
+}
+
+return [{
+  json: {
+    ...base,
+    responder_output: {
+      route_key: base.router_output?.route_key || 'generic_sales',
+      reply_text: replyText,
+      selected_product_keys: selected,
+      actions,
+      state_delta: stateDelta,
+    },
+    responder_provider_name: 'google',
+    responder_model_name: base.responder_model_name || 'gemini-2.5-flash',
+    responder_raw_text: rawText,
   }
 }];`
   );
@@ -969,6 +1052,9 @@ const formatArs = (value) => {
   return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(amount);
 };
 
+const paymentProcess =
+  'En technostoresalta.com avanzás en pocos clics: elegís el equipo, te mandamos el link de pago por WhatsApp y pagás transfiriendo al alias que aparece ahí. Después coordinamos la entrega o el retiro por este mismo chat.';
+
 let replyText = '';
 let actions = [];
 let stateDelta = {
@@ -991,7 +1077,7 @@ switch (router.route_key) {
     if (payment?.status === 'paid') {
       replyText = 'Tu pago ya figura aprobado para ' + (order?.title || 'tu pedido') + '. Si querés, seguimos por este chat con la coordinación de entrega o retiro.';
     } else if (payment?.url) {
-      replyText = 'Perfecto, ya te preparé el link de pago para ' + (order?.title || 'tu pedido') + (totalText ? ' por ARS ' + totalText : '') + '. Pagalo acá: ' + payment.url + ' Cuando lo completes, seguí por este mismo chat.';
+      replyText = 'Perfecto, ya te preparé el link de pago para ' + (order?.title || 'tu pedido') + (totalText ? ' por ARS ' + totalText : '') + '. Pagalo acá: ' + payment.url + ' Transferís al alias que aparece en el link y después seguimos por este mismo chat para coordinar la entrega o el retiro.';
     } else if (payment?.message) {
       replyText = 'Tomé tu pedido web #' + (order?.id || '') + '. ' + payment.message + ' Si querés, también puedo seguir la coordinación por acá.';
     } else {
@@ -1011,7 +1097,10 @@ switch (router.route_key) {
       stateDelta.share_store_location = wantsLocation;
     }
     if (wantsHours && store.store_hours) parts.push('Horario: ' + store.store_hours);
-    if (wantsPayments && store.store_payment_methods) parts.push('Medios de pago: ' + store.store_payment_methods);
+    if (wantsPayments) {
+      parts.push(paymentProcess);
+      if (store.store_payment_methods) parts.push('Referencia de pago: ' + store.store_payment_methods);
+    }
     if (wantsShipping && store.store_shipping_policy) parts.push('Envíos: ' + store.store_shipping_policy);
     if (wantsWarranty) {
       if (store.store_warranty_new) parts.push('Nuevos: ' + store.store_warranty_new);
@@ -1143,13 +1232,13 @@ if (!replyText) {
 
   if (router.route_key === 'exact_product_quote' && candidateProducts[0]) {
     const product = candidateProducts[0];
-    const priceArs = product.promo_price_ars || product.price_ars;
-    replyText = 'Sí, tengo ' + product.product_name + '. Queda en ARS ' + priceArs + '. Si querés, te paso el link de pago o vemos cuál te conviene más.';
+    const priceArs = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(product.promo_price_ars || product.price_ars);
+    replyText = 'Sí, tengo ' + product.product_name + '. Queda en ARS ' + priceArs + '. Si querés, te cuento cómo avanzar con la compra o vemos si es el modelo que más te conviene.';
   } else if (router.route_key === 'storefront_order' && storefrontPaymentUrl) {
     const order = context.storefront_handoff?.order || {};
     const totalText = Number(order.total || order.subtotal);
     const formattedTotal = Number.isFinite(totalText) ? new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(totalText) : null;
-    replyText = 'Perfecto, ya te preparé el link de pago para ' + (order.title || 'tu pedido') + (formattedTotal ? ' por ARS ' + formattedTotal : '') + '. Pagalo acá: ' + storefrontPaymentUrl + ' Cuando lo completes, seguí por este mismo chat.';
+    replyText = 'Perfecto, ya te preparé el link de pago para ' + (order.title || 'tu pedido') + (formattedTotal ? ' por ARS ' + formattedTotal : '') + '. Pagalo acá: ' + storefrontPaymentUrl + ' Transferís al alias que aparece en el link y después seguimos por este mismo chat para coordinar la entrega o el retiro.';
   } else if (router.route_key === 'store_info') {
     replyText = 'Sí, te ayudo por acá. Si querés mirar todo el catálogo, lo tenés en ' + website + '. ¿Qué modelo buscás?';
   } else {

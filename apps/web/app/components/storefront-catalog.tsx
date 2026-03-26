@@ -3,7 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
-import type { StorefrontProduct, StorefrontProfile } from "../../lib/storefront";
+import { buildStorefrontProductPath, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
+import { StorefrontProductActions } from "./storefront-product-actions";
 
 type StorefrontCatalogProps = {
   store: StorefrontProfile;
@@ -49,14 +50,6 @@ function formatMoney(amount: number | null) {
 function buildWhatsAppUrl(baseUrl: string | null, message: string) {
   if (!baseUrl) return null;
   return `${baseUrl}?text=${encodeURIComponent(message)}`;
-}
-
-function buildProductConsultUrl(baseUrl: string | null, product: StorefrontProduct) {
-  return buildWhatsAppUrl(baseUrl, `Hola! Quiero consultar por ${product.title}.`);
-}
-
-function buildProductPaymentFallbackUrl(baseUrl: string | null, product: StorefrontProduct) {
-  return buildWhatsAppUrl(baseUrl, `Hola! Quiero pagarlo ahora por ${product.title}.`);
 }
 
 function buildSpecSummary(product: StorefrontProduct) {
@@ -120,7 +113,6 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
   const [storageFilter, setStorageFilter] = useState("all");
   const [sort, setSort] = useState("featured");
   const [page, setPage] = useState(1);
-  const [pendingPayProductId, setPendingPayProductId] = useState<number | null>(null);
   const deferredQuery = useDeferredValue(query);
   const needle = deferredQuery.trim().toLowerCase();
 
@@ -215,38 +207,6 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
 
     if (typeof window !== "undefined") {
       document.getElementById("modelos")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }
-
-  async function handlePayNow(product: StorefrontProduct) {
-    const fallbackUrl = buildProductPaymentFallbackUrl(store.whatsapp_url, product);
-
-    try {
-      setPendingPayProductId(product.id);
-
-      const response = await fetch("/api/storefront/payment-intents", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          product_id: product.id,
-          source_path: window.location.pathname,
-        }),
-      });
-
-      const payload = (await response.json()) as { redirect_url?: string };
-      if (!response.ok || !payload.redirect_url) {
-        throw new Error("No pudimos preparar el link de pago.");
-      }
-
-      window.location.assign(payload.redirect_url);
-    } catch {
-      if (fallbackUrl) {
-        window.location.assign(fallbackUrl);
-      }
-    } finally {
-      setPendingPayProductId(null);
     }
   }
 
@@ -395,18 +355,20 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
         <>
           <section className="storefront-grid">
             {pagedProducts.map((product) => {
-              const consultUrl = buildProductConsultUrl(store.whatsapp_url, product);
+              const detailHref = buildStorefrontProductPath(product.sku);
               const specSummary = buildSpecSummary(product);
               const shouldShowDescription =
                 Boolean(product.description) &&
                 normalizeComparableText(product.description) !== normalizeComparableText(specSummary.join(", "));
-              const payEnabled = product.public_price_ars != null;
 
               return (
                 <article key={product.id} className="storefront-card">
                   <div className="storefront-card-media">
-                    <ProductImage product={product} />
+                    <Link href={detailHref} className="storefront-card-media-link" aria-label={`Ver ${product.title}`}>
+                      <ProductImage product={product} />
+                    </Link>
                     <div className="storefront-status-row">
+                      <span className="chip accent mono">{product.sku}</span>
                       <span className={`chip ${product.in_stock ? "good" : "warn"}`}>
                         {product.in_stock ? "Disponible" : "Consultar disponibilidad"}
                       </span>
@@ -416,7 +378,11 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
                   <div className="storefront-card-body">
                     <div className="storefront-card-header">
                       <p className="catalog-kicker">{product.brand}</p>
-                      <h3 className="storefront-card-title">{product.title}</h3>
+                      <h3 className="storefront-card-title">
+                        <Link href={detailHref} className="storefront-card-title-link">
+                          {product.title}
+                        </Link>
+                      </h3>
                       {product.model ? <p className="storefront-card-subtitle">{product.model}</p> : null}
                     </div>
 
@@ -443,25 +409,12 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
                               : "Retiro o entrega coordinada"}
                           </p>
                         </div>
-
-                        <div className="storefront-card-actions">
-                          <button
-                            type="button"
-                            className="storefront-pay-button"
-                            disabled={!payEnabled || pendingPayProductId === product.id}
-                            onClick={() => void handlePayNow(product)}
-                          >
-                            {pendingPayProductId === product.id ? "Preparando..." : "Quiero pagarlo ahora"}
-                          </button>
-                          {consultUrl ? (
-                            <a className="storefront-secondary-button" href={consultUrl} target="_blank" rel="noreferrer">
-                              <WhatsAppIcon />
-                              Consultar
-                            </a>
-                          ) : null}
-                        </div>
+                        <StorefrontProductActions
+                          product={product}
+                          whatsappUrl={store.whatsapp_url}
+                          detailHref={detailHref}
+                        />
                       </div>
-                      <p className="storefront-card-action-note">Abrimos WhatsApp con este modelo ya cargado.</p>
                     </div>
                   </div>
                 </article>

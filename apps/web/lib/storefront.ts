@@ -2,6 +2,7 @@ import type { ProductRecord, SettingRecord } from "./api";
 
 export type StorefrontProduct = {
   id: number;
+  sku: string;
   slug: string;
   brand: string;
   model: string;
@@ -50,6 +51,11 @@ function normalizePhone(value: string | null) {
   if (!value) return null;
   const digits = value.replace(/\D+/g, "");
   return digits.length >= 8 ? digits : null;
+}
+
+function buildWhatsAppUrl(baseUrl: string | null, message: string) {
+  if (!baseUrl) return null;
+  return `${baseUrl}?text=${encodeURIComponent(message)}`;
 }
 
 function pickText(settingsMap: Map<string, unknown>, storeRoot: Record<string, unknown>, ...keys: string[]) {
@@ -113,11 +119,33 @@ export function buildStorefrontProfile(settings: SettingRecord[]): StorefrontPro
   };
 }
 
+export function buildStorefrontProductPath(sku: string) {
+  return `/${encodeURIComponent(sku.trim().toLowerCase())}`;
+}
+
+export function buildStorefrontProductUrl(storefrontUrl: string | null, sku: string) {
+  const path = buildStorefrontProductPath(sku);
+  if (!storefrontUrl) {
+    return path;
+  }
+
+  return `${storefrontUrl.replace(/\/$/, "")}${path}`;
+}
+
+export function buildStorefrontConsultUrl(whatsappUrl: string | null, product: Pick<StorefrontProduct, "title">) {
+  return buildWhatsAppUrl(whatsappUrl, `Hola! Quiero consultar por ${product.title}.`);
+}
+
+export function buildStorefrontPaymentFallbackUrl(whatsappUrl: string | null, product: Pick<StorefrontProduct, "title">) {
+  return buildWhatsAppUrl(whatsappUrl, `Hola! Quiero pagarlo ahora por ${product.title}.`);
+}
+
 export function buildStorefrontProducts(items: ProductRecord[]): StorefrontProduct[] {
   return items
     .filter((item) => item.active)
     .map((item) => ({
       id: item.id,
+      sku: item.sku,
       slug: item.slug,
       brand: item.brand,
       model: item.model,
