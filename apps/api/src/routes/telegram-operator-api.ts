@@ -43,6 +43,7 @@ const resolveDraftSchema = z.object({
   chat_id_number: z.coerce.number().int(),
   user_id: z.string().trim().optional().nullable(),
   user_message: z.string().trim().min(1),
+  conversation_id: z.coerce.number().int().positive().optional(),
   draft: draftSchema,
 });
 
@@ -79,6 +80,7 @@ export const telegramOperatorApiRoutes: FastifyPluginAsync = async (app) => {
       chatIdNumber: body.chat_id_number,
       userId: body.user_id ?? null,
       userMessage: body.user_message,
+      conversationId,
       imageBase64: body.image_base64 ?? undefined,
     });
 
@@ -101,6 +103,7 @@ export const telegramOperatorApiRoutes: FastifyPluginAsync = async (app) => {
         chatIdNumber: body.chat_id_number,
         userId: body.user_id ?? null,
         userMessage: body.user_message,
+        conversationId: body.conversation_id,
       },
       body.draft
     );

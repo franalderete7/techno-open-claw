@@ -17,7 +17,7 @@ const SKILLS: OperatorSkillDefinition[] = [
     label: "Ayuda operatoria",
     mode: "read",
     entity: "system",
-    summary: "Resume lo que el bot puede hacer y como confirmar mutaciones.",
+    summary: "Resume lo que el bot puede hacer y como se aprueban cambios con bajo o alto riesgo.",
     requiredInputs: [],
     optionalInputs: [],
     guardrails: ["No muta datos."],
@@ -53,9 +53,9 @@ const SKILLS: OperatorSkillDefinition[] = [
     label: "Listar productos",
     mode: "read",
     entity: "products",
-    summary: "Busca productos por sku, titulo, marca o modelo.",
+    summary: "Busca productos por sku, titulo, marca, modelo, precio, RAM, storage, stock o si tienen imagen.",
     requiredInputs: [],
-    optionalInputs: ["query"],
+    optionalInputs: ["query", "brand", "active", "in_stock", "category", "min_price_ars", "max_price_ars", "min_ram_gb", "max_ram_gb", "min_storage_gb", "max_storage_gb", "has_image", "sort_by", "sort_dir"],
     guardrails: ["Solo lectura."],
     bulkSupport: "none",
     examples: ["productos samsung", "buscar s25 ultra"],
@@ -113,7 +113,7 @@ const SKILLS: OperatorSkillDefinition[] = [
     label: "Editar producto",
     mode: "write",
     entity: "products",
-    summary: "Actualiza un producto existente usando product_ref por id, sku o slug.",
+    summary: "Actualiza un producto existente usando product_ref por id, sku o slug. Tambien sirve para archivar con active=false.",
     requiredInputs: ["product_ref", "changes"],
     optionalInputs: [
       "title",
@@ -166,7 +166,7 @@ const SKILLS: OperatorSkillDefinition[] = [
     label: "Borrar producto",
     mode: "write",
     entity: "products",
-    summary: "Elimina un producto solo si no tiene stock asociado.",
+    summary: "Elimina un producto de forma permanente solo si no tiene stock asociado.",
     requiredInputs: ["product_ref"],
     optionalInputs: [],
     guardrails: [
@@ -181,9 +181,9 @@ const SKILLS: OperatorSkillDefinition[] = [
     label: "Listar stock",
     mode: "read",
     entity: "stock_units",
-    summary: "Busca unidades por serial, imei, sku o titulo de producto.",
+    summary: "Busca unidades por serial, imei, sku o titulo de producto, con filtros por marca, estado, ubicacion y fechas.",
     requiredInputs: [],
-    optionalInputs: ["query", "status"],
+    optionalInputs: ["query", "product_ref", "brand", "status", "location_code", "sold_from", "sold_to", "acquired_from", "acquired_to", "has_imei"],
     guardrails: ["Solo lectura."],
     bulkSupport: "none",
     examples: ["stock del s25 ultra", "buscar imei 356..."],
@@ -243,6 +243,22 @@ const SKILLS: OperatorSkillDefinition[] = [
     ],
     bulkSupport: "none",
     examples: ["marca como vendido el imei 356...", "mueve el stock 44 a local SALTA"],
+  },
+  {
+    id: "delete_stock_unit",
+    label: "Borrar unidad de stock",
+    mode: "write",
+    entity: "stock_units",
+    summary: "Elimina una unidad fisica puntual por id, serial o IMEI.",
+    requiredInputs: ["stock_ref"],
+    optionalInputs: [],
+    guardrails: [
+      "Si la referencia es ambigua, detener.",
+      "No borrar stock vendido.",
+      "Pedir aprobacion previa.",
+    ],
+    bulkSupport: "none",
+    examples: ["borra el stock 44", "elimina la unidad con imei 356..."],
   },
   {
     id: "bulk_update_stock_units",
@@ -372,7 +388,8 @@ export function buildOperatorSkillGuide() {
   return [
     "Operator skill registry:",
     "The model must choose only from the skills below.",
-    "Every write skill is deterministic, validated, and requires confirmation before execution.",
+    "Every write skill is deterministic and validated before execution.",
+    "Exact low-risk single-row edits can auto-execute. Higher-risk writes go through approve/edit/cancel review.",
     "If required inputs are missing, the model must ask only for the missing fields.",
     "If a reference is ambiguous, the model must stop and ask for the exact sku / slug / id / serial / imei / key.",
     ...SKILLS.map(renderSkill),
@@ -381,10 +398,11 @@ export function buildOperatorSkillGuide() {
 
 export function buildOperatorSkillListText() {
   const sections = [
-    "Skills activas del bot:",
+    "Capacidades activas del bot:",
     ...SKILLS.map((skill) => `• ${skill.id}: ${skill.summary}`),
     "",
-    "Todas las mutaciones quedan sujetas a CONFIRM <TOKEN>.",
+    "Cambios puntuales de bajo riesgo pueden ejecutarse directo.",
+    "El resto queda pendiente con botones de aprobar / editar / cancelar y fallback CONFIRM <TOKEN>.",
   ];
 
   return sections.join("\n");
@@ -397,6 +415,8 @@ export function buildOperatorHelpText() {
   return [
     "TechnoStore Ops via Telegram",
     "",
+    "Podés escribir en lenguaje natural o usar los botones del menú.",
+    "",
     "Lectura:",
     ...reads,
     "",
@@ -404,7 +424,8 @@ export function buildOperatorHelpText() {
     ...writes,
     "",
     "Reglas:",
-    "• Todo write requiere CONFIRM <TOKEN>.",
+    "• Cambios exactos de bajo riesgo pueden ejecutarse sin confirmación manual.",
+    "• Cambios más sensibles quedan pendientes para aprobar, editar o cancelar.",
     "• Si falta un dato, el bot tiene que pedirlo.",
     "• Si una referencia es ambigua, el bot se detiene.",
     "• Los cambios masivos aplican el mismo cambio a varias filas.",

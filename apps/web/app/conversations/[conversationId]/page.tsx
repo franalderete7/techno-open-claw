@@ -23,6 +23,10 @@ function summarizePayload(payload: Record<string, unknown>) {
     .join(" · ");
 }
 
+function formatPayloadJson(payload: Record<string, unknown>) {
+  return JSON.stringify(payload, null, 2);
+}
+
 function isPreviewableImage(url: string | null) {
   if (!url) {
     return false;
@@ -129,13 +133,15 @@ export default async function ConversationDetailPage({ params }: ConversationPag
                     ? "message-bubble system"
                     : "message-bubble inbound";
               const speakerLabel =
-                message.direction === "outbound"
-                  ? message.sender_kind === "tool"
-                    ? "Bot"
-                    : "Operador"
-                  : message.direction === "system"
-                    ? "Sistema"
-                    : "Cliente";
+                message.sender_kind === "tool"
+                  ? "Bot"
+                  : message.sender_kind === "admin"
+                    ? "Operador"
+                    : message.sender_kind === "system"
+                      ? "Sistema"
+                      : conversation?.channel === "telegram"
+                        ? "Operador"
+                        : "Cliente";
 
               return (
                 <article key={message.id} className={bubbleClass}>
@@ -163,6 +169,12 @@ export default async function ConversationDetailPage({ params }: ConversationPag
                     </div>
                   ) : null}
                   {payloadSummary ? <p className="message-support mono">{payloadSummary}</p> : null}
+                  {message.payload && Object.keys(message.payload).length > 0 ? (
+                    <details>
+                      <summary className="message-support mono">Ver payload</summary>
+                      <pre className="message-support mono">{formatPayloadJson(message.payload)}</pre>
+                    </details>
+                  ) : null}
                 </article>
               );
             })}

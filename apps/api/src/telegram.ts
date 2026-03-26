@@ -43,16 +43,30 @@ const telegramMessageSchema = z.object({
   photo: z.array(telegramPhotoSchema).optional(),
 });
 
+const telegramCallbackQuerySchema = z.object({
+  id: z.string().min(1),
+  from: telegramUserSchema,
+  message: telegramMessageSchema.optional(),
+  data: z.string().optional(),
+});
+
 const telegramUpdateSchema = z.object({
   update_id: z.number().int().optional(),
   message: telegramMessageSchema.optional(),
   edited_message: telegramMessageSchema.optional(),
   channel_post: telegramMessageSchema.optional(),
   edited_channel_post: telegramMessageSchema.optional(),
+  callback_query: telegramCallbackQuerySchema.optional(),
 });
 
 export type TelegramMessage = z.infer<typeof telegramMessageSchema>;
 export type TelegramUpdate = z.infer<typeof telegramUpdateSchema>;
+export type TelegramCallbackQuery = z.infer<typeof telegramCallbackQuerySchema>;
+
+export type TelegramInlineButton = {
+  text: string;
+  callback_data: string;
+};
 
 export interface TelegramBotProfile {
   id: number;
@@ -90,6 +104,10 @@ export function extractTelegramMessage(update: TelegramUpdate) {
   return update.message ?? update.edited_message ?? update.channel_post ?? update.edited_channel_post ?? null;
 }
 
+export function extractTelegramCallbackQuery(update: TelegramUpdate) {
+  return update.callback_query ?? null;
+}
+
 export function isTelegramChatAllowed(message: TelegramMessage, allowedChatIds: string[]) {
   if (allowedChatIds.length === 0) {
     return true;
@@ -100,6 +118,18 @@ export function isTelegramChatAllowed(message: TelegramMessage, allowedChatIds: 
   const userId = message.from ? String(message.from.id) : null;
 
   return allowed.has(chatId) || (userId != null && allowed.has(userId));
+}
+
+export function isTelegramCallbackAllowed(callbackQuery: TelegramCallbackQuery, allowedChatIds: string[]) {
+  if (allowedChatIds.length === 0) {
+    return true;
+  }
+
+  const allowed = new Set(allowedChatIds);
+  const chatId = callbackQuery.message ? String(callbackQuery.message.chat.id) : null;
+  const userId = String(callbackQuery.from.id);
+
+  return allowed.has(userId) || (chatId != null && allowed.has(chatId));
 }
 
 export function inferTelegramMessageType(message: TelegramMessage) {
@@ -243,7 +273,7 @@ export async function setTelegramWebhook(
   return telegramApiRequest<true>(botToken, "setWebhook", {
     url: options.url,
     secret_token: options.secretToken || undefined,
-    allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post"],
+    allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post", "callback_query"],
     drop_pending_updates: false,
   });
 }
@@ -254,11 +284,35 @@ export async function deleteTelegramWebhook(botToken: string) {
   });
 }
 
-export async function sendTelegramTextMessage(options: {
+function buildReplyMarkup(options: { buttons?: TelegramInlineButton[][]; forceReply?: boolean }) {
+  if (options.forceReply) {
+    return {
+      force_reply: true,
+      selective: true,
+    };
+  }
+
+  if (options.buttons && options.buttons.length > 0) {
+    return {
+      inline_keyboard: options.buttons.map((row) =>
+        row.map((button) => ({
+          text: button.text,
+          callback_data: button.callback_data,
+        }))
+      ),
+    };
+  }
+
+  return undefined;
+}
+
+export async function sendTelegramMessage(options: {
   botToken: string;
   chatId: number | string;
   text: string;
   replyToMessageId?: number;
+  buttons?: TelegramInlineButton[][];
+  forceReply?: boolean;
 }) {
   return telegramApiRequest<{ message_id: number }>(options.botToken, "sendMessage", {
     chat_id: options.chatId,
@@ -266,7 +320,17 @@ export async function sendTelegramTextMessage(options: {
     reply_to_message_id: options.replyToMessageId,
     allow_sending_without_reply: true,
     disable_web_page_preview: true,
+    reply_markup: buildReplyMarkup({ buttons: options.buttons, forceReply: options.forceReply }),
   });
+}
+
+export async function sendTelegramTextMessage(options: {
+  botToken: string;
+  chatId: number | string;
+  text: string;
+  replyToMessageId?: number;
+}) {
+  return sendTelegramMessage(options);
 }
 
 export function splitTelegramText(text: string, maxLength = 3900) {
@@ -336,4 +400,30 @@ export async function sendTelegramTextMessages(options: {
   }
 
   return results;
+}
+
+export async function answerTelegramCallbackQuery(options: {
+  botToken: string;
+  callbackQueryId: string;
+  text?: string;
+}) {
+  return telegramApiRequest<true>(options.botToken, "answerCallbackQuery", {
+    callback_query_id: options.callbackQueryId,
+    text: options.text?.trim() || undefined,
+    show_alert: false,
+  });
+}
+
+export async function clearTelegramInlineKeyboard(options: {
+  botToken: string;
+  chatId: number | string;
+  messageId: number;
+}) {
+  return telegramApiRequest<true>(options.botToken, "editMessageReplyMarkup", {
+    chat_id: options.chatId,
+    message_id: options.messageId,
+    reply_markup: {
+      inline_keyboard: [],
+    },
+  });
 }

@@ -71,9 +71,9 @@ export async function upsertTelegramConversation(params: {
 
 export async function saveConversationMessage(params: {
   conversationId: number;
-  direction: "inbound" | "outbound";
-  senderKind: "customer" | "tool";
-  messageType: "text" | "audio" | "image" | "video" | "file";
+  direction: "inbound" | "outbound" | "system";
+  senderKind: "customer" | "tool" | "admin" | "system";
+  messageType: "text" | "audio" | "image" | "video" | "file" | "event";
   textBody?: string | null;
   mediaUrl?: string | null;
   transcript?: string | null;
