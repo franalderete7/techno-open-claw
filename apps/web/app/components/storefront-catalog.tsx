@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { buildStorefrontProductPath, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
 import { StorefrontProductActions } from "./storefront-product-actions";
@@ -59,7 +58,7 @@ function buildSpecSummary(product: StorefrontProduct) {
     product.storage_gb ? `${product.storage_gb}GB` : null,
     product.network ? product.network.toUpperCase() : null,
     product.color,
-  ].filter(Boolean);
+  ].filter((value): value is string => Boolean(value));
 }
 
 function normalizeComparableText(value: string | null) {
@@ -68,6 +67,38 @@ function normalizeComparableText(value: string | null) {
     .replace(/\s+/g, " ")
     .replace(/\s*,\s*/g, ", ")
     .trim();
+}
+
+function normalizeComparableFragment(value: string | null) {
+  return normalizeComparableText(value)
+    .replace(/\b(storage|almacenamiento|memoria interna)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitComparableFragments(value: string | null) {
+  return normalizeComparableText(value)
+    .split(",")
+    .map((fragment) => normalizeComparableFragment(fragment))
+    .filter(Boolean);
+}
+
+function shouldRenderCardDescription(product: StorefrontProduct, specSummary: string[]) {
+  if (!product.description) {
+    return false;
+  }
+
+  const descriptionFragments = splitComparableFragments(product.description);
+  if (descriptionFragments.length === 0) {
+    return false;
+  }
+
+  const specFragments = specSummary.map((spec) => normalizeComparableFragment(spec));
+  const coveredBySpecs = descriptionFragments.every((fragment) =>
+    specFragments.some((spec) => spec === fragment || spec.includes(fragment) || fragment.includes(spec))
+  );
+
+  return !coveredBySpecs;
 }
 
 function ProductImage({ product }: { product: StorefrontProduct }) {
@@ -108,7 +139,6 @@ function WhatsAppIcon() {
 }
 
 export function StorefrontCatalog({ store, products, eyebrow, title, lead }: StorefrontCatalogProps) {
-  const router = useRouter();
   const [query, setQuery] = useState("");
   const [availability, setAvailability] = useState("all");
   const [ramFilter, setRamFilter] = useState("all");
@@ -209,31 +239,6 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
 
     if (typeof window !== "undefined") {
       document.getElementById("modelos")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }
-
-  function navigateToProduct(detailHref: string) {
-    router.push(detailHref);
-  }
-
-  function handleProductCardClick(event: React.MouseEvent<HTMLElement>, detailHref: string) {
-    const target = event.target as HTMLElement | null;
-    if (target?.closest("a, button, input, select, textarea, summary")) {
-      return;
-    }
-
-    navigateToProduct(detailHref);
-  }
-
-  function handleProductCardKeyDown(event: React.KeyboardEvent<HTMLElement>, detailHref: string) {
-    const target = event.target as HTMLElement | null;
-    if (target?.closest("a, button, input, select, textarea, summary")) {
-      return;
-    }
-
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      navigateToProduct(detailHref);
     }
   }
 
@@ -384,24 +389,15 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
             {pagedProducts.map((product) => {
               const detailHref = buildStorefrontProductPath(product.sku);
               const specSummary = buildSpecSummary(product);
-              const shouldShowDescription =
-                Boolean(product.description) &&
-                normalizeComparableText(product.description) !== normalizeComparableText(specSummary.join(", "));
+              const shouldShowDescription = shouldRenderCardDescription(product, specSummary);
 
               return (
-                <article
-                  key={product.id}
-                  className="storefront-card storefront-card-clickable"
-                  role="link"
-                  tabIndex={0}
-                  aria-label={`Abrir ${product.title}`}
-                  onClick={(event) => handleProductCardClick(event, detailHref)}
-                  onKeyDown={(event) => handleProductCardKeyDown(event, detailHref)}
-                >
+                <article key={product.id} className="storefront-card storefront-card-clickable">
+                  <Link href={detailHref} className="storefront-card-overlay-link" aria-label={`Abrir ${product.title}`} />
                   <div className="storefront-card-media">
-                    <Link href={detailHref} className="storefront-card-media-link" aria-label={`Ver ${product.title}`}>
+                    <div className="storefront-card-media-link">
                       <ProductImage product={product} />
-                    </Link>
+                    </div>
                     <div className="storefront-status-row">
                       <span className="chip accent mono">{product.sku}</span>
                       <span className={`chip ${product.in_stock ? "good" : "warn"}`}>
@@ -413,11 +409,7 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
                   <div className="storefront-card-body">
                     <div className="storefront-card-header">
                       <p className="catalog-kicker">{product.brand}</p>
-                      <h3 className="storefront-card-title">
-                        <Link href={detailHref} className="storefront-card-title-link">
-                          {product.title}
-                        </Link>
-                      </h3>
+                      <h3 className="storefront-card-title">{product.title}</h3>
                       {product.model ? <p className="storefront-card-subtitle">{product.model}</p> : null}
                     </div>
 
