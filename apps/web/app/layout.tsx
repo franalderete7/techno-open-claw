@@ -1,9 +1,18 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { Instrument_Sans, Newsreader } from "next/font/google";
 import type { ReactNode } from "react";
 import { getSiteMode } from "../lib/site-mode";
 import "./globals.css";
+
+export const metadata: Metadata = {
+  icons: {
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/apple-icon.png",
+  },
+};
 
 const navItems = [
   ["Dashboard", "/"],
