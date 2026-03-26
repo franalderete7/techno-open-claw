@@ -155,6 +155,38 @@
         1180,
         320
       ]
+    },
+    {
+      "id": "92de5e1b-64fc-4dc1-a2da-1f8dfd90fa11",
+      "name": "Should Save Bot Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1060,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f3d7fe56-c89e-4d5b-a069-efbe1f5bc3e8",
+              "leftValue": "={{ $(\"Build Update Payload\").first().json.bot_message_row && $(\"Build Update Payload\").first().json.bot_message_row.skip_save !== true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
     }
   ],
   "connections": {
@@ -177,7 +209,22 @@
             "type": "main",
             "index": 0
           }
-        ],
+        ]
+      ]
+    },
+    "Update Customer": {
+      "main": [
+        [
+          {
+            "node": "Should Save Bot Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Save Bot Message?": {
+      "main": [
         [
           {
             "node": "Save Bot Message",
@@ -194,22 +241,11 @@
         ]
       ]
     },
-    "Update Customer": {
-      "main": [
-        [
-          {
-            "node": "Return Result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Save Bot Message": {
       "main": [
         [
           {
-            "node": "Return Result",
+            "node": "Log AI Turn",
             "type": "main",
             "index": 0
           }

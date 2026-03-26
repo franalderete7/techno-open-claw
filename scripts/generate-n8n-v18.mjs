@@ -133,6 +133,19 @@ function updateNodeExecutionFlags(workflow, nodeName, flags) {
   Object.assign(node, flags);
 }
 
+function upsertNode(workflow, nodeName, factory) {
+  if (!Array.isArray(workflow.nodes)) {
+    workflow.nodes = [];
+  }
+
+  const existing = workflow.nodes.find((entry) => entry?.name === nodeName);
+  const nextNode = factory(existing);
+
+  if (!existing) {
+    workflow.nodes.push(nextNode);
+  }
+}
+
 function patchEntryWorkflow(workflow, outputFile) {
   if (outputFile !== "TechnoStore_v18_entry.json") {
     return;
@@ -522,6 +535,118 @@ return [{
     continueOnFail: false,
     alwaysOutputData: false,
   });
+
+  updateNodeExecutionFlags(workflow, "Log AI Turn", {
+    continueOnFail: true,
+    alwaysOutputData: true,
+  });
+
+  upsertNode(workflow, "Should Save Bot Message?", (existing) => ({
+    id: existing?.id ?? "92de5e1b-64fc-4dc1-a2da-1f8dfd90fa11",
+    name: "Should Save Bot Message?",
+    type: "n8n-nodes-base.if",
+    typeVersion: 2.2,
+    position: [1060, 320],
+    parameters: {
+      conditions: {
+        options: {
+          caseSensitive: true,
+          typeValidation: "strict",
+          version: 2,
+        },
+        conditions: [
+          {
+            id: "f3d7fe56-c89e-4d5b-a069-efbe1f5bc3e8",
+            leftValue:
+              '={{ $("Build Update Payload").first().json.bot_message_row && $("Build Update Payload").first().json.bot_message_row.skip_save !== true }}',
+            rightValue: true,
+            operator: {
+              type: "boolean",
+              operation: "equals",
+            },
+          },
+        ],
+        combinator: "and",
+      },
+      options: {},
+    },
+  }));
+
+  workflow.connections = {
+    "When Executed by Another Workflow": {
+      main: [
+        [
+          {
+            node: "Build Update Payload",
+            type: "main",
+            index: 0,
+          },
+        ],
+      ],
+    },
+    "Build Update Payload": {
+      main: [
+        [
+          {
+            node: "Update Customer",
+            type: "main",
+            index: 0,
+          },
+        ],
+      ],
+    },
+    "Update Customer": {
+      main: [
+        [
+          {
+            node: "Should Save Bot Message?",
+            type: "main",
+            index: 0,
+          },
+        ],
+      ],
+    },
+    "Should Save Bot Message?": {
+      main: [
+        [
+          {
+            node: "Save Bot Message",
+            type: "main",
+            index: 0,
+          },
+        ],
+        [
+          {
+            node: "Log AI Turn",
+            type: "main",
+            index: 0,
+          },
+        ],
+      ],
+    },
+    "Save Bot Message": {
+      main: [
+        [
+          {
+            node: "Log AI Turn",
+            type: "main",
+            index: 0,
+          },
+        ],
+      ],
+    },
+    "Log AI Turn": {
+      main: [
+        [
+          {
+            node: "Return Result",
+            type: "main",
+            index: 0,
+          },
+        ],
+      ],
+    },
+  };
 }
 
 function patchContextBuilderWorkflow(workflow, outputFile) {
