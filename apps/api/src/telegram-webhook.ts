@@ -19,6 +19,7 @@ import {
   buildTelegramConversationTitle,
   getTelegramFileUrl,
   sendTelegramTextMessage,
+  sendTelegramTextMessages,
 } from "./telegram.js";
 import { transcribeAudio } from "./sales-agent.js";
 import { storeTelegramImage } from "./media-storage.js";
@@ -187,6 +188,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
 
       let responseText = "";
       let telegramMessageId: number | null = null;
+      let telegramMessageIds: number[] = [];
 
       if (operatorResult.kind === "chat") {
         const thinkingMessageId = await sendThinkingMessage(
@@ -211,23 +213,25 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
             prompt: operatorResult.prompt,
             imageBase64,
           });
-          const telegramResponse = await sendTelegramTextMessage({
+          const telegramResponses = await sendTelegramTextMessages({
             botToken: config.TELEGRAM_BOT_TOKEN,
             chatId: message.chat.id,
             text: responseText,
             replyToMessageId: message.message_id,
           });
-          telegramMessageId = telegramResponse.message_id;
+          telegramMessageIds = telegramResponses.map((item) => item.message_id);
+          telegramMessageId = telegramMessageIds[0] ?? null;
         }
       } else {
         responseText = operatorResult.text.trim() || "No pude preparar una respuesta útil.";
-        const telegramResponse = await sendTelegramTextMessage({
+        const telegramResponses = await sendTelegramTextMessages({
           botToken: config.TELEGRAM_BOT_TOKEN,
           chatId: message.chat.id,
           text: responseText,
           replyToMessageId: message.message_id,
         });
-        telegramMessageId = telegramResponse.message_id;
+        telegramMessageIds = telegramResponses.map((item) => item.message_id);
+        telegramMessageId = telegramMessageIds[0] ?? null;
       }
 
       await saveConversationMessage({
@@ -239,6 +243,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
         payload: {
           source: operatorResult.kind === "chat" ? "telegram-stream" : "telegram-operator",
           telegramMessageId: telegramMessageId,
+          telegramMessageIds,
         },
       });
 
@@ -254,15 +259,17 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
     } catch (error) {
       request.log.error({ error }, "Telegram operator flow failed");
 
-      const fallbackText = error instanceof Error ? error.message : "No pude procesar esa instrucción.";
+        const fallbackText = error instanceof Error ? error.message : "No pude procesar esa instrucción.";
 
       try {
-        const telegramResponse = await sendTelegramTextMessage({
+        const telegramResponses = await sendTelegramTextMessages({
           botToken: config.TELEGRAM_BOT_TOKEN,
           chatId: message.chat.id,
           text: fallbackText,
           replyToMessageId: message.message_id,
         });
+        const telegramMessageIds = telegramResponses.map((item) => item.message_id);
+        const telegramMessageId = telegramMessageIds[0] ?? null;
 
         await saveConversationMessage({
           conversationId,
@@ -272,7 +279,8 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
           textBody: fallbackText,
           payload: {
             source: "telegram-error",
-            telegramMessageId: telegramResponse.message_id,
+            telegramMessageId,
+            telegramMessageIds,
           },
         });
       } catch (sendError) {

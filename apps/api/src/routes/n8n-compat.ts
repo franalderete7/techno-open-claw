@@ -530,7 +530,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
     const manychatId = String(body.p_manychat_id ?? body.manychat_id ?? "").trim();
     const userMessage = String(body.p_user_message ?? body.user_message ?? "").trim();
-    const recentLimit = Math.max(1, Math.min(20, Number(body.p_recent_limit ?? 6) || 6));
+    const recentLimit = Math.max(1, Math.min(20, Number(body.p_recent_limit ?? 10) || 10));
     const candidateLimit = Math.max(1, Math.min(20, Number(body.p_candidate_limit ?? 8) || 8));
     const storefrontOrderId = Number(body.p_storefront_order_id ?? body.storefront_order_id ?? 0) || null;
     const storefrontOrderToken = String(body.p_storefront_order_token ?? body.storefront_order_token ?? "")
@@ -639,23 +639,30 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
       `
     );
 
+    const interestedProductKey = customerState.interestedProduct?.trim().toLowerCase() || null;
+
     const candidateProducts = productRows
-      .map((product) => ({
-        score: scoreCandidate(product, userMessage),
-        product_key: product.sku,
-        product_name: product.title,
-        brand_key: normalizeBrandKey(product.brand),
-        condition: product.condition,
-        storage_gb: product.storage_gb ?? inferStorageGb(product),
-        color: product.color ?? inferColor(product),
-        in_stock: true,
-        in_stock_units: product.in_stock_units,
-        delivery_days: product.delivery_days,
-        price_ars: product.price_amount == null ? null : Number(product.price_amount),
-        promo_price_ars: product.promo_price_ars == null ? null : Number(product.promo_price_ars),
-        price_usd: product.price_usd == null ? null : Number(product.price_usd),
-        image_url: product.image_url,
-      }))
+      .map((product) => {
+        const productKey = product.sku.trim().toLowerCase();
+        const interestedProductBoost = interestedProductKey && productKey === interestedProductKey ? 40 : 0;
+
+        return {
+          score: scoreCandidate(product, userMessage) + interestedProductBoost,
+          product_key: product.sku,
+          product_name: product.title,
+          brand_key: normalizeBrandKey(product.brand),
+          condition: product.condition,
+          storage_gb: product.storage_gb ?? inferStorageGb(product),
+          color: product.color ?? inferColor(product),
+          in_stock: true,
+          in_stock_units: product.in_stock_units,
+          delivery_days: product.delivery_days,
+          price_ars: product.price_amount == null ? null : Number(product.price_amount),
+          promo_price_ars: product.promo_price_ars == null ? null : Number(product.promo_price_ars),
+          price_usd: product.price_usd == null ? null : Number(product.price_usd),
+          image_url: product.image_url,
+        };
+      })
       .sort((left, right) => {
         if (right.score !== left.score) return right.score - left.score;
         if (Number(right.in_stock) !== Number(left.in_stock)) return Number(right.in_stock) - Number(left.in_stock);

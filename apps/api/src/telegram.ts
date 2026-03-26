@@ -268,3 +268,72 @@ export async function sendTelegramTextMessage(options: {
     disable_web_page_preview: true,
   });
 }
+
+export function splitTelegramText(text: string, maxLength = 3900) {
+  const normalized = text.trim();
+
+  if (!normalized) {
+    return [];
+  }
+
+  if (normalized.length <= maxLength) {
+    return [normalized];
+  }
+
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const line of normalized.split("\n")) {
+    const next = current ? `${current}\n${line}` : line;
+
+    if (next.length <= maxLength) {
+      current = next;
+      continue;
+    }
+
+    if (current) {
+      chunks.push(current);
+      current = "";
+    }
+
+    if (line.length <= maxLength) {
+      current = line;
+      continue;
+    }
+
+    let remainder = line;
+    while (remainder.length > maxLength) {
+      chunks.push(remainder.slice(0, maxLength));
+      remainder = remainder.slice(maxLength);
+    }
+    current = remainder;
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks.filter(Boolean);
+}
+
+export async function sendTelegramTextMessages(options: {
+  botToken: string;
+  chatId: number | string;
+  text: string;
+  replyToMessageId?: number;
+}) {
+  const chunks = splitTelegramText(options.text);
+  const results: { message_id: number }[] = [];
+
+  for (const [index, chunk] of chunks.entries()) {
+    const result = await sendTelegramTextMessage({
+      botToken: options.botToken,
+      chatId: options.chatId,
+      text: chunk,
+      replyToMessageId: index === 0 ? options.replyToMessageId : undefined,
+    });
+    results.push(result);
+  }
+
+  return results;
+}

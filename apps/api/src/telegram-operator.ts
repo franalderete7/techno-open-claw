@@ -16,6 +16,20 @@ const jsonValueSchema: z.ZodTypeAny = z.lazy(() =>
   z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema)])
 );
 
+const booleanishSchema = z.preprocess((value) => {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "si", "sí", "all"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return value;
+}, z.boolean());
+
 const createProductSchema = z.object({
   sku: z.string().trim().min(1),
   slug: z.string().trim().optional(),
@@ -71,6 +85,8 @@ const deleteProductSchema = z.object({
 
 const listProductsSchema = z.object({
   query: z.string().trim().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  all: booleanishSchema.optional(),
 });
 
 const getProductDetailsSchema = z.object({
@@ -80,6 +96,8 @@ const getProductDetailsSchema = z.object({
 const listStockSchema = z.object({
   query: z.string().trim().optional(),
   status: z.enum(stockStatusValues).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  all: booleanishSchema.optional(),
 });
 
 const getStockDetailsSchema = z.object({
@@ -124,6 +142,8 @@ const updateStockSchema = z.object({
 
 const listSettingsSchema = z.object({
   query: z.string().trim().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  all: booleanishSchema.optional(),
 });
 
 const getSettingDetailsSchema = z.object({
@@ -142,6 +162,8 @@ const deleteSettingSchema = z.object({
 
 const listCustomersSchema = z.object({
   query: z.string().trim().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  all: booleanishSchema.optional(),
 });
 
 const getCustomerDetailsSchema = z.object({
@@ -177,10 +199,14 @@ const updateCustomerSchema = z.object({
 
 const listOrdersSchema = z.object({
   query: z.string().trim().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  all: booleanishSchema.optional(),
 });
 
 const listConversationsSchema = z.object({
   query: z.string().trim().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  all: booleanishSchema.optional(),
 });
 
 const listOperatorSkillsSchema = z.object({});
@@ -915,13 +941,14 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       return listN8nWorkflows();
     case "list_products": {
       const parsed = listProductsSchema.parse(params);
+      const limit = parsed.all ? 200 : parsed.limit ?? 24;
       const rows = await query<ProductRow>(
         `
           select id, sku, slug, brand, model, title, active, price_amount, promo_price_ars, currency_code
           from public.products
           ${parsed.query ? "where title ilike $1 or sku ilike $1 or brand ilike $1 or model ilike $1" : ""}
           order by updated_at desc, id desc
-          limit 8
+          limit ${limit}
         `,
         parsed.query ? [`%${parsed.query}%`] : []
       );
@@ -931,7 +958,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       }
 
       return [
-        `Productos${parsed.query ? ` para "${parsed.query}"` : ""}:`,
+        `Productos${parsed.query ? ` para "${parsed.query}"` : ""} (${rows.length}${parsed.all ? "" : ` máx. ${limit}`}) :`,
         ...rows.map(
           (row) =>
             `• ${row.sku} · ${row.title} · ${formatMoney(row.promo_price_ars ?? row.price_amount, row.currency_code)} · ${
@@ -975,6 +1002,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
     }
     case "list_stock": {
       const parsed = listStockSchema.parse(params);
+      const limit = parsed.all ? 200 : parsed.limit ?? 36;
       const values: unknown[] = [];
       const where: string[] = [];
 
@@ -997,7 +1025,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
           join public.products p on p.id = su.product_id
           ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
           order by su.updated_at desc, su.id desc
-          limit 8
+          limit ${limit}
         `,
         values
       );
@@ -1007,7 +1035,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       }
 
       return [
-        "Stock reciente:",
+        `Stock${parsed.query ? ` para "${parsed.query}"` : ""} (${rows.length}${parsed.all ? "" : ` máx. ${limit}`}) :`,
         ...rows.map(
           (row) =>
             `• #${row.id} · ${row.sku} · ${row.status} · ${row.serial_number || row.imei_1 || row.imei_2 || "sin serial/imei"}`
@@ -1042,13 +1070,14 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
     }
     case "list_settings": {
       const parsed = listSettingsSchema.parse(params);
+      const limit = parsed.all ? 200 : parsed.limit ?? 36;
       const rows = await query<{ key: string; value: unknown }>(
         `
           select key, value
           from public.settings
           ${parsed.query ? "where key ilike $1" : ""}
           order by key asc
-          limit 12
+          limit ${limit}
         `,
         parsed.query ? [`%${parsed.query}%`] : []
       );
@@ -1057,7 +1086,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
         return "No encontré settings con ese criterio.";
       }
 
-      return ["Settings:", ...rows.map((row) => `• ${row.key} = ${asText(row.value)}`)].join("\n");
+      return [`Settings (${rows.length}${parsed.all ? "" : ` máx. ${limit}`}) :`, ...rows.map((row) => `• ${row.key} = ${asText(row.value)}`)].join("\n");
     }
     case "get_setting_details": {
       const parsed = getSettingDetailsSchema.parse(params);
@@ -1080,6 +1109,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
     }
     case "list_customers": {
       const parsed = listCustomersSchema.parse(params);
+      const limit = parsed.all ? 200 : parsed.limit ?? 36;
       const rows = await query<CustomerRow>(
         `
           select id, external_ref, first_name, last_name, phone, email
@@ -1090,7 +1120,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
               : ""
           }
           order by updated_at desc, id desc
-          limit 8
+          limit ${limit}
         `,
         parsed.query ? [`%${parsed.query}%`] : []
       );
@@ -1100,7 +1130,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       }
 
       return [
-        "Clientes:",
+        `Clientes${parsed.query ? ` para "${parsed.query}"` : ""} (${rows.length}${parsed.all ? "" : ` máx. ${limit}`}) :`,
         ...rows.map(
           (row) =>
             `• #${row.id} · ${[row.first_name, row.last_name].filter(Boolean).join(" ") || "sin nombre"} · ${
@@ -1130,13 +1160,14 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
     }
     case "list_orders": {
       const parsed = listOrdersSchema.parse(params);
+      const limit = parsed.all ? 200 : parsed.limit ?? 36;
       const rows = await query<{ id: number; order_number: string; status: string; total_amount: string | number | null; currency_code: string }>(
         `
           select id, order_number, status, total_amount, currency_code
           from public.orders
           ${parsed.query ? "where order_number ilike $1 or coalesce(notes, '') ilike $1" : ""}
           order by created_at desc, id desc
-          limit 8
+          limit ${limit}
         `,
         parsed.query ? [`%${parsed.query}%`] : []
       );
@@ -1146,19 +1177,20 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       }
 
       return [
-        "Órdenes:",
+        `Órdenes${parsed.query ? ` para "${parsed.query}"` : ""} (${rows.length}${parsed.all ? "" : ` máx. ${limit}`}) :`,
         ...rows.map((row) => `• ${row.order_number} · ${row.status} · ${formatMoney(row.total_amount, row.currency_code)}`),
       ].join("\n");
     }
     case "list_conversations": {
       const parsed = listConversationsSchema.parse(params);
+      const limit = parsed.all ? 200 : parsed.limit ?? 36;
       const rows = await query<{ id: number; title: string | null; channel: string; status: string; channel_thread_key: string }>(
         `
           select id, title, channel, status, channel_thread_key
           from public.conversations
           ${parsed.query ? "where coalesce(title, '') ilike $1 or channel_thread_key ilike $1 or channel ilike $1" : ""}
           order by last_message_at desc nulls last, id desc
-          limit 8
+          limit ${limit}
         `,
         parsed.query ? [`%${parsed.query}%`] : []
       );
@@ -1168,7 +1200,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       }
 
       return [
-        "Conversaciones:",
+        `Conversaciones${parsed.query ? ` para "${parsed.query}"` : ""} (${rows.length}${parsed.all ? "" : ` máx. ${limit}`}) :`,
         ...rows.map((row) => `• #${row.id} · ${row.title || row.channel_thread_key} · ${row.channel} · ${row.status}`),
       ].join("\n");
     }
@@ -1980,6 +2012,42 @@ function applyAttachedImageDefaults(
   return rawParams;
 }
 
+function applyReadIntentDefaults(
+  actor: ActorContext,
+  command: WriteCommandName | ReadCommandName | undefined,
+  rawParams: Record<string, unknown>
+) {
+  if (!command || !String(command).startsWith("list_")) {
+    return rawParams;
+  }
+
+  const wantsAll = /\b(all|todos?|todas?|entire|full|completo|completa)\b/i.test(actor.userMessage);
+  const nextParams = { ...rawParams };
+
+  if (wantsAll && nextParams.all == null) {
+    nextParams.all = true;
+  }
+
+  if (nextParams.limit == null) {
+    switch (command) {
+      case "list_products":
+        nextParams.limit = wantsAll ? 200 : 24;
+        break;
+      case "list_stock":
+      case "list_settings":
+      case "list_customers":
+      case "list_orders":
+      case "list_conversations":
+        nextParams.limit = wantsAll ? 200 : 36;
+        break;
+      default:
+        break;
+    }
+  }
+
+  return nextParams;
+}
+
 export async function handleTelegramOperatorMessage(actor: ActorContext): Promise<OperatorMessageResult> {
   const start = await startTelegramOperatorTurn(actor);
 
@@ -2063,7 +2131,11 @@ export async function resolveTelegramOperatorDraft(
     return { kind: "chat", ...chat };
   }
 
-  const params = applyAttachedImageDefaults(actor, draft.command, draft.params || {});
+  const params = applyReadIntentDefaults(
+    actor,
+    draft.command,
+    applyAttachedImageDefaults(actor, draft.command, draft.params || {})
+  );
 
   try {
     if (draft.mode === "read") {
