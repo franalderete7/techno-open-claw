@@ -8,6 +8,18 @@ import { ollamaGenerate } from "./ollama.js";
 import { buildOperatorHelpText, buildOperatorSkillGuide, buildOperatorSkillListText } from "./operator-skills.js";
 import { calculateDerivedPricing, shouldRecalculatePricing } from "./pricing.js";
 import { saveConversationMessage } from "./telegram-storage.js";
+import {
+  createInventoryPurchase,
+  getInventoryPurchaseDetail,
+  inventoryPurchaseStatusValues,
+  listInventoryPurchases,
+  updateInventoryPurchase,
+} from "./inventory-purchases.js";
+import {
+  countRecentTelegramImageBatch,
+  extractStockCandidatesFromRecentImages,
+  type ExtractedStockCandidate,
+} from "./imei-images.js";
 
 const exec = promisify(execCallback);
 
@@ -151,6 +163,7 @@ const deleteStockSchema = z.object({
 
 const createStockSchema = z.object({
   product_ref: z.string().trim().min(1),
+  inventory_purchase_ref: z.string().trim().optional(),
   serial_number: z.string().trim().optional().nullable(),
   imei_1: z.string().trim().optional().nullable(),
   imei_2: z.string().trim().optional().nullable(),
@@ -169,6 +182,7 @@ const updateStockSchema = z.object({
   changes: z
     .object({
       product_ref: z.string().trim().optional(),
+      inventory_purchase_ref: z.string().trim().optional(),
       serial_number: z.string().trim().nullable().optional(),
       imei_1: z.string().trim().nullable().optional(),
       imei_2: z.string().trim().nullable().optional(),
@@ -266,6 +280,77 @@ const bulkUpdateStockSchema = z.object({
   changes: updateStockSchema.shape.changes,
 });
 
+const inventoryPurchaseFunderSchema = z.object({
+  funder_name: z.string().trim().min(1),
+  payment_method: z.string().trim().optional().nullable(),
+  amount_amount: z.coerce.number().finite().nonnegative().optional().nullable(),
+  currency_code: z.string().trim().optional().nullable(),
+  share_pct: z.coerce.number().finite().nonnegative().optional().nullable(),
+  notes: z.string().trim().optional().nullable(),
+});
+
+const listInventoryPurchasesSchema = z.object({
+  query: z.string().trim().optional(),
+  status: z.enum(inventoryPurchaseStatusValues).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  all: booleanishSchema.optional(),
+});
+
+const getInventoryPurchaseDetailsSchema = z.object({
+  purchase_ref: z.string().trim().min(1),
+});
+
+const createInventoryPurchaseSchema = z.object({
+  supplier_name: z.string().trim().optional().nullable(),
+  currency_code: z.string().trim().optional(),
+  total_amount: z.coerce.number().finite().nonnegative().optional().nullable(),
+  status: z.enum(inventoryPurchaseStatusValues).optional(),
+  acquired_at: z.string().datetime().optional().nullable(),
+  notes: z.string().trim().optional().nullable(),
+  metadata: z.record(z.string(), jsonValueSchema).optional(),
+  funders: z.array(inventoryPurchaseFunderSchema).optional(),
+});
+
+const updateInventoryPurchaseSchema = z.object({
+  purchase_ref: z.string().trim().min(1),
+  changes: createInventoryPurchaseSchema.refine((value) => Object.keys(value).length > 0, "Provide at least one purchase field to update."),
+});
+
+const bulkRepriceProductsSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        product_ref: z.string().trim().min(1),
+        cost_usd: z.coerce.number().finite().nonnegative(),
+      })
+    )
+    .min(1)
+    .max(50),
+});
+
+const createStockFromImagesSchema = z.object({
+  product_ref: z.string().trim().min(1),
+  inventory_purchase_ref: z.string().trim().optional(),
+  cost_amount: z.coerce.number().finite().nonnegative().optional().nullable(),
+  currency_code: z.string().trim().optional(),
+  status: z.enum(stockStatusValues).optional(),
+  location_code: z.string().trim().optional().nullable(),
+  acquired_at: z.string().datetime().optional().nullable(),
+  metadata: z.record(z.string(), jsonValueSchema).optional(),
+});
+
+const createInventoryPurchaseFromImagesSchema = createInventoryPurchaseSchema.extend({
+  product_ref: z.string().trim().min(1),
+  cost_amount: z.coerce.number().finite().nonnegative().optional().nullable(),
+  location_code: z.string().trim().optional().nullable(),
+});
+
+const updateStockStatusFromImagesSchema = z.object({
+  status: z.enum(stockStatusValues),
+  sold_at: z.string().datetime().optional().nullable(),
+  location_code: z.string().trim().optional().nullable(),
+});
+
 export const draftSchema = z.object({
   mode: z.enum(["read", "write", "clarify", "chat"]),
   command: z
@@ -284,12 +369,20 @@ export const draftSchema = z.object({
       "get_customer_details",
       "list_orders",
       "list_conversations",
+      "list_inventory_purchases",
+      "get_inventory_purchase_details",
       "create_product",
       "update_product",
       "bulk_update_products",
+      "bulk_reprice_products",
       "delete_product",
+      "create_inventory_purchase",
+      "update_inventory_purchase",
       "create_stock_unit",
+      "create_stock_from_images",
+      "create_inventory_purchase_from_images",
       "update_stock_unit",
+      "update_stock_status_from_images",
       "delete_stock_unit",
       "bulk_update_stock_units",
       "update_setting",
@@ -362,6 +455,28 @@ type ProductResolutionPromptPayload = {
   options: ProductResolutionOption[];
 };
 
+type PurchaseResolutionOption = {
+  id: number | null;
+  purchase_number: string;
+  supplier_name: string | null;
+  status: string;
+  total_amount: string | number | null;
+  currency_code: string;
+  is_create_new?: boolean;
+};
+
+type PurchaseResolutionPromptPayload = {
+  kind: "purchase_resolution_prompt";
+  mode: "write";
+  command: WriteCommandName;
+  params: Record<string, unknown>;
+  reference: string;
+  reference_path: ProductResolutionPathPart[];
+  options: PurchaseResolutionOption[];
+};
+
+type ResolutionPromptPayload = ProductResolutionPromptPayload | PurchaseResolutionPromptPayload;
+
 type ReadCommandName =
   | "help"
   | "list_operator_skills"
@@ -376,21 +491,54 @@ type ReadCommandName =
   | "list_customers"
   | "get_customer_details"
   | "list_orders"
-  | "list_conversations";
+  | "list_conversations"
+  | "list_inventory_purchases"
+  | "get_inventory_purchase_details";
 
 type WriteCommandName =
   | "create_product"
   | "update_product"
   | "bulk_update_products"
+  | "bulk_reprice_products"
   | "delete_product"
+  | "create_inventory_purchase"
+  | "update_inventory_purchase"
   | "create_stock_unit"
+  | "create_stock_from_images"
+  | "create_inventory_purchase_from_images"
   | "update_stock_unit"
+  | "update_stock_status_from_images"
   | "delete_stock_unit"
   | "bulk_update_stock_units"
   | "update_setting"
   | "delete_setting"
   | "create_customer"
   | "update_customer";
+
+type InventoryPurchaseRow = QueryResultRow & {
+  id: number;
+  purchase_number: string;
+  supplier_name: string | null;
+  currency_code: string;
+  total_amount: string | number | null;
+  status: string;
+  acquired_at: string | null;
+  created_at?: string;
+  funders_count?: number;
+  stock_units_count?: number;
+};
+
+type ExistingStockMatchRow = QueryResultRow & {
+  id: number;
+  product_id: number;
+  sku: string;
+  title: string;
+  serial_number: string | null;
+  imei_1: string | null;
+  imei_2: string | null;
+  status: string;
+  location_code: string | null;
+};
 
 type ProductRow = QueryResultRow & {
   id: number;
@@ -451,6 +599,20 @@ class ProductReferenceAmbiguityError extends Error {
     this.name = "ProductReferenceAmbiguityError";
     this.reference = reference;
     this.options = options;
+  }
+}
+
+class PurchaseReferenceAmbiguityError extends Error {
+  reference: string;
+  options: PurchaseResolutionOption[];
+  referencePath: ProductResolutionPathPart[];
+
+  constructor(reference: string, options: PurchaseResolutionOption[], referencePath: ProductResolutionPathPart[]) {
+    super(`Necesito elegir una compra para "${reference}".`);
+    this.name = "PurchaseReferenceAmbiguityError";
+    this.reference = reference;
+    this.options = options;
+    this.referencePath = referencePath;
   }
 }
 
@@ -592,6 +754,17 @@ function buildProductResolutionOptionLabel(option: ProductResolutionOption, inde
   )}`;
 }
 
+function buildPurchaseResolutionOptionLabel(option: PurchaseResolutionOption, index: number) {
+  if (option.is_create_new) {
+    return `${index + 1}. Crear compra nueva`;
+  }
+
+  return `${index + 1}. ${option.purchase_number} · ${option.supplier_name || "sin proveedor"} · ${option.status} · ${formatMoney(
+    option.total_amount,
+    option.currency_code
+  )}`;
+}
+
 function buildProductResolutionReply(prompt: ProductResolutionPromptPayload): OperatorMessageResult {
   return {
     kind: "reply",
@@ -604,6 +777,27 @@ function buildProductResolutionReply(prompt: ProductResolutionPromptPayload): Op
       {
         text: `${index + 1}. ${option.title}`,
         callback_data: buildOperatorCallbackData("pick", option.sku),
+      },
+    ]),
+  };
+}
+
+function buildPurchaseResolutionReply(prompt: PurchaseResolutionPromptPayload): OperatorMessageResult {
+  return {
+    kind: "reply",
+    text: [
+      "Toda unidad de stock tiene que quedar vinculada a una compra.",
+      `Elegí una compra para "${prompt.reference}" o creá una nueva.`,
+      ...prompt.options.map((option, index) => buildPurchaseResolutionOptionLabel(option, index)),
+      "Respondé 1/2/3, primero/segundo, o tocá un botón.",
+    ].join("\n"),
+    buttons: prompt.options.slice(0, 5).map((option, index) => [
+      {
+        text: option.is_create_new ? "Crear compra nueva" : `${index + 1}. ${option.purchase_number}`,
+        callback_data: buildOperatorCallbackData(
+          "pick",
+          option.is_create_new ? "purchase:new" : `purchase:${option.purchase_number}`
+        ),
       },
     ]),
   };
@@ -629,11 +823,39 @@ function findProductReferencePaths(
   }
 
   return Object.entries(value).flatMap(([key, nestedValue]) => {
-    if (key !== "product_ref" && key !== "product_refs" && key !== "changes") {
+    if (key !== "product_ref" && key !== "product_refs" && key !== "changes" && key !== "items") {
       return [];
     }
 
     return findProductReferencePaths(nestedValue, reference, [...path, key]);
+  });
+}
+
+function findPurchaseReferencePaths(
+  value: unknown,
+  reference: string,
+  path: ProductResolutionPathPart[] = []
+): ProductResolutionPathPart[][] {
+  const normalizedReference = normalizeMatch(reference);
+
+  if (typeof value === "string" && normalizeMatch(value) === normalizedReference) {
+    return [path];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findPurchaseReferencePaths(item, reference, [...path, index]));
+  }
+
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    if (key !== "inventory_purchase_ref" && key !== "changes") {
+      return [];
+    }
+
+    return findPurchaseReferencePaths(nestedValue, reference, [...path, key]);
   });
 }
 
@@ -696,6 +918,25 @@ function resolveProductSelectionFromPrompt(text: string, prompt: ProductResoluti
   );
 }
 
+function resolvePurchaseSelectionFromPrompt(text: string, prompt: PurchaseResolutionPromptPayload) {
+  const normalized = normalizeMatch(text.replace(/^__pick_purchase:/, "").replace(/__$/, ""));
+  if (!normalized) {
+    return null;
+  }
+
+  const ordinalIndex = extractOrdinalIndex(text);
+  if (ordinalIndex != null && ordinalIndex >= 0 && ordinalIndex < prompt.options.length) {
+    return prompt.options[ordinalIndex];
+  }
+
+  return (
+    prompt.options.find((option) => normalizeMatch(option.purchase_number) === normalized) ||
+    (normalized === "new" || normalized === "crear compra nueva"
+      ? prompt.options.find((option) => option.is_create_new)
+      : null)
+  );
+}
+
 function buildPricingPreviewLines(fields: {
   price_amount?: number | string | null;
   promo_price_ars?: number | string | null;
@@ -736,6 +977,204 @@ function buildPricingPreviewLines(fields: {
         )} x cuota · interés ${formatPercentValue(fields.macro_interest)}`
       : "",
   ].filter(Boolean);
+}
+
+function asFiniteNumber(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const numeric = Number(trimmed);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  return null;
+}
+
+function roundAmount(value: number, decimals = 2) {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+function buildFunderSummaryLines(funders: Array<Record<string, unknown>> | undefined) {
+  return (funders || []).map((funder) => {
+    const amount = asFiniteNumber(funder.amount_amount);
+    const currencyCode =
+      typeof funder.currency_code === "string" && funder.currency_code.trim() ? funder.currency_code.trim() : "USD";
+    const sharePct = asFiniteNumber(funder.share_pct);
+
+    return `• ${String(funder.funder_name || "sin nombre")}${
+      funder.payment_method ? ` · ${String(funder.payment_method)}` : ""
+    }${amount != null ? ` · ${formatMoney(amount, currencyCode)}` : ""}${
+      sharePct != null ? ` · ${(sharePct * 100).toFixed(2)}%` : ""
+    }`;
+  });
+}
+
+function buildPurchaseSummaryLines(purchase: InventoryPurchaseRow | Record<string, unknown>) {
+  return [
+    `• Compra: ${String(purchase.purchase_number)}`,
+    `• Estado: ${String(purchase.status)}`,
+    purchase.supplier_name ? `• Proveedor: ${String(purchase.supplier_name)}` : "",
+    purchase.total_amount != null ? `• Total: ${formatMoney(purchase.total_amount as string | number, String(purchase.currency_code || "USD"))}` : "",
+    purchase.acquired_at ? `• Fecha: ${String(purchase.acquired_at)}` : "",
+  ].filter(Boolean);
+}
+
+function buildStockCandidateLabel(candidate: ExtractedStockCandidate, index: number) {
+  return `• ${index + 1}. ${candidate.imei_1 || candidate.imei_2 || candidate.serial_number || "sin identificador"}${
+    candidate.imei_2 ? ` / ${candidate.imei_2}` : ""
+  }${candidate.serial_number ? ` · serial ${candidate.serial_number}` : ""}`;
+}
+
+function buildImageBatchSummaryLines(candidates: ExtractedStockCandidate[], warnings: string[], maxPreview = 8) {
+  return [
+    `• Unidades detectadas: ${candidates.length}`,
+    ...candidates.slice(0, maxPreview).map((candidate, index) => buildStockCandidateLabel(candidate, index)),
+    candidates.length > maxPreview ? `• … y ${candidates.length - maxPreview} más.` : "",
+    warnings.length > 0 ? "• Advertencias OCR:" : "",
+    ...warnings.slice(0, 5).map((warning) => `  - ${warning}`),
+    warnings.length > 5 ? `  - … y ${warnings.length - 5} más.` : "",
+  ].filter(Boolean);
+}
+
+async function getRecentImageBatchOrThrow(actor: ActorContext) {
+  if (!actor.conversationId) {
+    throw new Error("No pude asociar estas imágenes a una conversación activa.");
+  }
+
+  const extracted = await extractStockCandidatesFromRecentImages(actor.conversationId, 20);
+  if (extracted.images.length === 0) {
+    throw new Error("No encontré imágenes recientes en este chat. Mandame las fotos y después pedime la acción.");
+  }
+
+  if (extracted.candidates.length === 0) {
+    throw new Error("No pude extraer IMEIs o seriales válidos de las imágenes recientes.");
+  }
+
+  return extracted;
+}
+
+async function findExistingStockMatches(candidates: ExtractedStockCandidate[]) {
+  const imeis = Array.from(
+    new Set(
+      candidates.flatMap((candidate) => [candidate.imei_1, candidate.imei_2]).filter((value): value is string => Boolean(value))
+    )
+  );
+  const serials = Array.from(
+    new Set(candidates.map((candidate) => candidate.serial_number).filter((value): value is string => Boolean(value)))
+  );
+
+  if (imeis.length === 0 && serials.length === 0) {
+    return [] as ExistingStockMatchRow[];
+  }
+
+  return query<ExistingStockMatchRow>(
+    `
+      select su.id, su.product_id, su.serial_number, su.imei_1, su.imei_2, su.status, su.location_code, p.sku, p.title
+      from public.stock_units su
+      join public.products p on p.id = su.product_id
+      where
+        (${imeis.length > 0 ? `(su.imei_1 = any($1::text[]) or su.imei_2 = any($1::text[]))` : "false"})
+        or (${serials.length > 0 ? `coalesce(su.serial_number, '') = any($2::text[])` : "false"})
+      order by su.id asc
+    `,
+    [imeis, serials]
+  );
+}
+
+async function assertNoExistingStockConflicts(candidates: ExtractedStockCandidate[]) {
+  const existing = await findExistingStockMatches(candidates);
+  if (existing.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Ya existen unidades con esos identificadores: ${existing
+      .slice(0, 10)
+      .map((row) => `#${row.id} ${row.sku} ${row.imei_1 || row.imei_2 || row.serial_number || ""}`.trim())
+      .join(" | ")}`
+  );
+}
+
+async function resolveStockMatchesFromCandidates(candidates: ExtractedStockCandidate[]) {
+  const existing = await findExistingStockMatches(candidates);
+  const byIdentifier = new Map<string, ExistingStockMatchRow>();
+
+  for (const row of existing) {
+    [row.imei_1, row.imei_2, row.serial_number]
+      .filter((value): value is string => Boolean(value))
+      .forEach((value) => byIdentifier.set(value, row));
+  }
+
+  const matches = new Map<number, ExistingStockMatchRow & { source_candidates: ExtractedStockCandidate[] }>();
+  const unmatched: ExtractedStockCandidate[] = [];
+
+  for (const candidate of candidates) {
+    const identifiers = [candidate.imei_1, candidate.imei_2, candidate.serial_number].filter(
+      (value): value is string => Boolean(value)
+    );
+    const matched = identifiers.map((identifier) => byIdentifier.get(identifier)).find(Boolean) ?? null;
+
+    if (!matched) {
+      unmatched.push(candidate);
+      continue;
+    }
+
+    const current = matches.get(matched.id);
+    if (current) {
+      current.source_candidates.push(candidate);
+      continue;
+    }
+
+    matches.set(matched.id, {
+      ...matched,
+      source_candidates: [candidate],
+    });
+  }
+
+  return {
+    matches: Array.from(matches.values()),
+    unmatched,
+  };
+}
+
+async function loadProductPricingState(productId: number) {
+  const rows = await query<Record<string, unknown>>(
+    `
+      select
+        id,
+        sku,
+        title,
+        cost_usd,
+        logistics_usd,
+        total_cost_usd,
+        margin_pct,
+        price_usd,
+        usd_rate,
+        price_amount,
+        promo_price_ars,
+        bancarizada_interest,
+        bancarizada_total,
+        bancarizada_cuota,
+        macro_interest,
+        macro_total,
+        macro_cuota,
+        cuotas_qty
+      from public.products
+      where id = $1
+      limit 1
+    `,
+    [productId]
+  );
+
+  return rows[0] ?? null;
 }
 
 function toPreviewValue(value: unknown): string | number | null {
@@ -830,16 +1269,22 @@ type MenuIntent =
   | "home"
   | "products"
   | "stock"
+  | "purchases"
   | "settings"
   | "reports"
   | "products_list_help"
   | "products_create_help"
   | "products_update_help"
+  | "products_bulk_reprice_help"
   | "products_delete_help"
   | "stock_list_help"
   | "stock_create_help"
+  | "stock_from_images_help"
   | "stock_update_help"
+  | "stock_mark_from_images_help"
   | "stock_delete_help"
+  | "purchases_list_help"
+  | "purchases_create_help"
   | "settings_update_help"
   | "settings_list_help"
   | "report_sold_last_30d"
@@ -868,6 +1313,10 @@ function parseBroadMenuIntent(text: string): MenuIntent | null {
     return "stock";
   }
 
+  if (/^(compras?|purchase|purchases|proveedores?)\W*$/i.test(trimmed)) {
+    return "purchases";
+  }
+
   if (/^(settings|config|configuracion|configuración|ajustes?)\W*$/i.test(trimmed)) {
     return "settings";
   }
@@ -884,44 +1333,63 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
     case "home":
       return {
         text:
-          "¿Qué querés hacer? Puedo gestionar productos, stock, settings y reportes. También podés escribirlo en lenguaje natural, por ejemplo: “subí 5% los Samsung”, “listá stock vendido el mes pasado” o “creá un producto con esta foto”.",
+          "¿Qué querés hacer? Puedo gestionar productos, stock, compras, settings y reportes. También podés escribirlo en lenguaje natural, por ejemplo: “actualizá esta lista de costos”, “cargá stock con estas fotos” o “marcá estas unidades como vendidas”.",
         buttons: [
           [
             { text: "Productos", callback_data: buildOperatorCallbackData("menu", "products") },
             { text: "Stock", callback_data: buildOperatorCallbackData("menu", "stock") },
           ],
           [
+            { text: "Compras", callback_data: buildOperatorCallbackData("menu", "purchases") },
             { text: "Settings", callback_data: buildOperatorCallbackData("menu", "settings") },
+          ],
+          [
             { text: "Reportes", callback_data: buildOperatorCallbackData("menu", "reports") },
           ],
         ],
       };
     case "products":
       return {
-        text: "Productos: podés listar con filtros, crear, editar precios o archivar/borrar. ¿Qué querés hacer?",
+        text: "Productos: podés listar con filtros, crear, editar precios, recalcular listas de costos o archivar/borrar. ¿Qué querés hacer?",
         buttons: [
           [
             { text: "Listar / filtrar", callback_data: buildOperatorCallbackData("menu", "products_list_help") },
             { text: "Crear", callback_data: buildOperatorCallbackData("menu", "products_create_help") },
           ],
           [
+            { text: "Repricing por lista", callback_data: buildOperatorCallbackData("menu", "products_bulk_reprice_help") },
             { text: "Editar", callback_data: buildOperatorCallbackData("menu", "products_update_help") },
-            { text: "Archivar / borrar", callback_data: buildOperatorCallbackData("menu", "products_delete_help") },
           ],
+          [{ text: "Archivar / borrar", callback_data: buildOperatorCallbackData("menu", "products_delete_help") }],
           [{ text: "Inicio", callback_data: buildOperatorCallbackData("menu", "home") }],
         ],
       };
     case "stock":
       return {
-        text: "Stock: podés listar, crear, editar estado/ubicación/IMEI o borrar una unidad. ¿Qué querés hacer?",
+        text: "Stock: podés listar, crear manualmente, cargar desde fotos, editar estado/ubicación/IMEI o marcar vendido desde fotos. ¿Qué querés hacer?",
         buttons: [
           [
             { text: "Listar / filtrar", callback_data: buildOperatorCallbackData("menu", "stock_list_help") },
             { text: "Crear", callback_data: buildOperatorCallbackData("menu", "stock_create_help") },
           ],
           [
+            { text: "Cargar con fotos", callback_data: buildOperatorCallbackData("menu", "stock_from_images_help") },
             { text: "Editar", callback_data: buildOperatorCallbackData("menu", "stock_update_help") },
+          ],
+          [
+            { text: "Marcar por fotos", callback_data: buildOperatorCallbackData("menu", "stock_mark_from_images_help") },
             { text: "Borrar", callback_data: buildOperatorCallbackData("menu", "stock_delete_help") },
+          ],
+          [{ text: "Inicio", callback_data: buildOperatorCallbackData("menu", "home") }],
+        ],
+      };
+    case "purchases":
+      return {
+        text: "Compras: podés listar compras, crear una compra manual o crear compra + stock desde fotos.",
+        buttons: [
+          [
+            { text: "Listar", callback_data: buildOperatorCallbackData("menu", "purchases_list_help") },
+            { text: "Crear con fotos", callback_data: buildOperatorCallbackData("menu", "purchases_create_help") },
           ],
           [{ text: "Inicio", callback_data: buildOperatorCallbackData("menu", "home") }],
         ],
@@ -964,7 +1432,12 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
     case "products_update_help":
       return {
         text:
-          "Decime el producto y el cambio. Ejemplos: “cambiá el precio del samsung-a56-5g-8-256 a 579000”, “desactivá iphone-16-128”, “poné 3 días de entrega al A36”.",
+          "Decime el producto y el cambio. Ejemplos: “cambiá el precio del A56 8/256 a 579000”, “desactivá iPhone 16 128”, “poné 3 días de entrega al A36”. Si hay varias coincidencias, te muestro botones para elegir.",
+      };
+    case "products_bulk_reprice_help":
+      return {
+        text:
+          "Pegame una lista con nombre completo y costo USD nuevo, una línea por producto. Ejemplo: “Samsung A17 6/128 = 155” y “Samsung A56 8/256 = 282”. Yo resuelvo SKU, recalculo y te muestro preview con botones.",
       };
     case "products_delete_help":
       return {
@@ -979,17 +1452,37 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
     case "stock_create_help":
       return {
         text:
-          "Para crear stock, indicame el producto y los datos físicos. Ejemplo: “crear stock para samsung-a56-5g-8-256 imei1 123 imei2 456 ubicación SALTA”.",
+          "Para crear stock, indicame el producto, la compra asociada y los datos físicos. Ejemplo: “crear stock del A56 8/256 para la compra PUR-AB12CD34 imei1 123 imei2 456 ubicación SALTA”. Si no decís la compra, te hago elegir una. Si mandaste fotos con IMEI, mejor usá la opción de cargar con fotos.",
+      };
+    case "stock_from_images_help":
+      return {
+        text:
+          "Mandame primero las fotos con IMEIs y después pedime algo como: “cargá stock del iPhone 17 Pro Max con estas fotos” o “creá stock del A17 en SALTA con estas imágenes”. Siempre las voy a vincular a una compra existente o te ofrezco crear una nueva.",
       };
     case "stock_update_help":
       return {
         text:
           "Podés cambiar estado, ubicación, IMEI, serial o costo. Ejemplos: “marcá como sold el imei 356...”, “mové el stock 44 a SALTA”.",
       };
+    case "stock_mark_from_images_help":
+      return {
+        text:
+          "Mandame las fotos de IMEI y después pedime: “marcá estas unidades como vendidas” o “pasá estas unidades a reserved”. Yo las cruzo contra stock y te muestro preview.",
+      };
     case "stock_delete_help":
       return {
         text:
           "Para borrar una unidad, decime la referencia exacta. Por seguridad no borro stock vendido.",
+      };
+    case "purchases_list_help":
+      return {
+        text:
+          "Podés pedirme compras por proveedor, estado o número. Ejemplos: “listá compras received”, “mostrá compras de Juan” o “detalle de la compra PUR-AB12CD34”.",
+      };
+    case "purchases_create_help":
+      return {
+        text:
+          "Mandame primero las fotos y después algo como: “registrá compra desde estas imágenes, 10 iPhone 17 Pro Max, total 5000 USD, Fran 50% cash y Agus 50% crypto”. Así creo la compra y dejo todas las unidades vinculadas desde el inicio.",
       };
     case "settings_list_help":
       return {
@@ -1080,6 +1573,7 @@ export async function buildOperatorSnapshot() {
   const [stock] = await query<{ count: string }>("select count(*)::text as count from public.stock_units where status = 'in_stock'");
   const [customers] = await query<{ count: string }>("select count(*)::text as count from public.customers");
   const [orders] = await query<{ count: string }>("select count(*)::text as count from public.orders");
+  const [inventoryPurchases] = await query<{ count: string }>("select count(*)::text as count from public.inventory_purchases");
   const [conversations] = await query<{ count: string }>(
     "select count(*)::text as count from public.conversations where status = 'open'"
   );
@@ -1093,6 +1587,7 @@ export async function buildOperatorSnapshot() {
     `
   );
   const settingKeys = await query<{ key: string }>("select key from public.settings order by key asc limit 20");
+  const recentImageBatchCount = await countRecentTelegramImageBatch();
 
   return {
     counts: {
@@ -1100,10 +1595,12 @@ export async function buildOperatorSnapshot() {
       stock: Number(stock?.count ?? 0),
       customers: Number(customers?.count ?? 0),
       orders: Number(orders?.count ?? 0),
+      inventoryPurchases: Number(inventoryPurchases?.count ?? 0),
       conversations: Number(conversations?.count ?? 0),
     },
     recentProducts: recentProducts.map((item) => `${item.sku}: ${item.title}`),
     settingKeys: settingKeys.map((item) => item.key),
+    recentImageBatchCount,
   };
 }
 
@@ -1158,11 +1655,15 @@ const OPERATOR_SCHEMA_GUIDE = [
   "Operational schema contract:",
   "- public.products stores catalog rows. Stable refs: id, sku, slug. Required for creation: sku and title. Common editable fields: brand, model, title, description, condition, active, price_amount, currency_code, category, cost_usd, logistics_usd, total_cost_usd, margin_pct, price_usd, promo_price_ars, bancarizada_total, bancarizada_cuota, bancarizada_interest, macro_total, macro_cuota, macro_interest, cuotas_qty, in_stock, delivery_type, delivery_days, usd_rate, image_url, ram_gb, storage_gb, network, color, battery_health.",
   "- When cost_usd, logistics_usd, usd_rate, or cuotas_qty change on a product, the API recalculates derived pricing fields deterministically from settings before saving.",
-  "- public.stock_units stores physical inventory. Stable refs: id, serial_number, imei_1, imei_2. Required for creation: product_ref. Common editable fields: serial_number, imei_1, imei_2, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, sold_at, metadata.",
+  "- public.stock_units stores physical inventory. Stable refs: id, serial_number, imei_1, imei_2. Required for creation: product_ref. Common editable fields: inventory_purchase_id, serial_number, imei_1, imei_2, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, sold_at, metadata.",
+  "- public.inventory_purchases stores inbound stock purchases. Stable refs: id or purchase_number. Common editable fields: supplier_name, currency_code, total_amount, status, acquired_at, notes, metadata.",
+  "- public.inventory_purchase_funders stores how a purchase was funded. Fields: funder_name, payment_method, amount_amount, currency_code, share_pct, notes.",
+  "- stock_units can link directly to inventory_purchases through inventory_purchase_id.",
   "- public.settings stores key/value configuration. Stable ref: key. update_setting requires key and value. delete_setting removes the key.",
   "- public.customers stores operator and customer contacts. Stable refs: id, external_ref, phone, email. create_customer requires at least one of external_ref, phone, or email.",
   "- public.conversations stores thread headers by channel_thread_key. public.messages stores the actual interaction timeline. Each Telegram inbound and outbound message is saved in public.messages.",
   "- Product images can use public URLs. If the operator attached a Telegram image, the API can persist it on the VPS and provide a /media/... URL for image_url.",
+  "- Recent Telegram image batches can be used to extract IMEIs and serials for bulk stock creation or stock status updates. Those flows must preview matches before execution.",
   "- public.operator_confirmations stores pending write actions. Low-risk single-row writes can auto-execute. Higher-risk actions use inline approve/edit/cancel buttons, with CONFIRM <TOKEN> and CANCEL <TOKEN> as fallback.",
   "- public.audit_logs stores executed mutations and important operator actions.",
   "- public.orders and public.order_items store commercial orders. They are readable in the operator chat even if writes are not yet exposed there.",
@@ -1190,8 +1691,8 @@ function buildDraftPrompts(params: {
     "Convert the operator request into a strict JSON decision for the automation flow.",
     "Think in natural operator intents like listing, filtering, creating, editing, archiving, deleting, moving stock, or changing settings. Do not mention internal tool names in user-facing reply text.",
     "Return JSON only. No prose. No markdown.",
-    "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, get_product_details, list_stock, get_stock_details, list_settings, get_setting_details, list_customers, get_customer_details, list_orders, list_conversations.",
-    "Allowed write commands: create_product, update_product, bulk_update_products, delete_product, create_stock_unit, update_stock_unit, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
+    "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, get_product_details, list_stock, get_stock_details, list_settings, get_setting_details, list_customers, get_customer_details, list_orders, list_conversations, list_inventory_purchases, get_inventory_purchase_details.",
+    "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, delete_product, create_inventory_purchase, update_inventory_purchase, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
     "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
     "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
     "If the user asks for full row, all columns, entire row, toda la fila, or all information about a product/stock/customer/setting, prefer the matching get_*_details read command instead of any list_* command.",
@@ -1199,9 +1700,11 @@ function buildDraftPrompts(params: {
     "If the reference is clear from recent thread history, do not ask the operator to repeat it.",
     "Never invent IDs. Keep product_ref, stock_ref, customer_ref and setting keys as plain text from the user's request.",
     "For update commands, only include the fields the user explicitly wants to change.",
+    "If the user pastes multiple product names each with different cost_usd values, prefer bulk_reprice_products with one item per row.",
     "For delete commands, only use them if the user explicitly asked to delete, remove, or permanently erase.",
     "For product archive/deactivate intent, use update_product with active=false.",
     "If the operator changes cost_usd, logistics_usd, usd_rate, or cuotas_qty on a product, the server will recalculate derived pricing fields from settings. You should frame the action as a repricing preview, not as a manual field edit list only.",
+    "If the operator refers to the latest Telegram images for new stock or sold devices, prefer the image-based stock commands rather than requesting manual IMEIs.",
     "When the user asks for lists by brand, price range, RAM, storage, sold date, acquisition date, location, stock status, or image presence, use the available filter fields instead of plain text only.",
     "For price and numeric values, use numbers, not strings, when possible.",
     "If the message is just a greeting like hey/hola, reply briefly in reply and use mode=chat.",
@@ -1442,6 +1945,73 @@ async function resolveSetting(keyRef: string) {
   return rows[0];
 }
 
+async function listRecentInventoryPurchaseOptions(limit = 4): Promise<PurchaseResolutionOption[]> {
+  const rows = await listInventoryPurchases(pool, { limit });
+  return rows.map((row) => ({
+    id: typeof row.id === "number" ? row.id : Number(row.id),
+    purchase_number: String(row.purchase_number),
+    supplier_name: typeof row.supplier_name === "string" ? row.supplier_name : null,
+    status: String(row.status),
+    total_amount: (row.total_amount as string | number | null) ?? null,
+    currency_code: typeof row.currency_code === "string" ? row.currency_code : "USD",
+  }));
+}
+
+async function resolveInventoryPurchaseForOperator(purchaseRef: string) {
+  const trimmed = purchaseRef.trim();
+  const exactId = /^\d+$/.test(trimmed) ? Number(trimmed) : null;
+  const rows = await query<InventoryPurchaseRow>(
+    `
+      select id, purchase_number, supplier_name, currency_code, total_amount, status, acquired_at, created_at
+      from public.inventory_purchases
+      where
+        ($1::bigint is not null and id = $1)
+        or lower(purchase_number) = lower($2)
+        or coalesce(supplier_name, '') ilike $3
+        or coalesce(notes, '') ilike $3
+      order by
+        case
+          when ($1::bigint is not null and id = $1) then 0
+          when lower(purchase_number) = lower($2) then 1
+          else 2
+        end,
+        coalesce(acquired_at, created_at) desc,
+        id desc
+      limit 5
+    `,
+    [exactId, trimmed, `%${trimmed}%`]
+  );
+
+  if (rows.length === 0) {
+    throw new Error(`No encontré una compra para "${purchaseRef}".`);
+  }
+
+  const exactRows = rows.filter(
+    (row) => row.id === exactId || row.purchase_number.toLowerCase() === trimmed.toLowerCase()
+  );
+
+  if (exactRows.length === 1) {
+    return exactRows[0];
+  }
+
+  if (rows.length > 1) {
+    throw new PurchaseReferenceAmbiguityError(
+      purchaseRef,
+      rows.slice(0, 5).map((row) => ({
+        id: row.id,
+        purchase_number: row.purchase_number,
+        supplier_name: row.supplier_name,
+        status: row.status,
+        total_amount: row.total_amount,
+        currency_code: row.currency_code,
+      })),
+      ["inventory_purchase_ref"]
+    );
+  }
+
+  return rows[0];
+}
+
 async function getLatestPendingConfirmation(actor: ActorContext) {
   const rows = await query<{
     id: number;
@@ -1464,7 +2034,7 @@ async function getLatestPendingConfirmation(actor: ActorContext) {
   return rows[0] ?? null;
 }
 
-async function getLatestProductResolutionPrompt(actor: ActorContext): Promise<ProductResolutionPromptPayload | null> {
+async function getLatestResolutionPrompt(actor: ActorContext): Promise<ResolutionPromptPayload | null> {
   if (!actor.conversationId) {
     return null;
   }
@@ -1474,7 +2044,12 @@ async function getLatestProductResolutionPrompt(actor: ActorContext): Promise<Pr
       select payload
       from public.messages
       where conversation_id = $1
-        and payload ->> 'kind' in ('product_resolution_prompt', 'product_resolution_selected')
+        and payload ->> 'kind' in (
+          'product_resolution_prompt',
+          'product_resolution_selected',
+          'purchase_resolution_prompt',
+          'purchase_resolution_selected'
+        )
       order by created_at desc, id desc
       limit 1
     `,
@@ -1482,10 +2057,11 @@ async function getLatestProductResolutionPrompt(actor: ActorContext): Promise<Pr
   );
 
   const payload = rows[0]?.payload;
-  if (!payload || payload.kind !== "product_resolution_prompt") {
+  if (!payload) {
     return null;
   }
 
+  if (payload.kind === "product_resolution_prompt") {
   if (
     (payload.mode !== "read" && payload.mode !== "write") ||
     typeof payload.command !== "string" ||
@@ -1543,6 +2119,63 @@ async function getLatestProductResolutionPrompt(actor: ActorContext): Promise<Pr
     reference_path: referencePath,
     options,
   };
+  }
+
+  if (payload.kind === "purchase_resolution_prompt") {
+    if (
+      payload.mode !== "write" ||
+      typeof payload.command !== "string" ||
+      !isRecord(payload.params) ||
+      typeof payload.reference !== "string" ||
+      !Array.isArray(payload.reference_path) ||
+      !Array.isArray(payload.options)
+    ) {
+      return null;
+    }
+
+    const referencePath = payload.reference_path.filter(
+      (part): part is ProductResolutionPathPart => typeof part === "string" || typeof part === "number"
+    );
+
+    const options = payload.options
+      .filter((option): option is PurchaseResolutionOption => {
+        return (
+          isRecord(option) &&
+          (typeof option.id === "number" || option.id === null) &&
+          typeof option.purchase_number === "string" &&
+          typeof option.status === "string" &&
+          typeof option.currency_code === "string"
+        );
+      })
+      .map((option) => ({
+        id: option.id,
+        purchase_number: option.purchase_number,
+        supplier_name: option.supplier_name ?? null,
+        status: option.status,
+        total_amount:
+          option.total_amount == null || typeof option.total_amount === "string" || typeof option.total_amount === "number"
+            ? option.total_amount
+            : null,
+        currency_code: option.currency_code,
+        is_create_new: Boolean(option.is_create_new),
+      }));
+
+    if (referencePath.length === 0 || options.length === 0) {
+      return null;
+    }
+
+    return {
+      kind: "purchase_resolution_prompt",
+      mode: "write",
+      command: payload.command as WriteCommandName,
+      params: payload.params,
+      reference: payload.reference,
+      reference_path: referencePath,
+      options,
+    };
+  }
+
+  return null;
 }
 
 type ApprovalMode = "auto" | "inline_confirm";
@@ -1687,9 +2320,13 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
         `• Productos: ${snapshot.counts.products}`,
         `• Stock: ${snapshot.counts.stock}`,
         `• Clientes: ${snapshot.counts.customers}`,
+        `• Compras de inventario: ${snapshot.counts.inventoryPurchases}`,
         `• Conversaciones abiertas: ${snapshot.counts.conversations}`,
         `• Órdenes: ${snapshot.counts.orders}`,
-      ].join("\n");
+        snapshot.recentImageBatchCount > 0 ? `• Último lote de imágenes: ${snapshot.recentImageBatchCount}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
     }
     case "list_workflows":
       return listN8nWorkflows();
@@ -2112,6 +2749,40 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
         ...rows.map((row) => `• ${row.order_number} · ${row.status} · ${formatMoney(row.total_amount, row.currency_code)}`),
       ].join("\n");
     }
+    case "list_inventory_purchases": {
+      const parsed = listInventoryPurchasesSchema.parse(params);
+      const limit = parsed.all ? 200 : parsed.limit ?? 36;
+      const rows = await listInventoryPurchases(pool, {
+        query: parsed.query,
+        status: parsed.status,
+        limit,
+      });
+
+      if (rows.length === 0) {
+        return "No encontré compras de inventario con ese criterio.";
+      }
+
+      return [
+        `Compras de inventario${parsed.query ? ` para "${parsed.query}"` : ""} (${rows.length}${parsed.all ? "" : ` máx. ${limit}`}) :`,
+        ...rows.map(
+          (row) =>
+            `• ${row.purchase_number} · ${row.status} · ${formatMoney(row.total_amount as string | number | null, row.currency_code)} · ${
+              row.supplier_name || "sin proveedor"
+            } · funders ${row.funders_count ?? 0} · stock ${row.stock_units_count ?? 0}`
+        ),
+      ].join("\n");
+    }
+    case "get_inventory_purchase_details": {
+      const parsed = getInventoryPurchaseDetailsSchema.parse(params);
+      const purchase = await resolveInventoryPurchaseForOperator(parsed.purchase_ref);
+      const detail = await getInventoryPurchaseDetail(pool, purchase.id);
+
+      if (!detail) {
+        return `No pude cargar la compra ${parsed.purchase_ref}.`;
+      }
+
+      return formatRecordDump(`Fila completa de compra ${detail.purchase_number}:`, detail as Record<string, unknown>);
+    }
     case "list_conversations": {
       const parsed = listConversationsSchema.parse(params);
       const limit = parsed.all ? 200 : parsed.limit ?? 36;
@@ -2138,7 +2809,11 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
   }
 }
 
-async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<string, unknown>): Promise<PreparedMutation> {
+async function prepareWriteCommand(
+  actor: ActorContext,
+  command: WriteCommandName,
+  rawParams: Record<string, unknown>
+): Promise<PreparedMutation> {
   switch (command) {
     case "create_product": {
       const parsed = createProductSchema.parse(rawParams);
@@ -2290,6 +2965,68 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
         },
       };
     }
+    case "bulk_reprice_products": {
+      const parsed = bulkRepriceProductsSchema.parse(rawParams);
+      const items: Array<{
+        product_id: number;
+        sku: string;
+        title: string;
+        previous_cost_usd: string | number | null;
+        previous_price_amount: string | number | null;
+        changes: Record<string, unknown>;
+      }> = [];
+      const seenProductIds = new Set<number>();
+
+      for (const item of parsed.items) {
+        const product = await resolveProduct(item.product_ref);
+        if (seenProductIds.has(product.id)) {
+          throw new Error(`El producto ${product.sku} aparece repetido en el lote. Dejame una sola línea por producto.`);
+        }
+
+        seenProductIds.add(product.id);
+        const current = await loadProductPricingState(product.id);
+        if (!current) {
+          throw new Error(`No pude cargar pricing actual para ${product.sku}.`);
+        }
+
+        const derived = await calculateDerivedPricing(
+          {
+            cost_usd: item.cost_usd,
+            logistics_usd: toPricingCarrierValue(current.logistics_usd ?? null),
+            usd_rate: toPricingCarrierValue(current.usd_rate ?? null),
+            cuotas_qty: toPricingCarrierValue(current.cuotas_qty ?? null),
+          },
+          pool
+        );
+
+        items.push({
+          product_id: product.id,
+          sku: product.sku,
+          title: product.title,
+          previous_cost_usd: current.cost_usd as string | number | null,
+          previous_price_amount: current.price_amount as string | number | null,
+          changes: {
+            cost_usd: item.cost_usd,
+            ...derived,
+          },
+        });
+      }
+
+      return {
+        command,
+        summary: [
+          `Repricing masivo de ${items.length} productos`,
+          ...items.map(
+            (item) =>
+              `• ${item.sku} · cost_usd ${item.previous_cost_usd ?? "-"} → ${item.changes.cost_usd} · ${formatMoney(
+                item.previous_price_amount,
+                "ARS"
+              )} → ${formatMoney(item.changes.price_amount as string | number | null, "ARS")}`
+          ),
+        ].join("\n"),
+        payload: { items },
+      };
+    }
     case "delete_product": {
       const parsed = deleteProductSchema.parse(rawParams);
       const product = await resolveProduct(parsed.product_ref);
@@ -2303,14 +3040,90 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
         },
       };
     }
+    case "create_inventory_purchase": {
+      const parsed = createInventoryPurchaseSchema.parse(rawParams);
+      const payload = {
+        ...parsed,
+        currency_code: parsed.currency_code?.trim() || "USD",
+        status: parsed.status || "draft",
+      };
+
+      return {
+        command,
+        summary: [
+          "Crear compra de inventario",
+          payload.supplier_name ? `• Proveedor: ${payload.supplier_name}` : "",
+          payload.total_amount != null ? `• Total: ${formatMoney(payload.total_amount, payload.currency_code)}` : "",
+          `• Estado: ${payload.status}`,
+          payload.acquired_at ? `• Fecha: ${payload.acquired_at}` : "",
+          payload.notes ? `• Notas: ${payload.notes}` : "",
+          payload.funders?.length ? "• Funders:" : "",
+          ...buildFunderSummaryLines(payload.funders as Array<Record<string, unknown>> | undefined),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        payload,
+      };
+    }
+    case "update_inventory_purchase": {
+      const parsed = updateInventoryPurchaseSchema.parse(rawParams);
+      const purchase = await resolveInventoryPurchaseForOperator(parsed.purchase_ref);
+      const nextChanges = {
+        ...parsed.changes,
+        currency_code:
+          parsed.changes.currency_code === undefined ? undefined : parsed.changes.currency_code?.trim() || "USD",
+      };
+
+      return {
+        command,
+        summary: [
+          `Actualizar compra ${purchase.purchase_number}`,
+          purchase.supplier_name ? `• Compra actual: ${purchase.supplier_name}` : "",
+          `• Cambios: ${Object.entries(nextChanges)
+            .map(([key, value]) => `${key}=${formatJsonPreview(value)}`)
+            .join(", ")}`,
+          Array.isArray(nextChanges.funders) && nextChanges.funders.length > 0 ? "• Funders propuestos:" : "",
+          ...buildFunderSummaryLines(nextChanges.funders as Array<Record<string, unknown>> | undefined),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        payload: {
+          purchase_id: purchase.id,
+          purchase_number: purchase.purchase_number,
+          changes: nextChanges,
+        },
+      };
+    }
     case "create_stock_unit": {
       const parsed = createStockSchema.parse(rawParams);
       const product = await resolveProduct(parsed.product_ref);
+      const purchase = parsed.inventory_purchase_ref ? await resolveInventoryPurchaseForOperator(parsed.inventory_purchase_ref) : null;
+
+      if (!purchase) {
+        throw new PurchaseReferenceAmbiguityError(
+          `${product.title} stock manual`,
+          [
+            ...(await listRecentInventoryPurchaseOptions(4)),
+            {
+              id: null,
+              purchase_number: "new",
+              supplier_name: null,
+              status: "draft",
+              total_amount: null,
+              currency_code: "USD",
+              is_create_new: true,
+            },
+          ],
+          ["inventory_purchase_ref"]
+        );
+      }
+
       return {
         command,
         summary: [
           `Crear unidad de stock para ${product.sku}`,
           `• Producto: ${product.title}`,
+          `• Compra: ${purchase.purchase_number}`,
           parsed.serial_number ? `• Serial: ${parsed.serial_number}` : "",
           parsed.imei_1 ? `• IMEI 1: ${parsed.imei_1}` : "",
           parsed.imei_2 ? `• IMEI 2: ${parsed.imei_2}` : "",
@@ -2322,6 +3135,8 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
         payload: {
           ...parsed,
           product_id: product.id,
+          inventory_purchase_id: purchase.id,
+          inventory_purchase_number: purchase.purchase_number,
           sku: product.sku,
           currency_code: parsed.currency_code?.trim() || "ARS",
           status: parsed.status || "in_stock",
@@ -2333,6 +3148,8 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
       const stock = await resolveStock(parsed.stock_ref);
       let nextProductId: number | null = null;
       let nextSku: string | null = null;
+      let nextInventoryPurchaseId: number | null = null;
+      let nextInventoryPurchaseNumber: string | null = null;
 
       if (parsed.changes.product_ref) {
         const product = await resolveProduct(parsed.changes.product_ref);
@@ -2340,11 +3157,18 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
         nextSku = product.sku;
       }
 
+      if (parsed.changes.inventory_purchase_ref) {
+        const purchase = await resolveInventoryPurchaseForOperator(parsed.changes.inventory_purchase_ref);
+        nextInventoryPurchaseId = purchase.id;
+        nextInventoryPurchaseNumber = purchase.purchase_number;
+      }
+
       return {
         command,
         summary: [
           `Actualizar stock #${stock.id}`,
           `• Referencia actual: ${stock.serial_number || stock.imei_1 || stock.imei_2 || stock.sku}`,
+          nextInventoryPurchaseNumber ? `• Compra destino: ${nextInventoryPurchaseNumber}` : "",
           `• Cambios: ${Object.entries(parsed.changes)
             .map(([key, value]) => `${key}=${formatJsonPreview(value)}`)
             .join(", ")}`,
@@ -2355,6 +3179,200 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
           changes: parsed.changes,
           product_id: nextProductId,
           next_sku: nextSku,
+          inventory_purchase_id: nextInventoryPurchaseId,
+          inventory_purchase_number: nextInventoryPurchaseNumber,
+        },
+      };
+    }
+    case "create_stock_from_images": {
+      const parsed = createStockFromImagesSchema.parse(rawParams);
+      const product = await resolveProduct(parsed.product_ref);
+      const purchase = parsed.inventory_purchase_ref ? await resolveInventoryPurchaseForOperator(parsed.inventory_purchase_ref) : null;
+
+      if (!purchase) {
+        throw new PurchaseReferenceAmbiguityError(
+          product.title,
+          [
+            ...(await listRecentInventoryPurchaseOptions(4)),
+            {
+              id: null,
+              purchase_number: "new",
+              supplier_name: null,
+              status: "draft",
+              total_amount: null,
+              currency_code: "USD",
+              is_create_new: true,
+            },
+          ],
+          ["inventory_purchase_ref"]
+        );
+      }
+
+      const extracted = await getRecentImageBatchOrThrow(actor);
+      await assertNoExistingStockConflicts(extracted.candidates);
+      const current = await loadProductPricingState(product.id);
+      const fallbackCost = asFiniteNumber(current?.cost_usd ?? null);
+      const purchaseTotal = asFiniteNumber(purchase?.total_amount ?? null);
+      const derivedCost =
+        parsed.cost_amount ??
+        (purchaseTotal != null && extracted.candidates.length > 0 ? roundAmount(purchaseTotal / extracted.candidates.length) : null) ??
+        fallbackCost;
+      const currencyCode =
+        parsed.currency_code?.trim() ||
+        purchase?.currency_code ||
+        (fallbackCost != null ? "USD" : "ARS");
+
+      return {
+        command,
+        summary: [
+          `Crear ${extracted.candidates.length} unidades desde imágenes`,
+          `• Producto: ${product.sku} · ${product.title}`,
+          `• Compra asociada: ${purchase.purchase_number}`,
+          `• Imágenes usadas: ${extracted.images.length}`,
+          derivedCost != null ? `• Costo por unidad: ${formatMoney(derivedCost, currencyCode)}` : "",
+          `• Estado inicial: ${parsed.status || "in_stock"}`,
+          parsed.location_code ? `• Ubicación: ${parsed.location_code}` : "",
+          ...buildImageBatchSummaryLines(extracted.candidates, extracted.warnings),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        payload: {
+          product_id: product.id,
+          sku: product.sku,
+          title: product.title,
+          inventory_purchase_id: purchase.id,
+          inventory_purchase_number: purchase.purchase_number,
+          candidates: extracted.candidates,
+          warnings: extracted.warnings,
+          cost_amount: derivedCost,
+          currency_code: currencyCode,
+          status: parsed.status || "in_stock",
+          location_code: parsed.location_code ?? null,
+          acquired_at: parsed.acquired_at ?? purchase.acquired_at ?? null,
+          metadata: parsed.metadata || {},
+        },
+      };
+    }
+    case "create_inventory_purchase_from_images": {
+      const parsed = createInventoryPurchaseFromImagesSchema.parse(rawParams);
+      const product = await resolveProduct(parsed.product_ref);
+      const extracted = await getRecentImageBatchOrThrow(actor);
+      await assertNoExistingStockConflicts(extracted.candidates);
+      const current = await loadProductPricingState(product.id);
+      const fallbackCost = asFiniteNumber(current?.cost_usd ?? null);
+      const currencyCode = parsed.currency_code?.trim() || "USD";
+      const explicitTotal = asFiniteNumber(parsed.total_amount ?? null);
+      const derivedUnitCost =
+        parsed.cost_amount ??
+        (explicitTotal != null && extracted.candidates.length > 0 ? roundAmount(explicitTotal / extracted.candidates.length) : null) ??
+        fallbackCost;
+      const totalAmount =
+        explicitTotal ?? (derivedUnitCost != null ? roundAmount(derivedUnitCost * extracted.candidates.length) : null);
+      const purchaseInput = {
+        supplier_name: parsed.supplier_name ?? null,
+        currency_code: currencyCode,
+        total_amount: totalAmount,
+        status: parsed.status || "received",
+        acquired_at: parsed.acquired_at ?? new Date().toISOString(),
+        notes: parsed.notes ?? null,
+        metadata: {
+          ...(parsed.metadata || {}),
+          source: "telegram-image-batch",
+          product_sku: product.sku,
+          image_count: extracted.images.length,
+          source_media_urls: extracted.images.map((image) => image.media_url),
+          extracted_warnings: extracted.warnings,
+        },
+        funders: parsed.funders || [],
+      };
+
+      return {
+        command,
+        summary: [
+          `Crear compra + ${extracted.candidates.length} unidades desde imágenes`,
+          `• Producto: ${product.sku} · ${product.title}`,
+          purchaseInput.supplier_name ? `• Proveedor: ${purchaseInput.supplier_name}` : "",
+          totalAmount != null ? `• Total compra: ${formatMoney(totalAmount, currencyCode)}` : "",
+          derivedUnitCost != null ? `• Costo unitario: ${formatMoney(derivedUnitCost, currencyCode)}` : "",
+          `• Estado compra: ${purchaseInput.status}`,
+          parsed.location_code ? `• Ubicación stock: ${parsed.location_code}` : "",
+          purchaseInput.funders.length > 0 ? "• Funders:" : "",
+          ...buildFunderSummaryLines(purchaseInput.funders as Array<Record<string, unknown>>),
+          ...buildImageBatchSummaryLines(extracted.candidates, extracted.warnings),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        payload: {
+          purchase_input: purchaseInput,
+          stock_input: {
+            product_id: product.id,
+            sku: product.sku,
+            title: product.title,
+            candidates: extracted.candidates,
+            warnings: extracted.warnings,
+            cost_amount: derivedUnitCost,
+            currency_code: currencyCode,
+            status: "in_stock",
+            location_code: parsed.location_code ?? null,
+            acquired_at: purchaseInput.acquired_at,
+            metadata: parsed.metadata || {},
+          },
+        },
+      };
+    }
+    case "update_stock_status_from_images": {
+      const parsed = updateStockStatusFromImagesSchema.parse(rawParams);
+      const extracted = await getRecentImageBatchOrThrow(actor);
+      const resolved = await resolveStockMatchesFromCandidates(extracted.candidates);
+
+      if (resolved.matches.length === 0) {
+        throw new Error("No encontré unidades existentes para los IMEIs/seriales de las imágenes recientes.");
+      }
+
+      if (resolved.unmatched.length > 0) {
+        throw new Error(
+          `No encontré stock para: ${resolved.unmatched
+            .slice(0, 10)
+            .map((candidate) => candidate.imei_1 || candidate.imei_2 || candidate.serial_number || "sin identificador")
+            .join(" | ")}`
+        );
+      }
+
+      const computedSoldAt = parsed.status === "sold" ? parsed.sold_at ?? new Date().toISOString() : parsed.sold_at;
+
+      return {
+        command,
+        summary: [
+          `Actualizar ${resolved.matches.length} unidades desde imágenes`,
+          `• Estado nuevo: ${parsed.status}`,
+          computedSoldAt ? `• sold_at: ${computedSoldAt}` : "",
+          parsed.location_code ? `• location_code: ${parsed.location_code}` : "",
+          ...resolved.matches.map(
+            (match) =>
+              `• #${match.id} · ${match.sku} · ${match.imei_1 || match.imei_2 || match.serial_number || "sin ref"} · ${match.status} → ${parsed.status}`
+          ),
+          extracted.warnings.length > 0 ? "• Advertencias OCR:" : "",
+          ...extracted.warnings.slice(0, 5).map((warning) => `  - ${warning}`),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        payload: {
+          status: parsed.status,
+          sold_at: computedSoldAt ?? null,
+          apply_sold_at: parsed.sold_at !== undefined || parsed.status === "sold",
+          location_code: parsed.location_code ?? null,
+          apply_location_code: parsed.location_code !== undefined,
+          matches: resolved.matches.map((match) => ({
+            stock_unit_id: match.id,
+            sku: match.sku,
+            title: match.title,
+            current_status: match.status,
+            serial_number: match.serial_number,
+            imei_1: match.imei_1,
+            imei_2: match.imei_2,
+            source_message_ids: match.source_candidates.map((candidate) => candidate.source_message_id),
+          })),
+          warnings: extracted.warnings,
         },
       };
     }
@@ -2383,11 +3401,19 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
       const uniqueStock = Array.from(new Map(resolved.map((stock) => [stock.id, stock])).values());
       let nextProductId: number | null = null;
       let nextSku: string | null = null;
+      let nextInventoryPurchaseId: number | null = null;
+      let nextInventoryPurchaseNumber: string | null = null;
 
       if (parsed.changes.product_ref) {
         const product = await resolveProduct(parsed.changes.product_ref);
         nextProductId = product.id;
         nextSku = product.sku;
+      }
+
+      if (parsed.changes.inventory_purchase_ref) {
+        const purchase = await resolveInventoryPurchaseForOperator(parsed.changes.inventory_purchase_ref);
+        nextInventoryPurchaseId = purchase.id;
+        nextInventoryPurchaseNumber = purchase.purchase_number;
       }
 
       return {
@@ -2397,6 +3423,7 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
           `• Referencias: ${uniqueStock
             .map((stock) => stock.serial_number || stock.imei_1 || stock.imei_2 || `#${stock.id}`)
             .join(", ")}`,
+          nextInventoryPurchaseNumber ? `• Compra destino: ${nextInventoryPurchaseNumber}` : "",
           `• Cambios: ${Object.entries(parsed.changes)
             .map(([key, value]) => `${key}=${formatJsonPreview(value)}`)
             .join(", ")}`,
@@ -2406,6 +3433,8 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
           changes: parsed.changes,
           product_id: nextProductId,
           next_sku: nextSku,
+          inventory_purchase_id: nextInventoryPurchaseId,
+          inventory_purchase_number: nextInventoryPurchaseNumber,
         },
       };
     }
@@ -2647,6 +3676,52 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
         ...result.rows.map((row) => `• ${row.sku}`),
       ].join("\n");
     }
+    case "bulk_reprice_products": {
+      const parsed = z
+        .object({
+          items: z
+            .array(
+              z.object({
+                product_id: z.coerce.number().int().positive(),
+                sku: z.string(),
+                title: z.string(),
+                previous_cost_usd: z.union([z.string(), z.number()]).nullable().optional(),
+                previous_price_amount: z.union([z.string(), z.number()]).nullable().optional(),
+                changes: z.record(z.string(), z.unknown()),
+              })
+            )
+            .min(1),
+        })
+        .parse(payload);
+
+      const updatedRows: Array<{ sku: string; price_amount: string | number | null; cost_usd: string | number | null }> = [];
+
+      for (const item of parsed.items) {
+        const entries = Object.entries(item.changes);
+        const sql = entries.map(([key], index) => `${key} = $${index + 1}`).join(", ");
+        const values = entries.map(([, value]) => value);
+        const result = await client.query<{
+          id: number;
+          sku: string;
+          cost_usd: string | number | null;
+          price_amount: string | number | null;
+        }>(
+          `update public.products set ${sql} where id = $${values.length + 1} returning id, sku, cost_usd, price_amount`,
+          [...values, item.product_id]
+        );
+
+        const row = result.rows[0];
+        await writeAudit(client, actor, "telegram.product.repriced", "product", String(row.id), item.changes);
+        updatedRows.push(row);
+      }
+
+      return [
+        `Productos recalculados: ${updatedRows.length}`,
+        ...updatedRows.map(
+          (row) => `• ${row.sku} · cost_usd ${row.cost_usd ?? "-"} · precio ${formatMoney(row.price_amount, "ARS")}`
+        ),
+      ].join("\n");
+    }
     case "delete_product": {
       const parsed = z
         .object({
@@ -2672,10 +3747,61 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       });
       return `Producto borrado.\n• ID: ${parsed.product_id}\n• SKU: ${parsed.sku}`;
     }
+    case "create_inventory_purchase": {
+      const parsed = createInventoryPurchaseSchema.parse(payload);
+      const purchase = await createInventoryPurchase(client, parsed);
+
+      if (!purchase) {
+        throw new Error("No pude crear la compra de inventario.");
+      }
+
+      await writeAudit(client, actor, "telegram.inventory_purchase.created", "inventory_purchase", String(purchase.id), parsed);
+      return [
+        "Compra de inventario creada.",
+        ...buildPurchaseSummaryLines(purchase),
+        Array.isArray(purchase.funders) && purchase.funders.length > 0 ? "• Funders:" : "",
+        ...buildFunderSummaryLines(purchase.funders as Array<Record<string, unknown>> | undefined),
+        `• Stock vinculado: ${purchase.stock_units_total ?? 0}`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    case "update_inventory_purchase": {
+      const parsed = z
+        .object({
+          purchase_id: z.coerce.number().int().positive(),
+          purchase_number: z.string(),
+          changes: createInventoryPurchaseSchema,
+        })
+        .parse(payload);
+      const purchase = await updateInventoryPurchase(client, parsed.purchase_id, parsed.changes);
+
+      if (!purchase) {
+        throw new Error(`No encontré la compra ${parsed.purchase_number}.`);
+      }
+
+      await writeAudit(
+        client,
+        actor,
+        "telegram.inventory_purchase.updated",
+        "inventory_purchase",
+        String(purchase.id),
+        parsed.changes
+      );
+      return [
+        "Compra de inventario actualizada.",
+        ...buildPurchaseSummaryLines(purchase),
+        Array.isArray(purchase.funders) && purchase.funders.length > 0 ? "• Funders:" : "",
+        ...buildFunderSummaryLines(purchase.funders as Array<Record<string, unknown>> | undefined),
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
     case "create_stock_unit": {
       const parsed = createStockSchema
         .extend({
           product_id: z.coerce.number().int().positive(),
+          inventory_purchase_id: z.coerce.number().int().positive(),
           sku: z.string(),
         })
         .parse(payload);
@@ -2683,8 +3809,8 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       const result = await client.query(
         `
           insert into public.stock_units (
-            product_id, serial_number, imei_1, imei_2, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, metadata
-          ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            product_id, serial_number, imei_1, imei_2, inventory_purchase_id, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, metadata
+          ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
           returning id
         `,
         [
@@ -2692,6 +3818,7 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
           parsed.serial_number ?? null,
           parsed.imei_1 ?? null,
           parsed.imei_2 ?? null,
+          parsed.inventory_purchase_id,
           parsed.color ?? null,
           parsed.battery_health ?? null,
           parsed.status || "in_stock",
@@ -2717,13 +3844,18 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
           current_sku: z.string(),
           changes: updateStockSchema.shape.changes,
           product_id: z.coerce.number().int().positive().nullable().optional(),
+          inventory_purchase_id: z.coerce.number().int().positive().optional(),
         })
         .parse(payload);
 
       const nextChanges = { ...parsed.changes } as Record<string, unknown>;
       delete nextChanges.product_ref;
+      delete nextChanges.inventory_purchase_ref;
       if (parsed.product_id != null) {
         nextChanges.product_id = parsed.product_id;
+      }
+      if (parsed.inventory_purchase_id !== undefined) {
+        nextChanges.inventory_purchase_id = parsed.inventory_purchase_id;
       }
 
       const entries = Object.entries(nextChanges);
@@ -2737,6 +3869,203 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       const stockUnit = result.rows[0];
       await writeAudit(client, actor, "telegram.stock.updated", "stock_unit", String(stockUnit.id), nextChanges);
       return `Unidad actualizada.\n• Stock ID: ${stockUnit.id}\n• Estado: ${stockUnit.status}`;
+    }
+    case "create_stock_from_images": {
+      const parsed = z
+        .object({
+          product_id: z.coerce.number().int().positive(),
+          sku: z.string(),
+          title: z.string(),
+          inventory_purchase_id: z.coerce.number().int().positive(),
+          inventory_purchase_number: z.string(),
+          candidates: z.array(
+            z.object({
+              imei_1: z.string().nullable(),
+              imei_2: z.string().nullable(),
+              serial_number: z.string().nullable(),
+              source_message_id: z.coerce.number().int().positive(),
+              source_media_url: z.string(),
+              notes: z.string().nullable(),
+            })
+          ),
+          warnings: z.array(z.string()).optional(),
+          cost_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
+          currency_code: z.string(),
+          status: z.enum(stockStatusValues),
+          location_code: z.string().nullable().optional(),
+          acquired_at: z.string().datetime().nullable().optional(),
+          metadata: z.record(z.string(), z.unknown()).optional(),
+        })
+        .parse(payload);
+
+      const createdRows: Array<{ id: number; ref: string }> = [];
+
+      for (const candidate of parsed.candidates) {
+        const result = await client.query<{ id: number }>(
+          `
+            insert into public.stock_units (
+              product_id,
+              serial_number,
+              imei_1,
+              imei_2,
+              inventory_purchase_id,
+              status,
+              location_code,
+              cost_amount,
+              currency_code,
+              acquired_at,
+              metadata
+            ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            returning id
+          `,
+          [
+            parsed.product_id,
+            candidate.serial_number ?? null,
+            candidate.imei_1 ?? null,
+            candidate.imei_2 ?? null,
+            parsed.inventory_purchase_id,
+            parsed.status,
+            parsed.location_code ?? null,
+            parsed.cost_amount ?? null,
+            parsed.currency_code,
+            parsed.acquired_at ?? null,
+            {
+              ...(parsed.metadata || {}),
+              source: "telegram-image-batch",
+              source_message_id: candidate.source_message_id,
+              source_media_url: candidate.source_media_url,
+              extracted_notes: candidate.notes ?? null,
+              extraction_warnings: parsed.warnings || [],
+            },
+          ]
+        );
+
+        const stockId = result.rows[0].id;
+        createdRows.push({
+          id: stockId,
+          ref: candidate.imei_1 || candidate.imei_2 || candidate.serial_number || `#${stockId}`,
+        });
+        await writeAudit(client, actor, "telegram.stock.created_from_images", "stock_unit", String(stockId), {
+          product_id: parsed.product_id,
+          sku: parsed.sku,
+          inventory_purchase_id: parsed.inventory_purchase_id,
+          source_message_id: candidate.source_message_id,
+          source_media_url: candidate.source_media_url,
+        });
+      }
+
+      return [
+        `Stock creado desde imágenes: ${createdRows.length}`,
+        `• Producto: ${parsed.sku}`,
+        `• Compra: ${parsed.inventory_purchase_number}`,
+        ...createdRows.map((row) => `• #${row.id} · ${row.ref}`),
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    case "create_inventory_purchase_from_images": {
+      const parsed = z
+        .object({
+          purchase_input: createInventoryPurchaseSchema,
+          stock_input: z.object({
+            product_id: z.coerce.number().int().positive(),
+            sku: z.string(),
+            title: z.string(),
+            candidates: z.array(
+              z.object({
+                imei_1: z.string().nullable(),
+                imei_2: z.string().nullable(),
+                serial_number: z.string().nullable(),
+                source_message_id: z.coerce.number().int().positive(),
+                source_media_url: z.string(),
+                notes: z.string().nullable(),
+              })
+            ),
+            warnings: z.array(z.string()).optional(),
+            cost_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
+            currency_code: z.string(),
+            status: z.enum(stockStatusValues),
+            location_code: z.string().nullable().optional(),
+            acquired_at: z.string().datetime().nullable().optional(),
+            metadata: z.record(z.string(), z.unknown()).optional(),
+          }),
+        })
+        .parse(payload);
+
+      const purchase = await createInventoryPurchase(client, parsed.purchase_input);
+      if (!purchase) {
+        throw new Error("No pude crear la compra de inventario.");
+      }
+
+      const createdRows: Array<{ id: number; ref: string }> = [];
+
+      for (const candidate of parsed.stock_input.candidates) {
+        const result = await client.query<{ id: number }>(
+          `
+            insert into public.stock_units (
+              product_id,
+              serial_number,
+              imei_1,
+              imei_2,
+              inventory_purchase_id,
+              status,
+              location_code,
+              cost_amount,
+              currency_code,
+              acquired_at,
+              metadata
+            ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            returning id
+          `,
+          [
+            parsed.stock_input.product_id,
+            candidate.serial_number ?? null,
+            candidate.imei_1 ?? null,
+            candidate.imei_2 ?? null,
+            purchase.id,
+            parsed.stock_input.status,
+            parsed.stock_input.location_code ?? null,
+            parsed.stock_input.cost_amount ?? null,
+            parsed.stock_input.currency_code,
+            parsed.stock_input.acquired_at ?? null,
+            {
+              ...(parsed.stock_input.metadata || {}),
+              source: "telegram-image-batch",
+              source_message_id: candidate.source_message_id,
+              source_media_url: candidate.source_media_url,
+              extracted_notes: candidate.notes ?? null,
+              extraction_warnings: parsed.stock_input.warnings || [],
+            },
+          ]
+        );
+
+        const stockId = result.rows[0].id;
+        createdRows.push({
+          id: stockId,
+          ref: candidate.imei_1 || candidate.imei_2 || candidate.serial_number || `#${stockId}`,
+        });
+        await writeAudit(client, actor, "telegram.stock.created_from_purchase_images", "stock_unit", String(stockId), {
+          product_id: parsed.stock_input.product_id,
+          sku: parsed.stock_input.sku,
+          inventory_purchase_id: purchase.id,
+          purchase_number: purchase.purchase_number,
+          source_message_id: candidate.source_message_id,
+        });
+      }
+
+      await writeAudit(client, actor, "telegram.inventory_purchase.created_from_images", "inventory_purchase", String(purchase.id), {
+        product_id: parsed.stock_input.product_id,
+        sku: parsed.stock_input.sku,
+        stock_units_created: createdRows.length,
+      });
+
+      return [
+        "Compra + stock creados desde imágenes.",
+        ...buildPurchaseSummaryLines(purchase),
+        `• Producto: ${parsed.stock_input.sku}`,
+        `• Unidades creadas: ${createdRows.length}`,
+        ...createdRows.map((row) => `• #${row.id} · ${row.ref}`),
+      ].join("\n");
     }
     case "delete_stock_unit": {
       const parsed = z
@@ -2766,13 +4095,18 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
           stock_unit_ids: z.array(z.coerce.number().int().positive()).min(1),
           changes: updateStockSchema.shape.changes,
           product_id: z.coerce.number().int().positive().nullable().optional(),
+          inventory_purchase_id: z.coerce.number().int().positive().optional(),
         })
         .parse(payload);
 
       const nextChanges = { ...parsed.changes } as Record<string, unknown>;
       delete nextChanges.product_ref;
+      delete nextChanges.inventory_purchase_ref;
       if (parsed.product_id != null) {
         nextChanges.product_id = parsed.product_id;
+      }
+      if (parsed.inventory_purchase_id !== undefined) {
+        nextChanges.inventory_purchase_id = parsed.inventory_purchase_id;
       }
 
       const entries = Object.entries(nextChanges);
@@ -2790,6 +4124,65 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       return [
         `Unidades actualizadas: ${result.rowCount ?? result.rows.length}`,
         ...result.rows.map((row) => `• #${row.id} · ${row.status}`),
+      ].join("\n");
+    }
+    case "update_stock_status_from_images": {
+      const parsed = z
+        .object({
+          status: z.enum(stockStatusValues),
+          sold_at: z.string().datetime().nullable().optional(),
+          apply_sold_at: z.boolean().optional(),
+          location_code: z.string().nullable().optional(),
+          apply_location_code: z.boolean().optional(),
+          matches: z.array(
+            z.object({
+              stock_unit_id: z.coerce.number().int().positive(),
+              sku: z.string(),
+              title: z.string(),
+              current_status: z.string(),
+              serial_number: z.string().nullable().optional(),
+              imei_1: z.string().nullable().optional(),
+              imei_2: z.string().nullable().optional(),
+              source_message_ids: z.array(z.coerce.number().int().positive()).optional(),
+            })
+          ),
+        })
+        .parse(payload);
+
+      const results: Array<{ id: number; sku: string; status: string }> = [];
+
+      for (const match of parsed.matches) {
+        const nextChanges: Record<string, unknown> = {
+          status: parsed.status,
+        };
+
+        if (parsed.apply_location_code) {
+          nextChanges.location_code = parsed.location_code ?? null;
+        }
+
+        if (parsed.apply_sold_at) {
+          nextChanges.sold_at = parsed.sold_at ?? null;
+        }
+
+        const entries = Object.entries(nextChanges);
+        const sql = entries.map(([key], index) => `${key} = $${index + 1}`).join(", ");
+        const values = entries.map(([, value]) => value);
+        const result = await client.query<{ id: number; status: string }>(
+          `update public.stock_units set ${sql} where id = $${values.length + 1} returning id, status`,
+          [...values, match.stock_unit_id]
+        );
+
+        const row = result.rows[0];
+        results.push({ id: row.id, sku: match.sku, status: row.status });
+        await writeAudit(client, actor, "telegram.stock.updated_from_images", "stock_unit", String(row.id), {
+          ...nextChanges,
+          source_message_ids: match.source_message_ids || [],
+        });
+      }
+
+      return [
+        `Stock actualizado desde imágenes: ${results.length}`,
+        ...results.map((row) => `• #${row.id} · ${row.sku} · ${row.status}`),
       ].join("\n");
     }
     case "update_setting": {
@@ -3174,35 +4567,82 @@ function applyReadIntentDefaults(
   return nextParams;
 }
 
-async function tryResumePendingProductResolution(actor: ActorContext): Promise<OperatorMessageResult | null> {
-  const prompt = await getLatestProductResolutionPrompt(actor);
+async function tryResumePendingResolution(actor: ActorContext): Promise<OperatorMessageResult | null> {
+  const prompt = await getLatestResolutionPrompt(actor);
   if (!prompt) {
     return null;
   }
 
-  const selected = resolveProductSelectionFromPrompt(actor.userMessage, prompt);
+  if (prompt.kind === "product_resolution_prompt") {
+    const selected = resolveProductSelectionFromPrompt(actor.userMessage, prompt);
+    if (!selected) {
+      return null;
+    }
+
+    await saveOperatorEventMessage(actor, `Producto resuelto: ${selected.sku}`, {
+      kind: "product_resolution_selected",
+      reference: prompt.reference,
+      sku: selected.sku,
+      title: selected.title,
+    });
+
+    const resumedDraft: Draft = {
+      mode: prompt.mode,
+      command: prompt.command,
+      params: setValueAtPath(prompt.params, prompt.reference_path, selected.sku),
+    };
+
+    return resolveTelegramOperatorDraft(actor, resumedDraft);
+  }
+
+  const selected = resolvePurchaseSelectionFromPrompt(actor.userMessage, prompt);
   if (!selected) {
     return null;
   }
 
-  await saveOperatorEventMessage(actor, `Producto resuelto: ${selected.sku}`, {
-    kind: "product_resolution_selected",
-    reference: prompt.reference,
-    sku: selected.sku,
-    title: selected.title,
-  });
+  await saveOperatorEventMessage(
+    actor,
+    selected.is_create_new ? "Compra nueva seleccionada" : `Compra resuelta: ${selected.purchase_number}`,
+    {
+      kind: "purchase_resolution_selected",
+      reference: prompt.reference,
+      purchase_number: selected.purchase_number,
+      is_create_new: Boolean(selected.is_create_new),
+    }
+  );
+
+  if (selected.is_create_new) {
+    if (prompt.command === "create_stock_from_images") {
+      const resumedDraft: Draft = {
+        mode: "write",
+        command: "create_inventory_purchase_from_images",
+        params: {
+          ...prompt.params,
+          status: "draft",
+        },
+      };
+      return resolveTelegramOperatorDraft(actor, resumedDraft);
+    }
+
+    return {
+      kind: "reply",
+      text:
+        "Perfecto. Para esa carga primero necesito una compra nueva. Podés responder algo como: “creá compra nueva total 5000 USD, Fran 50% cash y Agus 50% crypto” o usar la opción de compra + stock desde fotos.",
+      forceReply: true,
+    };
+  }
 
   const resumedDraft: Draft = {
     mode: prompt.mode,
     command: prompt.command,
-    params: setValueAtPath(prompt.params, prompt.reference_path, selected.sku),
+    params: setValueAtPath(prompt.params, prompt.reference_path, selected.purchase_number),
   };
 
   return resolveTelegramOperatorDraft(actor, resumedDraft);
 }
 
 export async function handleTelegramOperatorMessage(actor: ActorContext): Promise<OperatorMessageResult> {
-  const resumedResolution = await tryResumePendingProductResolution(actor);
+  const resumedResolution = await tryResumePendingResolution(actor);
   if (resumedResolution) {
     return resumedResolution;
   }
@@ -3338,7 +4778,7 @@ export async function resolveTelegramOperatorDraft(
       };
     }
 
-    const prepared = await prepareWriteCommand(draft.command as WriteCommandName, params);
+    const prepared = await prepareWriteCommand(actor, draft.command as WriteCommandName, params);
     const approvalMode = getApprovalMode(prepared);
 
     if (approvalMode === "auto") {
@@ -3387,6 +4827,30 @@ export async function resolveTelegramOperatorDraft(
       if (promptPayload) {
         await saveOperatorEventMessage(actor, `Resolución pendiente para producto: ${error.reference}`, promptPayload);
         return buildProductResolutionReply(promptPayload);
+      }
+    }
+
+    if (error instanceof PurchaseReferenceAmbiguityError) {
+      const referencePath =
+        error.referencePath.length > 0
+          ? error.referencePath
+          : findPurchaseReferencePaths(params, error.reference)[0] ?? [];
+      const promptPayload: PurchaseResolutionPromptPayload | null =
+        referencePath.length > 0
+          ? {
+              kind: "purchase_resolution_prompt",
+              mode: "write",
+              command: draft.command as WriteCommandName,
+              params,
+              reference: error.reference,
+              reference_path: referencePath,
+              options: error.options,
+            }
+          : null;
+
+      if (promptPayload) {
+        await saveOperatorEventMessage(actor, `Resolución pendiente para compra: ${error.reference}`, promptPayload);
+        return buildPurchaseResolutionReply(promptPayload);
       }
     }
 

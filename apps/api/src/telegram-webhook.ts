@@ -288,7 +288,9 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
           callbackAction.action === "menu"
             ? `__menu:${callbackAction.value}__`
             : callbackAction.action === "pick"
-              ? `__pick_product:${callbackAction.value}__`
+              ? callbackAction.value.startsWith("purchase:")
+                ? `__pick_purchase:${callbackAction.value.slice("purchase:".length)}__`
+                : `__pick_product:${callbackAction.value}__`
             : `${callbackAction.action === "approve" ? "CONFIRM" : "CANCEL"} ${callbackAction.value}`;
 
         const operatorResult = await handleTelegramOperatorMessage({
@@ -438,6 +440,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
       updateId: update.update_id ?? null,
       telegramMessageId: message.message_id,
       chatId: message.chat.id,
+      mediaGroupId: message.media_group_id ?? null,
     },
   });
 

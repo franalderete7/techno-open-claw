@@ -7,7 +7,7 @@ type OperatorSkillDefinition = {
   requiredInputs: string[];
   optionalInputs: string[];
   guardrails: string[];
-  bulkSupport: "none" | "same-change-multi-row";
+  bulkSupport: "none" | "same-change-multi-row" | "per-row-multi-row";
   examples: string[];
 };
 
@@ -163,6 +163,25 @@ const SKILLS: OperatorSkillDefinition[] = [
     ],
   },
   {
+    id: "bulk_reprice_products",
+    label: "Repricing masivo por lista",
+    mode: "write",
+    entity: "products",
+    summary: "Actualiza cost_usd por producto desde una lista y recalcula pricing derivado desde settings para cada fila.",
+    requiredInputs: ["items[{product_ref,cost_usd}]"],
+    optionalInputs: [],
+    guardrails: [
+      "Cada línea debe resolver un solo producto.",
+      "Si una referencia es ambigua, mostrar opciones y pedir elección.",
+      "Siempre mostrar preview antes de ejecutar.",
+    ],
+    bulkSupport: "per-row-multi-row",
+    examples: [
+      "actualizá estos costos: Samsung A17 6/128 = 155, Samsung A56 8/256 = 282",
+      "te paso una lista de productos con costo USD nuevo y recalculalos",
+    ],
+  },
+  {
     id: "delete_product",
     label: "Borrar producto",
     mode: "write",
@@ -190,6 +209,30 @@ const SKILLS: OperatorSkillDefinition[] = [
     examples: ["stock del s25 ultra", "buscar imei 356..."],
   },
   {
+    id: "list_inventory_purchases",
+    label: "Listar compras",
+    mode: "read",
+    entity: "inventory_purchases",
+    summary: "Lista compras de inventario por número, proveedor o estado.",
+    requiredInputs: [],
+    optionalInputs: ["query", "status"],
+    guardrails: ["Solo lectura."],
+    bulkSupport: "none",
+    examples: ["listá compras de inventario", "mostrá compras received de Juan"],
+  },
+  {
+    id: "get_inventory_purchase_details",
+    label: "Detalle de compra",
+    mode: "read",
+    entity: "inventory_purchases",
+    summary: "Devuelve la fila completa de una compra por id o purchase_number, incluyendo funders y stock vinculado.",
+    requiredInputs: ["purchase_ref"],
+    optionalInputs: [],
+    guardrails: ["Si la referencia es ambigua, pedir elegir la compra correcta."],
+    bulkSupport: "none",
+    examples: ["dame la compra PUR-AB12CD34", "detalle completo de la compra 15"],
+  },
+  {
     id: "get_stock_details",
     label: "Detalle completo de stock",
     mode: "read",
@@ -202,12 +245,48 @@ const SKILLS: OperatorSkillDefinition[] = [
     examples: ["dame toda la fila del imei 356...", "full row stock 44"],
   },
   {
+    id: "create_inventory_purchase",
+    label: "Crear compra",
+    mode: "write",
+    entity: "inventory_purchases",
+    summary: "Crea una compra de inventario con total, proveedor y funders.",
+    requiredInputs: [],
+    optionalInputs: ["supplier_name", "currency_code", "total_amount", "status", "acquired_at", "notes", "funders[]", "metadata"],
+    guardrails: [
+      "No inventar funders ni montos.",
+      "Si el total no está claro, dejarlo en null o pedirlo.",
+    ],
+    bulkSupport: "none",
+    examples: [
+      "creá una compra de 5000 USD financiada 50/50 por Fran y Agus",
+      "registrá compra draft proveedor Juan con total 1200 usd",
+    ],
+  },
+  {
+    id: "update_inventory_purchase",
+    label: "Editar compra",
+    mode: "write",
+    entity: "inventory_purchases",
+    summary: "Actualiza proveedor, total, estado, notas o funders de una compra existente.",
+    requiredInputs: ["purchase_ref", "changes"],
+    optionalInputs: ["supplier_name", "total_amount", "status", "acquired_at", "notes", "funders[]"],
+    guardrails: [
+      "Resolver la compra exacta antes de editar.",
+      "Si cambia el reparto de funders, mostrar el lote completo antes de aprobar.",
+    ],
+    bulkSupport: "none",
+    examples: [
+      "cambiá la compra PUR-AB12CD34 a received",
+      "actualizá funders de la compra 18 a 60/40",
+    ],
+  },
+  {
     id: "create_stock_unit",
     label: "Crear unidad de stock",
     mode: "write",
     entity: "stock_units",
-    summary: "Registra una unidad fisica vinculada a un producto.",
-    requiredInputs: ["product_ref"],
+    summary: "Registra una unidad fisica vinculada a un producto y obligatoriamente a una compra.",
+    requiredInputs: ["product_ref", "inventory_purchase_ref"],
     optionalInputs: [
       "serial_number",
       "imei_1",
@@ -222,12 +301,52 @@ const SKILLS: OperatorSkillDefinition[] = [
     ],
     guardrails: [
       "Resolver producto exacto antes de crear.",
+      "Toda unidad nueva debe quedar asociada a una compra existente o a una compra nueva creada en la misma operacion.",
       "Usar IMEI 1 e IMEI 2 para telefonos dual-SIM.",
     ],
     bulkSupport: "none",
     examples: [
       "crear stock para samsung-s25-ultra-12-512 imei1 123 imei2 456",
       "crear unidad para iphone-16-128 serial SN001 location_code SALTA",
+    ],
+  },
+  {
+    id: "create_stock_from_images",
+    label: "Crear stock desde fotos",
+    mode: "write",
+    entity: "stock_units",
+    summary: "Toma las imágenes recientes del chat, extrae IMEIs/seriales, muestra preview y crea las unidades de stock vinculadas a una compra.",
+    requiredInputs: ["product_ref"],
+    optionalInputs: ["inventory_purchase_ref", "cost_amount", "currency_code", "status", "location_code", "acquired_at", "metadata"],
+    guardrails: [
+      "Usar solo el lote reciente de imágenes del chat.",
+      "Nunca crear stock sin compra asociada; si falta, pedir elegir una compra o crearla.",
+      "Si un IMEI ya existe, bloquear el lote.",
+      "Siempre mostrar preview antes de ejecutar.",
+    ],
+    bulkSupport: "per-row-multi-row",
+    examples: [
+      "creá stock del iPhone 17 Pro Max con estas fotos",
+      "tomá estas imágenes y cargá stock del A17 en SALTA",
+    ],
+  },
+  {
+    id: "create_inventory_purchase_from_images",
+    label: "Compra + stock desde fotos",
+    mode: "write",
+    entity: "inventory_purchases",
+    summary: "Con las imágenes recientes crea una compra de inventario y las unidades de stock vinculadas.",
+    requiredInputs: ["product_ref"],
+    optionalInputs: ["supplier_name", "currency_code", "total_amount", "funders[]", "cost_amount", "location_code", "acquired_at", "notes", "metadata"],
+    guardrails: [
+      "Extraer y validar IMEIs antes de crear.",
+      "Si hay duplicados o faltan coincidencias confiables, detener.",
+      "Siempre pedir aprobación con preview.",
+    ],
+    bulkSupport: "per-row-multi-row",
+    examples: [
+      "con estas fotos cargá una compra de 10 iPhone 17 Pro Max financiada 50/50",
+      "registrá compra desde estas imágenes proveedor Juan 3200 usd",
     ],
   },
   {
@@ -244,6 +363,25 @@ const SKILLS: OperatorSkillDefinition[] = [
     ],
     bulkSupport: "none",
     examples: ["marca como vendido el imei 356...", "mueve el stock 44 a local SALTA"],
+  },
+  {
+    id: "update_stock_status_from_images",
+    label: "Actualizar stock desde fotos",
+    mode: "write",
+    entity: "stock_units",
+    summary: "Extrae IMEIs/seriales de las imágenes recientes, los cruza contra stock existente y cambia el estado.",
+    requiredInputs: ["status"],
+    optionalInputs: ["sold_at", "location_code"],
+    guardrails: [
+      "Si una imagen no matchea stock existente, detener.",
+      "Para ventas, si no llega sold_at usar ahora.",
+      "Siempre mostrar preview antes de ejecutar.",
+    ],
+    bulkSupport: "per-row-multi-row",
+    examples: [
+      "con estas fotos marcá como vendido el stock",
+      "tomá estas imágenes y pasá esas unidades a reserved",
+    ],
   },
   {
     id: "delete_stock_unit",
@@ -392,7 +530,7 @@ export function buildOperatorSkillGuide() {
     "Every write skill is deterministic and validated before execution.",
     "Exact low-risk single-row edits can auto-execute. Higher-risk writes go through approve/edit/cancel review.",
     "If required inputs are missing, the model must ask only for the missing fields.",
-    "If a reference is ambiguous, the model must stop and ask for the exact sku / slug / id / serial / imei / key.",
+    "If a reference is ambiguous, the model must stop and ask the operator to choose from concrete options.",
     ...SKILLS.map(renderSkill),
   ].join("\n");
 }
@@ -428,8 +566,9 @@ export function buildOperatorHelpText() {
     "• Cambios exactos de bajo riesgo pueden ejecutarse sin confirmación manual.",
     "• Cambios más sensibles quedan pendientes para aprobar, editar o cancelar.",
     "• Si cambiás cost_usd, logistics_usd, usd_rate o cuotas_qty, el pricing derivado se recalcula desde settings.",
+    "• También puedo hacer repricing masivo desde una lista y trabajar con imágenes recientes para stock/compras.",
     "• Si falta un dato, el bot tiene que pedirlo.",
-    "• Si una referencia es ambigua, el bot se detiene.",
-    "• Los cambios masivos aplican el mismo cambio a varias filas.",
+    "• Si una referencia es ambigua, el bot muestra opciones para elegir.",
+    "• Los cambios masivos pueden aplicar el mismo cambio a varias filas o un repricing distinto por línea.",
   ].join("\n");
 }

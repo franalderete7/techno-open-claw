@@ -23,6 +23,13 @@ import {
   getTelegramWebhookInfo,
   setTelegramWebhook,
 } from "./telegram.js";
+import {
+  createInventoryPurchase,
+  getInventoryPurchaseDetail,
+  inventoryPurchaseStatusValues,
+  listInventoryPurchases,
+  updateInventoryPurchase,
+} from "./inventory-purchases.js";
 
 const app = Fastify({
   logger: true,
@@ -935,6 +942,7 @@ app.register(async (protectedApp) => {
           su.serial_number,
           su.imei_1,
           su.imei_2,
+          su.inventory_purchase_id,
           su.color,
           su.battery_health,
           su.status,
@@ -969,6 +977,7 @@ app.register(async (protectedApp) => {
       serial_number: z.string().trim().optional().nullable(),
       imei_1: z.string().trim().optional().nullable(),
       imei_2: z.string().trim().optional().nullable(),
+      inventory_purchase_id: z.coerce.number().int().positive(),
       color: z.string().trim().optional().nullable(),
       battery_health: z.coerce.number().int().min(0).max(100).optional().nullable(),
       status: z.enum(stockStatusValues).default("in_stock"),
@@ -987,6 +996,7 @@ app.register(async (protectedApp) => {
           serial_number,
           imei_1,
           imei_2,
+          inventory_purchase_id,
           color,
           battery_health,
           status,
@@ -995,7 +1005,7 @@ app.register(async (protectedApp) => {
           currency_code,
           acquired_at,
           metadata
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         returning *
       `,
       [
@@ -1003,6 +1013,7 @@ app.register(async (protectedApp) => {
         body.serial_number ?? null,
         body.imei_1 ?? null,
         body.imei_2 ?? null,
+        body.inventory_purchase_id ?? null,
         body.color ?? null,
         body.battery_health ?? null,
         body.status,
@@ -1031,6 +1042,7 @@ app.register(async (protectedApp) => {
       serial_number: z.string().trim().nullable().optional(),
       imei_1: z.string().trim().nullable().optional(),
       imei_2: z.string().trim().nullable().optional(),
+      inventory_purchase_id: z.coerce.number().int().positive().optional(),
       color: z.string().trim().nullable().optional(),
       battery_health: z.coerce.number().int().min(0).max(100).nullable().optional(),
       status: z.enum(stockStatusValues).optional(),
@@ -1068,6 +1080,102 @@ app.register(async (protectedApp) => {
 
     await writeAuditLog(pool, request, "stock.updated", "stock_unit", String(stockUnit.id), body);
     return stockUnit;
+  });
+
+  protectedApp.get("/v1/inventory-purchases", async (request) => {
+    const schema = z.object({
+      q: z.string().trim().optional(),
+      status: z.enum(inventoryPurchaseStatusValues).optional(),
+      limit: listLimitSchema(),
+    });
+    const params = schema.parse(request.query);
+
+    const items = await listInventoryPurchases(pool, {
+      query: params.q,
+      status: params.status,
+      limit: params.limit,
+    });
+
+    return { items };
+  });
+
+  protectedApp.get("/v1/inventory-purchases/:purchaseId", async (request, reply) => {
+    const schema = z.object({
+      purchaseId: z.coerce.number().int().positive(),
+    });
+    const { purchaseId } = schema.parse(request.params);
+    const item = await getInventoryPurchaseDetail(pool, purchaseId);
+
+    if (!item) {
+      return reply.code(404).send({ error: "Inventory purchase not found." });
+    }
+
+    return item;
+  });
+
+  protectedApp.post("/v1/inventory-purchases", async (request, reply) => {
+    const funderSchema = z.object({
+      funder_name: z.string().trim().min(1),
+      payment_method: z.string().trim().nullable().optional(),
+      amount_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
+      currency_code: z.string().trim().min(1).nullable().optional(),
+      share_pct: z.coerce.number().finite().nonnegative().nullable().optional(),
+      notes: z.string().trim().nullable().optional(),
+    });
+    const schema = z.object({
+      supplier_name: z.string().trim().nullable().optional(),
+      currency_code: z.string().trim().min(1).optional(),
+      total_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
+      status: z.enum(inventoryPurchaseStatusValues).optional(),
+      acquired_at: z.string().datetime().nullable().optional(),
+      notes: z.string().trim().nullable().optional(),
+      metadata: z.record(z.string(), jsonValueSchema).optional(),
+      funders: z.array(funderSchema).optional(),
+    });
+    const body = schema.parse(request.body);
+    const purchase = await createInventoryPurchase(pool, body);
+
+    if (!purchase) {
+      return reply.code(500).send({ error: "Failed to create inventory purchase." });
+    }
+
+    await writeAuditLog(pool, request, "inventory_purchase.created", "inventory_purchase", String(purchase.id), body);
+    return reply.code(201).send(purchase);
+  });
+
+  protectedApp.patch("/v1/inventory-purchases/:purchaseId", async (request, reply) => {
+    const paramsSchema = z.object({
+      purchaseId: z.coerce.number().int().positive(),
+    });
+    const funderSchema = z.object({
+      funder_name: z.string().trim().min(1),
+      payment_method: z.string().trim().nullable().optional(),
+      amount_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
+      currency_code: z.string().trim().min(1).nullable().optional(),
+      share_pct: z.coerce.number().finite().nonnegative().nullable().optional(),
+      notes: z.string().trim().nullable().optional(),
+    });
+    const bodySchema = z.object({
+      supplier_name: z.string().trim().nullable().optional(),
+      currency_code: z.string().trim().min(1).optional(),
+      total_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
+      status: z.enum(inventoryPurchaseStatusValues).optional(),
+      acquired_at: z.string().datetime().nullable().optional(),
+      notes: z.string().trim().nullable().optional(),
+      metadata: z.record(z.string(), jsonValueSchema).optional(),
+      funders: z.array(funderSchema).optional(),
+    });
+
+    const { purchaseId } = paramsSchema.parse(request.params);
+    const body = bodySchema.parse(request.body);
+    const purchase = await updateInventoryPurchase(pool, purchaseId, body);
+
+    if (!purchase) {
+      return reply.code(404).send({ error: "Inventory purchase not found." });
+    }
+
+    await writeAuditLog(pool, request, "inventory_purchase.updated", "inventory_purchase", String(purchase.id), body);
+    return purchase;
   });
 
   protectedApp.post("/v1/customers/upsert", async (request, reply) => {

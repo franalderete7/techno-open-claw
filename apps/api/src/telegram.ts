@@ -33,6 +33,7 @@ const telegramMessageSchema = z.object({
   date: z.number().int(),
   chat: telegramChatSchema,
   from: telegramUserSchema.optional(),
+  media_group_id: z.string().optional(),
   text: z.string().optional(),
   caption: z.string().optional(),
   voice: telegramFileSchema.optional(),
