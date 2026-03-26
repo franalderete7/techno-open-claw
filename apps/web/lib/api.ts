@@ -174,9 +174,98 @@ export type OrderRecord = {
   created_at: string;
   updated_at: string;
   customer_id: number | null;
+  customer_name: string | null;
   first_name: string | null;
   last_name: string | null;
   phone: string | null;
+};
+
+export type OrderItemRecord = {
+  id: number;
+  order_id: number;
+  product_id: number | null;
+  stock_unit_id: number | null;
+  title_snapshot: string;
+  quantity: number;
+  unit_price_amount: number;
+  currency_code: string;
+  created_at: string;
+  sku: string | null;
+  slug: string | null;
+  brand: string | null;
+  model: string | null;
+  product_title: string | null;
+  serial_number: string | null;
+  imei_1: string | null;
+  imei_2: string | null;
+  stock_status: string | null;
+  location_code: string | null;
+};
+
+export type OrderCheckoutIntentRecord = {
+  id: number;
+  order_id: number;
+  product_id: number;
+  token: string;
+  channel: string;
+  source_host: string | null;
+  status: string;
+  customer_phone: string | null;
+  customer_name: string | null;
+  title_snapshot: string;
+  unit_price_amount: number;
+  currency_code: string;
+  image_url_snapshot: string | null;
+  delivery_days_snapshot: number | null;
+  galio_reference_id: string | null;
+  galio_payment_url: string | null;
+  galio_proof_token: string | null;
+  galio_payment_id: string | null;
+  galio_payment_status: string | null;
+  metadata: Record<string, unknown>;
+  paid_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  sku: string | null;
+  slug: string | null;
+  brand: string | null;
+  model: string | null;
+};
+
+export type OrderAuditRecord = {
+  id: number;
+  actor_type: string;
+  actor_id: string | null;
+  action: string;
+  metadata: unknown;
+  created_at: string;
+};
+
+export type OrderDetailRecord = {
+  id: number;
+  order_number: string;
+  customer_id: number | null;
+  source: string;
+  status: string;
+  currency_code: string;
+  subtotal_amount: number | null;
+  total_amount: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  customer_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  email: string | null;
+};
+
+export type OrderDetailResponse = {
+  order: OrderDetailRecord;
+  items: OrderItemRecord[];
+  checkout_intents: OrderCheckoutIntentRecord[];
+  audit: OrderAuditRecord[];
 };
 
 export type SettingRecord = {
@@ -263,6 +352,10 @@ export async function getStock(limit = 50) {
 
 export async function getOrders(limit = 50) {
   return apiFetch<ListResponse<OrderRecord>>(`/v1/orders?limit=${limit}`);
+}
+
+export async function getOrderDetail(orderId: number) {
+  return apiFetch<OrderDetailResponse>(`/v1/orders/${orderId}`);
 }
 
 export async function getCustomers(limit = 50) {

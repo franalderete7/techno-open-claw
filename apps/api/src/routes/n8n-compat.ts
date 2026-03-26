@@ -724,6 +724,35 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     if (storefrontOrderId && storefrontOrderToken) {
       try {
         storefrontHandoff = await resolveStorefrontCheckoutHandoff(storefrontOrderId, storefrontOrderToken);
+
+        if (storefrontHandoff.ok && customer) {
+          const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || null;
+          const customerPhone = customer.phone?.trim() || null;
+
+          await query(
+            `
+              update public.orders
+              set
+                customer_id = coalesce(customer_id, $2),
+                updated_at = now()
+              where id = $1
+            `,
+            [storefrontOrderId, customer.id]
+          );
+
+          await query(
+            `
+              update public.storefront_checkout_intents
+              set
+                customer_phone = coalesce(nullif(customer_phone, ''), $3),
+                customer_name = coalesce(nullif(customer_name, ''), $4),
+                updated_at = now()
+              where order_id = $1
+                and token = $2
+            `,
+            [storefrontOrderId, storefrontOrderToken, customerPhone, customerName]
+          );
+        }
       } catch (error) {
         storefrontHandoff = {
           ok: true,

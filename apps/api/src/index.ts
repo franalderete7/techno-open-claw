@@ -1384,9 +1384,20 @@ app.register(async (protectedApp) => {
           c.id as customer_id,
           c.first_name,
           c.last_name,
-          c.phone
+          coalesce(c.phone, sci.customer_phone) as phone,
+          coalesce(
+            nullif(trim(concat_ws(' ', c.first_name, c.last_name)), ''),
+            sci.customer_name
+          ) as customer_name
         from public.orders o
         left join public.customers c on c.id = o.customer_id
+        left join lateral (
+          select customer_phone, customer_name
+          from public.storefront_checkout_intents
+          where order_id = o.id
+          order by created_at desc, id desc
+          limit 1
+        ) sci on true
         order by o.created_at desc, o.id desc
         limit $1
       `,
@@ -1394,6 +1405,151 @@ app.register(async (protectedApp) => {
     );
 
     return { items: rows };
+  });
+
+  protectedApp.get("/v1/orders/:orderId", async (request, reply) => {
+    const schema = z.object({
+      orderId: z.coerce.number().int().positive(),
+    });
+    const { orderId } = schema.parse(request.params);
+
+    const orderRows = await query(
+      `
+        select
+          o.id,
+          o.order_number,
+          o.customer_id,
+          o.source,
+          o.status,
+          o.currency_code,
+          o.subtotal_amount,
+          o.total_amount,
+          o.notes,
+          o.created_at,
+          o.updated_at,
+          c.first_name,
+          c.last_name,
+          coalesce(c.phone, sci.customer_phone) as phone,
+          c.email,
+          coalesce(
+            nullif(trim(concat_ws(' ', c.first_name, c.last_name)), ''),
+            sci.customer_name
+          ) as customer_name
+        from public.orders o
+        left join public.customers c on c.id = o.customer_id
+        left join lateral (
+          select customer_phone, customer_name
+          from public.storefront_checkout_intents
+          where order_id = o.id
+          order by created_at desc, id desc
+          limit 1
+        ) sci on true
+        where o.id = $1
+        limit 1
+      `,
+      [orderId]
+    );
+
+    const order = orderRows[0];
+
+    if (!order) {
+      return reply.code(404).send({ error: "Order not found." });
+    }
+
+    const [items, checkoutIntents, audit] = await Promise.all([
+      query(
+        `
+          select
+            oi.id,
+            oi.order_id,
+            oi.product_id,
+            oi.stock_unit_id,
+            oi.title_snapshot,
+            oi.quantity,
+            oi.unit_price_amount,
+            oi.currency_code,
+            oi.created_at,
+            p.sku,
+            p.slug,
+            p.brand,
+            p.model,
+            p.title as product_title,
+            su.serial_number,
+            su.imei_1,
+            su.imei_2,
+            su.status as stock_status,
+            su.location_code
+          from public.order_items oi
+          left join public.products p on p.id = oi.product_id
+          left join public.stock_units su on su.id = oi.stock_unit_id
+          where oi.order_id = $1
+          order by oi.id asc
+        `,
+        [orderId]
+      ),
+      query(
+        `
+          select
+            sci.id,
+            sci.order_id,
+            sci.product_id,
+            sci.token,
+            sci.channel,
+            sci.source_host,
+            sci.status,
+            sci.customer_phone,
+            sci.customer_name,
+            sci.title_snapshot,
+            sci.unit_price_amount,
+            sci.currency_code,
+            sci.image_url_snapshot,
+            sci.delivery_days_snapshot,
+            sci.galio_reference_id,
+            sci.galio_payment_url,
+            sci.galio_proof_token,
+            sci.galio_payment_id,
+            sci.galio_payment_status,
+            sci.metadata,
+            sci.paid_at,
+            sci.expires_at,
+            sci.created_at,
+            sci.updated_at,
+            p.sku,
+            p.slug,
+            p.brand,
+            p.model
+          from public.storefront_checkout_intents sci
+          left join public.products p on p.id = sci.product_id
+          where sci.order_id = $1
+          order by sci.created_at desc, sci.id desc
+        `,
+        [orderId]
+      ),
+      query(
+        `
+          select
+            id,
+            actor_type,
+            actor_id,
+            action,
+            metadata,
+            created_at
+          from public.audit_logs
+          where entity_type = 'order'
+            and entity_id = $1
+          order by created_at desc, id desc
+          limit 50
+        `,
+        [String(orderId)]
+      ),
+    ]);
+
+    return {
+      order,
+      items,
+      checkout_intents: checkoutIntents,
+      audit,
+    };
   });
 
   protectedApp.get("/v1/orders/:orderId/items", async (request) => {

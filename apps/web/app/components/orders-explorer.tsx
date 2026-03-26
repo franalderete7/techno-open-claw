@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useDeferredValue, useState } from "react";
 import type { OrderRecord } from "../../lib/api";
 import { SearchToolbar } from "./search-toolbar";
@@ -85,7 +86,7 @@ export function OrdersExplorer({ items }: OrdersExplorerProps) {
                   <p className="catalog-kicker">{order.source}</p>
                   <h3 className="record-title">{order.order_number}</h3>
                   <p className="record-subtitle">
-                    {[order.first_name, order.last_name].filter(Boolean).join(" ") || "No customer"}
+                    {order.customer_name || [order.first_name, order.last_name].filter(Boolean).join(" ") || "No customer"}
                   </p>
                 </div>
                 <span className={`pill ${order.status === "paid" || order.status === "fulfilled" ? "good" : "warn"}`}>
@@ -111,6 +112,12 @@ export function OrdersExplorer({ items }: OrdersExplorerProps) {
                   <dd>{formatDate(order.updated_at)}</dd>
                 </div>
               </dl>
+
+              <div className="meta-row">
+                <Link href={`/orders/${order.id}`} className="chip action-link">
+                  Open order
+                </Link>
+              </div>
             </article>
           ))}
         </section>
