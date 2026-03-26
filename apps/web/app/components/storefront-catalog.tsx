@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { buildStorefrontProductPath, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
 import { StorefrontProductActions } from "./storefront-product-actions";
@@ -107,6 +108,7 @@ function WhatsAppIcon() {
 }
 
 export function StorefrontCatalog({ store, products, eyebrow, title, lead }: StorefrontCatalogProps) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [availability, setAvailability] = useState("all");
   const [ramFilter, setRamFilter] = useState("all");
@@ -207,6 +209,31 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
 
     if (typeof window !== "undefined") {
       document.getElementById("modelos")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  function navigateToProduct(detailHref: string) {
+    router.push(detailHref);
+  }
+
+  function handleProductCardClick(event: React.MouseEvent<HTMLElement>, detailHref: string) {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("a, button, input, select, textarea, summary")) {
+      return;
+    }
+
+    navigateToProduct(detailHref);
+  }
+
+  function handleProductCardKeyDown(event: React.KeyboardEvent<HTMLElement>, detailHref: string) {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("a, button, input, select, textarea, summary")) {
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      navigateToProduct(detailHref);
     }
   }
 
@@ -362,7 +389,15 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
                 normalizeComparableText(product.description) !== normalizeComparableText(specSummary.join(", "));
 
               return (
-                <article key={product.id} className="storefront-card">
+                <article
+                  key={product.id}
+                  className="storefront-card storefront-card-clickable"
+                  role="link"
+                  tabIndex={0}
+                  aria-label={`Abrir ${product.title}`}
+                  onClick={(event) => handleProductCardClick(event, detailHref)}
+                  onKeyDown={(event) => handleProductCardKeyDown(event, detailHref)}
+                >
                   <div className="storefront-card-media">
                     <Link href={detailHref} className="storefront-card-media-link" aria-label={`Ver ${product.title}`}>
                       <ProductImage product={product} />

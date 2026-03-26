@@ -464,6 +464,15 @@ nav a:hover {
   box-shadow: var(--shadow);
 }
 
+.storefront-card-clickable {
+  cursor: pointer;
+}
+
+.storefront-card-clickable:focus-visible {
+  outline: 2px solid rgba(191, 111, 77, 0.55);
+  outline-offset: 3px;
+}
+
 .storefront-card-media {
   display: grid;
   gap: 10px;
