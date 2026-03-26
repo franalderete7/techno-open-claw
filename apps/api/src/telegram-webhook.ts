@@ -41,13 +41,13 @@ function parseOperatorCallbackData(data: string | undefined) {
     return null;
   }
 
-  const match = data.match(/^op:(approve|cancel|edit|menu):(.+)$/);
+  const match = data.match(/^op:(approve|cancel|edit|menu|pick):(.+)$/);
   if (!match) {
     return null;
   }
 
   return {
-    action: match[1] as "approve" | "cancel" | "edit" | "menu",
+    action: match[1] as "approve" | "cancel" | "edit" | "menu" | "pick",
     value: match[2],
   };
 }
@@ -227,7 +227,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
 
         const actorRef = `telegram:${callbackMessage.chat.id}:${callbackQuery.from.id}`;
 
-        if (callbackAction.action === "approve" || callbackAction.action === "cancel") {
+        if (callbackAction.action === "approve" || callbackAction.action === "cancel" || callbackAction.action === "pick") {
           try {
             await clearTelegramInlineKeyboard({
               botToken: config.TELEGRAM_BOT_TOKEN,
@@ -287,6 +287,8 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
         const syntheticText =
           callbackAction.action === "menu"
             ? `__menu:${callbackAction.value}__`
+            : callbackAction.action === "pick"
+              ? `__pick_product:${callbackAction.value}__`
             : `${callbackAction.action === "approve" ? "CONFIRM" : "CANCEL"} ${callbackAction.value}`;
 
         const operatorResult = await handleTelegramOperatorMessage({

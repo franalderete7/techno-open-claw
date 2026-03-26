@@ -340,6 +340,28 @@ type OperatorButton = {
   callback_data: string;
 };
 
+type ProductResolutionOption = {
+  id: number;
+  sku: string;
+  slug: string;
+  title: string;
+  price_amount: string | number | null;
+  promo_price_ars?: string | number | null;
+  currency_code: string;
+};
+
+type ProductResolutionPathPart = string | number;
+
+type ProductResolutionPromptPayload = {
+  kind: "product_resolution_prompt";
+  mode: "read" | "write";
+  command: ReadCommandName | WriteCommandName;
+  params: Record<string, unknown>;
+  reference: string;
+  reference_path: ProductResolutionPathPart[];
+  options: ProductResolutionOption[];
+};
+
 type ReadCommandName =
   | "help"
   | "list_operator_skills"
@@ -420,6 +442,18 @@ type ConversationMemoryRow = QueryResultRow & {
   media_url: string | null;
 };
 
+class ProductReferenceAmbiguityError extends Error {
+  reference: string;
+  options: ProductResolutionOption[];
+
+  constructor(reference: string, options: ProductResolutionOption[]) {
+    super(`Encontré varias coincidencias para "${reference}".`);
+    this.name = "ProductReferenceAmbiguityError";
+    this.reference = reference;
+    this.options = options;
+  }
+}
+
 function asText(value: unknown) {
   if (value == null) {
     return "null";
@@ -442,6 +476,10 @@ function formatJsonPreview(value: unknown) {
   }
 
   return JSON.stringify(value, null, 2);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function formatRecordDump(label: string, row: Record<string, unknown>) {
@@ -536,6 +574,126 @@ function buildDateRangeLabel(from?: string, to?: string) {
   }
 
   return from || to || "";
+}
+
+function normalizeMatch(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, " ")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildProductResolutionOptionLabel(option: ProductResolutionOption, index: number) {
+  return `${index + 1}. ${option.title} · ${option.sku} · ${formatMoney(
+    option.promo_price_ars ?? option.price_amount,
+    option.currency_code
+  )}`;
+}
+
+function buildProductResolutionReply(prompt: ProductResolutionPromptPayload): OperatorMessageResult {
+  return {
+    kind: "reply",
+    text: [
+      `Encontré ${prompt.options.length} opciones para "${prompt.reference}".`,
+      ...prompt.options.map((option, index) => buildProductResolutionOptionLabel(option, index)),
+      "Respondé 1/2/3, primero/segundo, o tocá un botón.",
+    ].join("\n"),
+    buttons: prompt.options.slice(0, 5).map((option, index) => [
+      {
+        text: `${index + 1}. ${option.title}`,
+        callback_data: buildOperatorCallbackData("pick", option.sku),
+      },
+    ]),
+  };
+}
+
+function findProductReferencePaths(
+  value: unknown,
+  reference: string,
+  path: ProductResolutionPathPart[] = []
+): ProductResolutionPathPart[][] {
+  const normalizedReference = normalizeMatch(reference);
+
+  if (typeof value === "string" && normalizeMatch(value) === normalizedReference) {
+    return [path];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findProductReferencePaths(item, reference, [...path, index]));
+  }
+
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    if (key !== "product_ref" && key !== "product_refs" && key !== "changes") {
+      return [];
+    }
+
+    return findProductReferencePaths(nestedValue, reference, [...path, key]);
+  });
+}
+
+function setValueAtPath<T>(value: T, path: ProductResolutionPathPart[], replacement: string): T {
+  if (path.length === 0) {
+    return replacement as T;
+  }
+
+  const [head, ...tail] = path;
+
+  if (Array.isArray(value) && typeof head === "number") {
+    return value.map((item, index) => (index === head ? setValueAtPath(item, tail, replacement) : item)) as T;
+  }
+
+  if (isRecord(value) && typeof head === "string") {
+    return {
+      ...value,
+      [head]: setValueAtPath(value[head], tail, replacement),
+    } as T;
+  }
+
+  return value;
+}
+
+function extractOrdinalIndex(text: string) {
+  const normalized = normalizeMatch(text);
+  if (!normalized) {
+    return null;
+  }
+
+  const digitMatch = normalized.match(/\b([1-9])\b/);
+  if (digitMatch) {
+    return Number(digitMatch[1]) - 1;
+  }
+
+  if (/\b(primero|primera|first|uno|1ro|1ero)\b/.test(normalized)) return 0;
+  if (/\b(segundo|segunda|second|dos|2do|2da)\b/.test(normalized)) return 1;
+  if (/\b(tercero|tercera|third|tres|3ro|3ra)\b/.test(normalized)) return 2;
+  if (/\b(cuarto|cuarta|fourth|cuatro|4to|4ta)\b/.test(normalized)) return 3;
+  if (/\b(quinto|quinta|fifth|cinco|5to|5ta)\b/.test(normalized)) return 4;
+
+  return null;
+}
+
+function resolveProductSelectionFromPrompt(text: string, prompt: ProductResolutionPromptPayload) {
+  const normalized = normalizeMatch(text.replace(/^__pick_product:/, "").replace(/__$/, ""));
+  if (!normalized) {
+    return null;
+  }
+
+  const ordinalIndex = extractOrdinalIndex(text);
+  if (ordinalIndex != null && ordinalIndex >= 0 && ordinalIndex < prompt.options.length) {
+    return prompt.options[ordinalIndex];
+  }
+
+  return (
+    prompt.options.find((option) => normalizeMatch(option.sku) === normalized || normalizeMatch(option.slug) === normalized) ||
+    prompt.options.find((option) => normalizeMatch(option.title) === normalized) ||
+    prompt.options.find((option) => normalizeMatch(option.title).includes(normalized))
+  );
 }
 
 function buildPricingPreviewLines(fields: {
@@ -636,7 +794,7 @@ function buildToken() {
   return randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase();
 }
 
-function buildOperatorCallbackData(kind: "approve" | "cancel" | "edit" | "menu", value: string) {
+function buildOperatorCallbackData(kind: "approve" | "cancel" | "edit" | "menu" | "pick", value: string) {
   return `op:${kind}:${value}`;
 }
 
@@ -1121,11 +1279,17 @@ async function resolveProduct(productRef: string) {
   }
 
   if (rows.length > 1 && exactRows.length !== 1) {
-    throw new Error(
-      `Encontré varias coincidencias para "${productRef}". Decime cuál querés usar: ${rows
-        .slice(0, 3)
-        .map((row) => `${row.sku} (${row.title})`)
-        .join(" | ")}`
+    throw new ProductReferenceAmbiguityError(
+      productRef,
+      rows.slice(0, 5).map((row) => ({
+        id: row.id,
+        sku: row.sku,
+        slug: row.slug,
+        title: row.title,
+        price_amount: row.price_amount,
+        promo_price_ars: row.promo_price_ars,
+        currency_code: row.currency_code,
+      }))
     );
   }
 
@@ -1298,6 +1462,87 @@ async function getLatestPendingConfirmation(actor: ActorContext) {
   );
 
   return rows[0] ?? null;
+}
+
+async function getLatestProductResolutionPrompt(actor: ActorContext): Promise<ProductResolutionPromptPayload | null> {
+  if (!actor.conversationId) {
+    return null;
+  }
+
+  const rows = await query<{ payload: Record<string, unknown> }>(
+    `
+      select payload
+      from public.messages
+      where conversation_id = $1
+        and payload ->> 'kind' in ('product_resolution_prompt', 'product_resolution_selected')
+      order by created_at desc, id desc
+      limit 1
+    `,
+    [actor.conversationId]
+  );
+
+  const payload = rows[0]?.payload;
+  if (!payload || payload.kind !== "product_resolution_prompt") {
+    return null;
+  }
+
+  if (
+    (payload.mode !== "read" && payload.mode !== "write") ||
+    typeof payload.command !== "string" ||
+    !isRecord(payload.params) ||
+    typeof payload.reference !== "string" ||
+    !Array.isArray(payload.reference_path) ||
+    !Array.isArray(payload.options)
+  ) {
+    return null;
+  }
+
+  const referencePath = payload.reference_path.filter(
+    (part): part is ProductResolutionPathPart => typeof part === "string" || typeof part === "number"
+  );
+
+  const options = payload.options
+    .filter((option): option is ProductResolutionOption => {
+      return (
+        isRecord(option) &&
+        typeof option.id === "number" &&
+        typeof option.sku === "string" &&
+        typeof option.slug === "string" &&
+        typeof option.title === "string" &&
+        typeof option.currency_code === "string"
+      );
+    })
+    .map((option) => ({
+      id: option.id,
+      sku: option.sku,
+      slug: option.slug,
+      title: option.title,
+      price_amount:
+        option.price_amount == null || typeof option.price_amount === "string" || typeof option.price_amount === "number"
+          ? option.price_amount
+          : null,
+      promo_price_ars:
+        option.promo_price_ars == null ||
+        typeof option.promo_price_ars === "string" ||
+        typeof option.promo_price_ars === "number"
+          ? option.promo_price_ars
+          : null,
+      currency_code: option.currency_code,
+    }));
+
+  if (referencePath.length === 0 || options.length === 0) {
+    return null;
+  }
+
+  return {
+    kind: "product_resolution_prompt",
+    mode: payload.mode,
+    command: payload.command as ReadCommandName | WriteCommandName,
+    params: payload.params,
+    reference: payload.reference,
+    reference_path: referencePath,
+    options,
+  };
 }
 
 type ApprovalMode = "auto" | "inline_confirm";
@@ -2929,7 +3174,39 @@ function applyReadIntentDefaults(
   return nextParams;
 }
 
+async function tryResumePendingProductResolution(actor: ActorContext): Promise<OperatorMessageResult | null> {
+  const prompt = await getLatestProductResolutionPrompt(actor);
+  if (!prompt) {
+    return null;
+  }
+
+  const selected = resolveProductSelectionFromPrompt(actor.userMessage, prompt);
+  if (!selected) {
+    return null;
+  }
+
+  await saveOperatorEventMessage(actor, `Producto resuelto: ${selected.sku}`, {
+    kind: "product_resolution_selected",
+    reference: prompt.reference,
+    sku: selected.sku,
+    title: selected.title,
+  });
+
+  const resumedDraft: Draft = {
+    mode: prompt.mode,
+    command: prompt.command,
+    params: setValueAtPath(prompt.params, prompt.reference_path, selected.sku),
+  };
+
+  return resolveTelegramOperatorDraft(actor, resumedDraft);
+}
+
 export async function handleTelegramOperatorMessage(actor: ActorContext): Promise<OperatorMessageResult> {
+  const resumedResolution = await tryResumePendingProductResolution(actor);
+  if (resumedResolution) {
+    return resumedResolution;
+  }
+
   const start = await startTelegramOperatorTurn(actor);
 
   if (start.kind === "reply") {
@@ -3092,6 +3369,27 @@ export async function resolveTelegramOperatorDraft(
     });
     return buildPendingActionReply(prepared, token);
   } catch (error) {
+    if (error instanceof ProductReferenceAmbiguityError) {
+      const referencePath = findProductReferencePaths(params, error.reference)[0] ?? [];
+      const promptPayload: ProductResolutionPromptPayload | null =
+        referencePath.length > 0
+          ? {
+              kind: "product_resolution_prompt",
+              mode: draft.mode,
+              command: draft.command as ReadCommandName | WriteCommandName,
+              params,
+              reference: error.reference,
+              reference_path: referencePath,
+              options: error.options,
+            }
+          : null;
+
+      if (promptPayload) {
+        await saveOperatorEventMessage(actor, `Resolución pendiente para producto: ${error.reference}`, promptPayload);
+        return buildProductResolutionReply(promptPayload);
+      }
+    }
+
     const message = error instanceof Error ? error.message : "No pude preparar esa acción. Revisá la referencia y los campos.";
     return {
       kind: "reply",
