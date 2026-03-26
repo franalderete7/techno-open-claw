@@ -57,6 +57,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               id="datafast-script"
               strategy="afterInteractive"
               src="/js/script.js"
+              data-api-url="/datafast-events"
               data-website-id={DATAFAST_WEBSITE_ID}
               data-domain={DATAFAST_DOMAIN}
             />
