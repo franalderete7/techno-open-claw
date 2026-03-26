@@ -6,6 +6,7 @@ import { z } from "zod";
 import { pool, query } from "./db.js";
 import { ollamaGenerate } from "./ollama.js";
 import { buildOperatorHelpText, buildOperatorSkillGuide, buildOperatorSkillListText } from "./operator-skills.js";
+import { calculateDerivedPricing, shouldRecalculatePricing } from "./pricing.js";
 import { saveConversationMessage } from "./telegram-storage.js";
 
 const exec = promisify(execCallback);
@@ -516,12 +517,91 @@ function formatMoney(amount: string | number | null, currency = "ARS") {
   }).format(numeric);
 }
 
+function formatPercentValue(value: string | number | null) {
+  if (value == null) {
+    return "-";
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return String(value);
+  }
+
+  return `${(numeric * 100).toFixed(2)}%`;
+}
+
 function buildDateRangeLabel(from?: string, to?: string) {
   if (from && to) {
     return `${from} → ${to}`;
   }
 
   return from || to || "";
+}
+
+function buildPricingPreviewLines(fields: {
+  price_amount?: number | string | null;
+  promo_price_ars?: number | string | null;
+  cost_usd?: number | string | null;
+  logistics_usd?: number | string | null;
+  total_cost_usd?: number | string | null;
+  margin_pct?: number | string | null;
+  price_usd?: number | string | null;
+  usd_rate?: number | string | null;
+  bancarizada_total?: number | string | null;
+  bancarizada_cuota?: number | string | null;
+  bancarizada_interest?: number | string | null;
+  macro_total?: number | string | null;
+  macro_cuota?: number | string | null;
+  macro_interest?: number | string | null;
+  cuotas_qty?: number | string | null;
+}) {
+  return [
+    fields.cost_usd != null ? `• cost_usd: ${fields.cost_usd}` : "",
+    fields.logistics_usd != null ? `• logistics_usd: ${fields.logistics_usd}` : "",
+    fields.total_cost_usd != null ? `• total_cost_usd: ${fields.total_cost_usd}` : "",
+    fields.margin_pct != null ? `• margin_pct: ${formatPercentValue(fields.margin_pct)}` : "",
+    fields.price_usd != null ? `• price_usd: ${fields.price_usd}` : "",
+    fields.usd_rate != null ? `• usd_rate: ${fields.usd_rate}` : "",
+    fields.price_amount != null ? `• price_amount: ${formatMoney(fields.price_amount, "ARS")}` : "",
+    fields.promo_price_ars != null ? `• promo_price_ars: ${formatMoney(fields.promo_price_ars, "ARS")}` : "",
+    fields.cuotas_qty != null ? `• cuotas_qty: ${fields.cuotas_qty}` : "",
+    fields.bancarizada_interest != null
+      ? `• bancarizada: ${formatMoney(fields.bancarizada_total ?? null, "ARS")} total · ${formatMoney(
+          fields.bancarizada_cuota ?? null,
+          "ARS"
+        )} x cuota · interés ${formatPercentValue(fields.bancarizada_interest)}`
+      : "",
+    fields.macro_interest != null
+      ? `• macro: ${formatMoney(fields.macro_total ?? null, "ARS")} total · ${formatMoney(
+          fields.macro_cuota ?? null,
+          "ARS"
+        )} x cuota · interés ${formatPercentValue(fields.macro_interest)}`
+      : "",
+  ].filter(Boolean);
+}
+
+function toPreviewValue(value: unknown): string | number | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+
+  return JSON.stringify(value);
+}
+
+function toPricingCarrierValue(value: unknown): string | number | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+
+  return null;
 }
 
 function inferBrand(title: string) {
@@ -919,6 +999,7 @@ export async function renderOperatorChatReply(params: {
 const OPERATOR_SCHEMA_GUIDE = [
   "Operational schema contract:",
   "- public.products stores catalog rows. Stable refs: id, sku, slug. Required for creation: sku and title. Common editable fields: brand, model, title, description, condition, active, price_amount, currency_code, category, cost_usd, logistics_usd, total_cost_usd, margin_pct, price_usd, promo_price_ars, bancarizada_total, bancarizada_cuota, bancarizada_interest, macro_total, macro_cuota, macro_interest, cuotas_qty, in_stock, delivery_type, delivery_days, usd_rate, image_url, ram_gb, storage_gb, network, color, battery_health.",
+  "- When cost_usd, logistics_usd, usd_rate, or cuotas_qty change on a product, the API recalculates derived pricing fields deterministically from settings before saving.",
   "- public.stock_units stores physical inventory. Stable refs: id, serial_number, imei_1, imei_2. Required for creation: product_ref. Common editable fields: serial_number, imei_1, imei_2, color, battery_health, status, location_code, cost_amount, currency_code, acquired_at, sold_at, metadata.",
   "- public.settings stores key/value configuration. Stable ref: key. update_setting requires key and value. delete_setting removes the key.",
   "- public.customers stores operator and customer contacts. Stable refs: id, external_ref, phone, email. create_customer requires at least one of external_ref, phone, or email.",
@@ -962,6 +1043,7 @@ function buildDraftPrompts(params: {
     "For update commands, only include the fields the user explicitly wants to change.",
     "For delete commands, only use them if the user explicitly asked to delete, remove, or permanently erase.",
     "For product archive/deactivate intent, use update_product with active=false.",
+    "If the operator changes cost_usd, logistics_usd, usd_rate, or cuotas_qty on a product, the server will recalculate derived pricing fields from settings. You should frame the action as a repricing preview, not as a manual field edit list only.",
     "When the user asks for lists by brand, price range, RAM, storage, sold date, acquisition date, location, stock status, or image presence, use the available filter fields instead of plain text only.",
     "For price and numeric values, use numbers, not strings, when possible.",
     "If the message is just a greeting like hey/hola, reply briefly in reply and use mode=chat.",
@@ -1040,7 +1122,7 @@ async function resolveProduct(productRef: string) {
 
   if (rows.length > 1 && exactRows.length !== 1) {
     throw new Error(
-      `El producto es ambiguo. Coincidencias: ${rows
+      `Encontré varias coincidencias para "${productRef}". Decime cuál querés usar: ${rows
         .slice(0, 3)
         .map((row) => `${row.sku} (${row.title})`)
         .join(" | ")}`
@@ -1818,7 +1900,7 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
       const title = parsed.title.trim();
       const brand = parsed.brand?.trim() || inferBrand(title);
       const model = parsed.model?.trim() || inferModel(title, brand);
-      const payload = {
+      const payload: Record<string, unknown> = {
         ...parsed,
         brand,
         model,
@@ -1830,6 +1912,15 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
         in_stock: parsed.in_stock ?? false,
         image_url: parsed.image_url || null,
       };
+      const pricingPreview =
+        parsed.cost_usd !== undefined ||
+        parsed.logistics_usd !== undefined ||
+        parsed.usd_rate !== undefined ||
+        parsed.cuotas_qty !== undefined
+          ? buildPricingPreviewLines(
+              Object.assign(payload, await calculateDerivedPricing(payload, pool)) as Record<string, unknown>
+            )
+          : [];
 
       return {
         command,
@@ -1838,7 +1929,9 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
           `• SKU: ${payload.sku}`,
           `• Título: ${payload.title}`,
           `• Marca / modelo: ${payload.brand} / ${payload.model}`,
-          payload.price_amount != null ? `• Precio: ${formatMoney(payload.price_amount, payload.currency_code)}` : "",
+          payload.price_amount != null ? `• Precio: ${formatMoney(payload.price_amount as string | number, String(payload.currency_code || "ARS"))}` : "",
+          pricingPreview.length > 0 ? "• Pricing derivado:" : "",
+          ...pricingPreview,
         ]
           .filter(Boolean)
           .join("\n"),
@@ -1848,20 +1941,86 @@ async function prepareWriteCommand(command: WriteCommandName, rawParams: Record<
     case "update_product": {
       const parsed = updateProductSchema.parse(rawParams);
       const product = await resolveProduct(parsed.product_ref);
+      let nextChanges = { ...parsed.changes } as Record<string, unknown>;
+      let beforePricing: Record<string, unknown> | null = null;
+      let pricingPreview: string[] = [];
+
+      if (shouldRecalculatePricing(nextChanges)) {
+        const rows = await query<Record<string, unknown>>(
+          `
+            select
+              cost_usd,
+              logistics_usd,
+              total_cost_usd,
+              margin_pct,
+              price_usd,
+              usd_rate,
+              price_amount,
+              promo_price_ars,
+              bancarizada_interest,
+              bancarizada_total,
+              bancarizada_cuota,
+              macro_interest,
+              macro_total,
+              macro_cuota,
+              cuotas_qty
+            from public.products
+            where id = $1
+            limit 1
+          `,
+          [product.id]
+        );
+
+        beforePricing = rows[0] ?? null;
+        nextChanges = {
+          ...nextChanges,
+          ...(await calculateDerivedPricing(
+            {
+              cost_usd: toPricingCarrierValue(nextChanges.cost_usd ?? beforePricing?.cost_usd ?? null),
+              logistics_usd: toPricingCarrierValue(nextChanges.logistics_usd ?? beforePricing?.logistics_usd ?? null),
+              usd_rate: toPricingCarrierValue(nextChanges.usd_rate ?? beforePricing?.usd_rate ?? null),
+              cuotas_qty: toPricingCarrierValue(nextChanges.cuotas_qty ?? beforePricing?.cuotas_qty ?? null),
+            },
+            pool
+          )),
+        };
+        pricingPreview = buildPricingPreviewLines({
+          cost_usd: toPreviewValue(nextChanges.cost_usd),
+          logistics_usd: toPreviewValue(nextChanges.logistics_usd),
+          total_cost_usd: toPreviewValue(nextChanges.total_cost_usd),
+          margin_pct: toPreviewValue(nextChanges.margin_pct),
+          price_usd: toPreviewValue(nextChanges.price_usd),
+          usd_rate: toPreviewValue(nextChanges.usd_rate),
+          price_amount: toPreviewValue(nextChanges.price_amount),
+          promo_price_ars: toPreviewValue(nextChanges.promo_price_ars),
+          bancarizada_interest: toPreviewValue(nextChanges.bancarizada_interest),
+          bancarizada_total: toPreviewValue(nextChanges.bancarizada_total),
+          bancarizada_cuota: toPreviewValue(nextChanges.bancarizada_cuota),
+          macro_interest: toPreviewValue(nextChanges.macro_interest),
+          macro_total: toPreviewValue(nextChanges.macro_total),
+          macro_cuota: toPreviewValue(nextChanges.macro_cuota),
+          cuotas_qty: toPreviewValue(nextChanges.cuotas_qty),
+        });
+      }
+
       return {
         command,
         summary: [
           `Actualizar producto ${product.sku}`,
           `• ${product.title}`,
-          `• Cambios: ${Object.entries(parsed.changes)
+          `• Cambios: ${Object.entries(nextChanges)
             .map(([key, value]) => `${key}=${formatJsonPreview(value)}`)
             .join(", ")}`,
+          pricingPreview.length > 0 ? "• Pricing recalculado desde settings:" : "",
+          ...pricingPreview,
         ].join("\n"),
         payload: {
           product_id: product.id,
           sku: product.sku,
           title: product.title,
-          changes: parsed.changes,
+          before_pricing: beforePricing,
+          pricing_recalculated: pricingPreview.length > 0,
+          changes: nextChanges,
         },
       };
     }
@@ -2091,7 +2250,25 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
             $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
             $31, $32, $33, $34
           )
-          returning id, sku, title
+          returning
+            id,
+            sku,
+            title,
+            cost_usd,
+            logistics_usd,
+            total_cost_usd,
+            margin_pct,
+            price_usd,
+            usd_rate,
+            price_amount,
+            promo_price_ars,
+            bancarizada_interest,
+            bancarizada_total,
+            bancarizada_cuota,
+            macro_interest,
+            macro_total,
+            macro_cuota,
+            cuotas_qty
         `,
         [
           body.sku,
@@ -2133,7 +2310,13 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
 
       const product = result.rows[0];
       await writeAudit(client, actor, "telegram.product.created", "product", String(product.id), { sku: product.sku });
-      return `Producto creado.\n• ID: ${product.id}\n• SKU: ${product.sku}\n• Título: ${product.title}`;
+      return [
+        "Producto creado.",
+        `• ID: ${product.id}`,
+        `• SKU: ${product.sku}`,
+        `• Título: ${product.title}`,
+        ...buildPricingPreviewLines(product),
+      ].join("\n");
     }
     case "update_product": {
       const parsed = z
@@ -2141,6 +2324,8 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
           product_id: z.coerce.number().int().positive(),
           sku: z.string(),
           title: z.string(),
+          before_pricing: z.record(z.string(), z.unknown()).nullable().optional(),
+          pricing_recalculated: z.boolean().optional(),
           changes: updateProductSchema.shape.changes,
         })
         .parse(payload);
@@ -2149,13 +2334,47 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       const sql = entries.map(([key], index) => `${key} = $${index + 1}`).join(", ");
       const values = entries.map(([, value]) => value);
       const result = await client.query(
-        `update public.products set ${sql} where id = $${values.length + 1} returning id, sku, title`,
+        `
+          update public.products
+          set ${sql}
+          where id = $${values.length + 1}
+          returning
+            id,
+            sku,
+            title,
+            cost_usd,
+            logistics_usd,
+            total_cost_usd,
+            margin_pct,
+            price_usd,
+            usd_rate,
+            price_amount,
+            promo_price_ars,
+            bancarizada_interest,
+            bancarizada_total,
+            bancarizada_cuota,
+            macro_interest,
+            macro_total,
+            macro_cuota,
+            cuotas_qty
+        `,
         [...values, parsed.product_id]
       );
 
       const product = result.rows[0];
       await writeAudit(client, actor, "telegram.product.updated", "product", String(product.id), parsed.changes);
-      return `Producto actualizado.\n• ID: ${product.id}\n• SKU: ${product.sku}\n• Título: ${product.title}`;
+      return [
+        "Producto actualizado.",
+        `• ID: ${product.id}`,
+        `• SKU: ${product.sku}`,
+        `• Título: ${product.title}`,
+        "• Campos aplicados:",
+        ...Object.entries(parsed.changes).map(([key, value]) => `  - ${key}: ${formatJsonPreview(value)}`),
+        parsed.pricing_recalculated ? "• Repricing aplicado desde settings." : "",
+        ...buildPricingPreviewLines(product),
+      ]
+        .filter(Boolean)
+        .join("\n");
     }
     case "bulk_update_products": {
       const parsed = z
@@ -2873,9 +3092,11 @@ export async function resolveTelegramOperatorDraft(
     });
     return buildPendingActionReply(prepared, token);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "No pude preparar esa acción. Revisá la referencia y los campos.";
     return {
       kind: "reply",
-      text: error instanceof Error ? error.message : "No pude preparar esa acción. Revisá la referencia y los campos.",
+      text: message,
+      forceReply: /ambigu/i.test(message),
     };
   }
 }

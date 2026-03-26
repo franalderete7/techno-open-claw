@@ -135,6 +135,7 @@ const SKILLS: OperatorSkillDefinition[] = [
       "Nunca inventar product_ref.",
       "Si hay multiples coincidencias, detener y pedir referencia exacta.",
       "Solo tocar campos mencionados por el operador.",
+      "Si cambia cost_usd, logistics_usd, usd_rate o cuotas_qty, recalcular pricing derivado desde settings.",
     ],
     bulkSupport: "none",
     examples: [
@@ -426,6 +427,7 @@ export function buildOperatorHelpText() {
     "Reglas:",
     "• Cambios exactos de bajo riesgo pueden ejecutarse sin confirmación manual.",
     "• Cambios más sensibles quedan pendientes para aprobar, editar o cancelar.",
+    "• Si cambiás cost_usd, logistics_usd, usd_rate o cuotas_qty, el pricing derivado se recalcula desde settings.",
     "• Si falta un dato, el bot tiene que pedirlo.",
     "• Si una referencia es ambigua, el bot se detiene.",
     "• Los cambios masivos aplican el mismo cambio a varias filas.",

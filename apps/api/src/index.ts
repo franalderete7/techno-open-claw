@@ -12,6 +12,7 @@ import {
   handleGalioPayWebhook,
   resolveStorefrontCheckoutHandoff,
 } from "./storefront-checkouts.js";
+import { calculateDerivedPricing, shouldRecalculatePricing } from "./pricing.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { n8nCompatRoutes } from "./routes/n8n-compat.js";
 import { telegramOperatorApiRoutes } from "./routes/telegram-operator-api.js";
@@ -694,6 +695,16 @@ app.register(async (protectedApp) => {
     if (body.image_url === "") {
       body.image_url = null;
     }
+
+    if (
+      body.cost_usd !== undefined ||
+      body.logistics_usd !== undefined ||
+      body.usd_rate !== undefined ||
+      body.cuotas_qty !== undefined
+    ) {
+      Object.assign(body, await calculateDerivedPricing(body, pool));
+    }
+
     const slug = body.slug || slugify(`${body.brand}-${body.model}-${body.title}`);
 
     const rows = await query(
@@ -837,6 +848,43 @@ app.register(async (protectedApp) => {
     if (body.image_url === "") {
       body.image_url = null;
     }
+
+    if (shouldRecalculatePricing(body)) {
+      const existingRows = await query<{
+        id: number;
+        cost_usd: number | string | null;
+        logistics_usd: number | string | null;
+        usd_rate: number | string | null;
+        cuotas_qty: number | string | null;
+      }>(
+        `
+          select id, cost_usd, logistics_usd, usd_rate, cuotas_qty
+          from public.products
+          where id = $1
+          limit 1
+        `,
+        [productId]
+      );
+
+      const existing = existingRows[0];
+      if (!existing) {
+        return reply.code(404).send({ error: "Product not found." });
+      }
+
+      Object.assign(
+        body,
+        await calculateDerivedPricing(
+          {
+            cost_usd: body.cost_usd ?? existing.cost_usd ?? null,
+            logistics_usd: body.logistics_usd ?? existing.logistics_usd ?? null,
+            usd_rate: body.usd_rate ?? existing.usd_rate ?? null,
+            cuotas_qty: body.cuotas_qty ?? existing.cuotas_qty ?? null,
+          },
+          pool
+        )
+      );
+    }
+
     const update = buildUpdateClause(body);
 
     if (!update) {
