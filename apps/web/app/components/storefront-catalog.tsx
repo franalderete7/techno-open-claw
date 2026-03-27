@@ -292,90 +292,81 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
       <div id="inicio" className="storefront-anchor" aria-hidden="true" />
 
       <section className="storefront-toolbar storefront-section" id="buscar">
-        <div className="storefront-toolbar-intro">
-          <div className="storefront-toolbar-copy">
-            <span className="eyebrow">{eyebrow}</span>
-            <h1 className="storefront-toolbar-title">Encontrá tu equipo rápido.</h1>
-            <p className="storefront-toolbar-lead">
-              Buscá por marca, RAM, memoria o precio y compará sin vueltas.
-            </p>
-          </div>
-
+        <div className="storefront-toolbar-meta">
+          <span className="eyebrow">{eyebrow}</span>
           <div className="storefront-toolbar-stats" aria-label="Resumen del catalogo">
             <span className="chip accent">{products.length} equipos</span>
             <span className="chip good">{availableCount} publicados</span>
           </div>
         </div>
 
-        <label className="storefront-search">
-          <span className="storefront-search-label">Buscar equipo</span>
-          <div className="storefront-search-shell">
-            <div className="storefront-search-field">
-              <SearchSparkIcon />
-              <input
-                type="search"
-                placeholder="iPhone, Xiaomi, Samsung, 8GB, 256GB..."
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
+        <div className="storefront-searchbar">
+          <label className="storefront-search">
+            <span className="storefront-search-label">Buscar equipo</span>
+            <div className="storefront-search-shell">
+              <div className="storefront-search-field">
+                <SearchSparkIcon />
+                <input
+                  type="search"
+                  placeholder="iPhone, Xiaomi, Samsung, 8GB, 256GB..."
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
             </div>
-            <div className="storefront-search-hint" aria-hidden="true">
-              <span className="storefront-search-pulse" />
-              Sugerencias: marca, RAM, memoria
+          </label>
+
+          <div className="storefront-toolbar-controls">
+            <div className="storefront-filter-row">
+              {[
+                { value: "all", label: "Todos" },
+                { value: "available", label: "Disponibles" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`storefront-filter ${availability === option.value ? "is-active" : ""}`}
+                  onClick={() => setAvailability(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
+
+            <label className="storefront-select">
+              <span>RAM</span>
+              <select value={ramFilter} onChange={(event) => setRamFilter(event.target.value)}>
+                <option value="all">Todas</option>
+                {ramOptions.map((value) => (
+                  <option key={value} value={String(value)}>
+                    {value} GB
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="storefront-select">
+              <span>Memoria</span>
+              <select value={storageFilter} onChange={(event) => setStorageFilter(event.target.value)}>
+                <option value="all">Todas</option>
+                {storageOptions.map((value) => (
+                  <option key={value} value={String(value)}>
+                    {value} GB
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="storefront-select">
+              <span>Ordenar</span>
+              <select value={sort} onChange={(event) => setSort(event.target.value)}>
+                <option value="featured">Destacados</option>
+                <option value="price-asc">Precio menor</option>
+                <option value="price-desc">Precio mayor</option>
+                <option value="alphabetical">A-Z</option>
+              </select>
+            </label>
           </div>
-        </label>
-
-        <div className="storefront-toolbar-controls">
-          <div className="storefront-filter-row">
-            {[
-              { value: "all", label: "Todos" },
-              { value: "available", label: "Disponibles" },
-            ].map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`storefront-filter ${availability === option.value ? "is-active" : ""}`}
-                onClick={() => setAvailability(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-
-          <label className="storefront-select">
-            <span>RAM</span>
-            <select value={ramFilter} onChange={(event) => setRamFilter(event.target.value)}>
-              <option value="all">Todas</option>
-              {ramOptions.map((value) => (
-                <option key={value} value={String(value)}>
-                  {value} GB
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="storefront-select">
-            <span>Memoria</span>
-            <select value={storageFilter} onChange={(event) => setStorageFilter(event.target.value)}>
-              <option value="all">Todas</option>
-              {storageOptions.map((value) => (
-                <option key={value} value={String(value)}>
-                  {value} GB
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="storefront-select">
-            <span>Ordenar</span>
-            <select value={sort} onChange={(event) => setSort(event.target.value)}>
-              <option value="featured">Destacados</option>
-              <option value="price-asc">Precio menor</option>
-              <option value="price-desc">Precio mayor</option>
-              <option value="alphabetical">A-Z</option>
-            </select>
-          </label>
         </div>
       </section>
 
