@@ -106,6 +106,14 @@ function shouldRenderCardDescription(product: StorefrontProduct, specSummary: st
   return !coveredBySpecs;
 }
 
+function isStorefrontRamOption(value: number | null) {
+  return value != null && Number.isFinite(value) && value >= 2;
+}
+
+function isStorefrontStorageOption(value: number | null) {
+  return value != null && Number.isFinite(value) && value >= 16;
+}
+
 function ProductImage({ product }: { product: StorefrontProduct }) {
   const initials = product.brand.slice(0, 2).toUpperCase();
   const [failed, setFailed] = useState(false);
@@ -156,7 +164,6 @@ function SearchSparkIcon() {
 
 export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalogProps) {
   const [query, setQuery] = useState("");
-  const [availability, setAvailability] = useState("all");
   const [ramFilter, setRamFilter] = useState("all");
   const [storageFilter, setStorageFilter] = useState("all");
   const [sort, setSort] = useState("featured");
@@ -166,14 +173,14 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
 
   const ramOptions = useMemo(
     () =>
-      [...new Set(products.map((product) => product.ram_gb).filter((value): value is number => value != null))].sort(
+      [...new Set(products.map((product) => product.ram_gb).filter((value): value is number => isStorefrontRamOption(value)))].sort(
         (left, right) => left - right
       ),
     [products]
   );
   const storageOptions = useMemo(
     () =>
-      [...new Set(products.map((product) => product.storage_gb).filter((value): value is number => value != null))].sort(
+      [...new Set(products.map((product) => product.storage_gb).filter((value): value is number => isStorefrontStorageOption(value)))].sort(
         (left, right) => left - right
       ),
     [products]
@@ -197,12 +204,10 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
           .toLowerCase()
           .includes(needle);
 
-      const matchesAvailability =
-        availability === "all" || (availability === "available" && product.in_stock);
       const matchesRam = ramFilter === "all" || String(product.ram_gb ?? "") === ramFilter;
       const matchesStorage = storageFilter === "all" || String(product.storage_gb ?? "") === storageFilter;
 
-      return matchesQuery && matchesAvailability && matchesRam && matchesStorage;
+      return matchesQuery && matchesRam && matchesStorage;
     });
 
     next.sort((left, right) => {
@@ -226,13 +231,13 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
     });
 
     return next;
-  }, [availability, needle, products, ramFilter, sort, storageFilter]);
+  }, [needle, products, ramFilter, sort, storageFilter]);
 
   useEffect(() => {
     startTransition(() => {
       setPage(1);
     });
-  }, [availability, needle, products.length, ramFilter, sort, storageFilter]);
+  }, [needle, products.length, ramFilter, sort, storageFilter]);
 
   const availableCount = products.filter((product) => product.in_stock).length;
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
@@ -317,22 +322,6 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
           </label>
 
           <div className="storefront-toolbar-controls">
-            <div className="storefront-filter-row">
-              {[
-                { value: "all", label: "Todos" },
-                { value: "available", label: "Disponibles" },
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`storefront-filter ${availability === option.value ? "is-active" : ""}`}
-                  onClick={() => setAvailability(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
             <label className="storefront-select">
               <span>RAM</span>
               <select value={ramFilter} onChange={(event) => setRamFilter(event.target.value)}>

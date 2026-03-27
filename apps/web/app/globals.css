@@ -261,6 +261,8 @@ nav a:hover {
   background: var(--text);
   color: white;
   font-weight: 600;
+  align-self: center;
+  margin-top: 2px;
 }
 
 .storefront-hero {
@@ -533,21 +535,29 @@ nav a:hover {
   box-shadow: none;
 }
 
-.storefront-filter-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .storefront-filter {
-  min-height: 40px;
-  padding: 0 14px;
-  border: 0.5px solid var(--line);
+  min-height: 42px;
+  padding: 0 15px;
+  border: 1px solid rgba(191, 111, 77, 0.12);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.8);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 247, 242, 0.88));
   color: var(--muted);
   font: inherit;
   cursor: pointer;
+  box-shadow:
+    0 6px 18px rgba(52, 30, 18, 0.05),
+    inset 0 0 0 1px rgba(191, 111, 77, 0.03);
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease;
+}
+
+.storefront-filter:hover:not(:disabled) {
+  border-color: rgba(191, 111, 77, 0.22);
+  transform: translateY(-1px);
 }
 
 .storefront-filter.is-active {
@@ -556,14 +566,32 @@ nav a:hover {
   color: var(--accent);
 }
 
-.storefront-filter:not(:disabled):hover,
-.storefront-select select:hover {
-  border-color: rgba(191, 111, 77, 0.26);
+.storefront-filter:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .storefront-select {
+  position: relative;
   display: grid;
   gap: 8px;
+}
+
+.storefront-select::after {
+  content: "";
+  position: absolute;
+  right: 16px;
+  bottom: 18px;
+  width: 10px;
+  height: 10px;
+  border-right: 1.5px solid rgba(108, 93, 82, 0.76);
+  border-bottom: 1.5px solid rgba(108, 93, 82, 0.76);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+.storefront-select select:hover {
+  border-color: rgba(191, 111, 77, 0.26);
 }
 
 .storefront-select span {
@@ -571,6 +599,32 @@ nav a:hover {
   font-size: 0.76rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.storefront-select select {
+  min-height: 54px;
+  padding: 0 42px 0 16px;
+  border: 1px solid rgba(191, 111, 77, 0.12);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 247, 242, 0.9));
+  box-shadow:
+    0 8px 22px rgba(52, 30, 18, 0.06),
+    inset 0 0 0 1px rgba(191, 111, 77, 0.03);
+  appearance: none;
+  -webkit-appearance: none;
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.storefront-select select:focus {
+  border-color: rgba(191, 111, 77, 0.28);
+  box-shadow:
+    0 14px 30px rgba(52, 30, 18, 0.1),
+    0 0 0 4px rgba(191, 111, 77, 0.08);
+  transform: translateY(-1px);
 }
 
 @keyframes storefront-toolbar-sheen {
