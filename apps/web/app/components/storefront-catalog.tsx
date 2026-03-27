@@ -143,7 +143,18 @@ function WhatsAppIcon() {
   );
 }
 
-export function StorefrontCatalog({ store, products, eyebrow, title, lead }: StorefrontCatalogProps) {
+function SearchSparkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="storefront-search-icon">
+      <path
+        fill="currentColor"
+        d="M10.5 3a7.5 7.5 0 0 1 5.93 12.1l4.23 4.22-1.41 1.42-4.23-4.23A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Zm.25 2.25c.41 0 .75.34.75.75v1.5H13a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0V11H8.5a.75.75 0 0 1 0-1.5H10V8c0-.41.34-.75.75-.75Z"
+      />
+    </svg>
+  );
+}
+
+export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalogProps) {
   const [query, setQuery] = useState("");
   const [availability, setAvailability] = useState("all");
   const [ramFilter, setRamFilter] = useState("all");
@@ -278,29 +289,41 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
         </div>
       </header>
 
-      <section className="storefront-hero storefront-section" id="inicio">
-        <div className="storefront-hero-copy">
-          <div className="storefront-topline">
+      <div id="inicio" className="storefront-anchor" aria-hidden="true" />
+
+      <section className="storefront-toolbar storefront-section" id="buscar">
+        <div className="storefront-toolbar-intro">
+          <div className="storefront-toolbar-copy">
             <span className="eyebrow">{eyebrow}</span>
+            <h1 className="storefront-toolbar-title">Encontrá tu equipo rápido.</h1>
+            <p className="storefront-toolbar-lead">
+              Buscá por marca, RAM, memoria o precio y compará sin vueltas.
+            </p>
           </div>
-          <h1 className="storefront-title">{title}</h1>
-          <p className="storefront-lead">{lead}</p>
-          <div className="chip-row">
+
+          <div className="storefront-toolbar-stats" aria-label="Resumen del catalogo">
             <span className="chip accent">{products.length} equipos</span>
             <span className="chip good">{availableCount} publicados</span>
           </div>
         </div>
-      </section>
 
-      <section className="storefront-toolbar storefront-section" id="modelos">
         <label className="storefront-search">
           <span className="storefront-search-label">Buscar equipo</span>
-          <input
-            type="search"
-            placeholder="iPhone, Xiaomi, Samsung, memoria, color..."
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
+          <div className="storefront-search-shell">
+            <div className="storefront-search-field">
+              <SearchSparkIcon />
+              <input
+                type="search"
+                placeholder="iPhone, Xiaomi, Samsung, 8GB, 256GB..."
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </div>
+            <div className="storefront-search-hint" aria-hidden="true">
+              <span className="storefront-search-pulse" />
+              Sugerencias: marca, RAM, memoria
+            </div>
+          </div>
         </label>
 
         <div className="storefront-toolbar-controls">
@@ -362,7 +385,7 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
         </section>
       ) : (
         <>
-          <section className="storefront-grid">
+          <section className="storefront-grid" id="modelos">
             {pagedProducts.map((product) => {
               const detailHref = buildStorefrontProductPath(product.sku);
               const specSummary = buildSpecSummary(product);

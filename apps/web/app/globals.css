@@ -378,17 +378,78 @@ nav a:hover {
 .storefront-toolbar {
   display: grid;
   gap: 14px;
-  padding: 14px;
+  padding: 16px;
   position: sticky;
   top: 116px;
   z-index: 12;
   border: 0.5px solid var(--line);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(14px);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(191, 111, 77, 0.13), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(255, 255, 255, 0.9));
+  backdrop-filter: blur(16px);
   box-shadow:
-    0 12px 28px rgba(52, 30, 18, 0.08),
-    0 0 0 1px rgba(191, 111, 77, 0.03);
+    0 16px 40px rgba(52, 30, 18, 0.09),
+    0 0 0 1px rgba(191, 111, 77, 0.05);
+  overflow: clip;
+}
+
+.storefront-toolbar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 12%, rgba(191, 111, 77, 0.08) 48%, transparent 72%);
+  opacity: 0.75;
+  transform: translateX(-58%);
+  animation: storefront-toolbar-sheen 6.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.storefront-anchor {
+  position: relative;
+  top: -120px;
+  width: 1px;
+  height: 1px;
+}
+
+.storefront-toolbar-intro,
+.storefront-toolbar-controls,
+.storefront-search {
+  position: relative;
+  z-index: 1;
+}
+
+.storefront-toolbar-intro {
+  display: grid;
+  gap: 12px;
+}
+
+.storefront-toolbar-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.storefront-toolbar-title {
+  margin: 0;
+  font-family: var(--font-serif), serif;
+  font-size: clamp(1.9rem, 7vw, 3rem);
+  line-height: 0.94;
+  letter-spacing: -0.055em;
+  max-width: 11ch;
+}
+
+.storefront-toolbar-lead {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  max-width: 32rem;
+}
+
+.storefront-toolbar-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .storefront-toolbar-controls {
@@ -408,7 +469,7 @@ nav a:hover {
   text-transform: uppercase;
 }
 
-.storefront-search input,
+.storefront-search-field input,
 .storefront-select select {
   width: 100%;
   min-height: 48px;
@@ -420,15 +481,100 @@ nav a:hover {
   font: inherit;
 }
 
-.storefront-search input {
-  box-shadow: inset 0 0 0 1px rgba(191, 111, 77, 0.03);
+.storefront-search-shell {
+  display: grid;
+  gap: 10px;
 }
 
-.storefront-search input:focus,
+.storefront-search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 58px;
+  padding: 0 14px 0 12px;
+  border: 1px solid rgba(191, 111, 77, 0.14);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 247, 242, 0.92));
+  box-shadow:
+    0 10px 26px rgba(52, 30, 18, 0.08),
+    inset 0 0 0 1px rgba(191, 111, 77, 0.03);
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.storefront-search-field::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(125deg, transparent 18%, rgba(191, 111, 77, 0.08) 45%, transparent 72%);
+  opacity: 0.85;
+  transform: translateX(-42%);
+  animation: storefront-search-glow 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.storefront-search-icon {
+  position: relative;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.storefront-search-field input {
+  position: relative;
+  z-index: 1;
+  min-height: 56px;
+  padding: 0 0 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.storefront-search-field input::placeholder {
+  color: rgba(108, 93, 82, 0.78);
+}
+
+.storefront-search-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  width: fit-content;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(191, 111, 77, 0.08);
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.storefront-search-pulse {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(191, 111, 77, 0.8);
+  box-shadow: 0 0 0 0 rgba(191, 111, 77, 0.35);
+  animation: storefront-search-pulse 2.2s ease-out infinite;
+}
+
+.storefront-search-field:focus-within {
+  border-color: rgba(191, 111, 77, 0.32);
+  box-shadow:
+    0 16px 36px rgba(52, 30, 18, 0.11),
+    0 0 0 4px rgba(191, 111, 77, 0.08);
+  transform: translateY(-1px);
+}
+
+.storefront-search-field input:focus,
 .storefront-select select:focus {
   outline: none;
-  border-color: rgba(191, 111, 77, 0.32);
-  box-shadow: 0 0 0 4px rgba(191, 111, 77, 0.08);
+  box-shadow: none;
 }
 
 .storefront-filter-row {
@@ -454,6 +600,11 @@ nav a:hover {
   color: var(--accent);
 }
 
+.storefront-filter:not(:disabled):hover,
+.storefront-select select:hover {
+  border-color: rgba(191, 111, 77, 0.26);
+}
+
 .storefront-select {
   display: grid;
   gap: 8px;
@@ -464,6 +615,45 @@ nav a:hover {
   font-size: 0.76rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+@keyframes storefront-toolbar-sheen {
+  0%,
+  100% {
+    transform: translateX(-58%);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translateX(58%);
+    opacity: 0.9;
+  }
+}
+
+@keyframes storefront-search-glow {
+  0%,
+  100% {
+    transform: translateX(-42%);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateX(42%);
+    opacity: 0.95;
+  }
+}
+
+@keyframes storefront-search-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(191, 111, 77, 0.35);
+    transform: scale(0.95);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(191, 111, 77, 0);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(191, 111, 77, 0);
+    transform: scale(0.95);
+  }
 }
 
 .storefront-grid {
@@ -2404,15 +2594,16 @@ nav a:hover {
     text-align: right;
   }
 
-  .storefront-hero {
-    grid-template-columns: 1fr;
-    padding: 20px;
-  }
-
   .storefront-toolbar {
     grid-template-columns: minmax(0, 1fr) minmax(380px, auto);
     align-items: end;
     gap: 18px;
+  }
+
+  .storefront-toolbar-intro {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
   }
 
   .storefront-toolbar-controls {
@@ -2479,5 +2670,11 @@ nav a:hover {
   .quick-search-result:hover,
   .filter-chip:hover {
     transform: none;
+  }
+
+  .storefront-toolbar::before,
+  .storefront-search-field::after,
+  .storefront-search-pulse {
+    animation: none;
   }
 }
