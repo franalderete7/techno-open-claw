@@ -19,6 +19,15 @@ function stringifyMetadata(value: unknown) {
   return value == null ? "" : JSON.stringify(value);
 }
 
+function summarizeMetadata(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value == null ? "No metadata" : "Metadata";
+  }
+
+  const keys = Object.keys(value).slice(0, 3);
+  return keys.length > 0 ? keys.join(" • ") : "Metadata";
+}
+
 export function AuditExplorer({ items }: AuditExplorerProps) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -93,7 +102,15 @@ export function AuditExplorer({ items }: AuditExplorerProps) {
                 </div>
               </dl>
 
-              {item.metadata != null ? <pre className="json-block">{JSON.stringify(item.metadata, null, 2)}</pre> : null}
+              {item.metadata != null ? (
+                <details className="field-details record-fold">
+                  <summary className="field-summary fold-summary">
+                    <span>Metadata</span>
+                    <span className="fold-meta">{summarizeMetadata(item.metadata)}</span>
+                  </summary>
+                  <pre className="json-block">{JSON.stringify(item.metadata, null, 2)}</pre>
+                </details>
+              ) : null}
             </article>
           ))}
         </section>

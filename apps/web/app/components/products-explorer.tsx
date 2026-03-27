@@ -20,6 +20,15 @@ type ProductSection = {
   fields: FieldRow[];
 };
 
+function summarizeSection(section: ProductSection) {
+  const visible = section.fields
+    .filter((field) => field.value !== "null" && field.value !== "")
+    .slice(0, 2)
+    .map((field) => `${field.label}: ${field.value}`);
+
+  return visible.length > 0 ? visible.join(" • ") : `${section.fields.length} fields`;
+}
+
 function formatMoney(amount: number | null, currency: string) {
   if (amount == null) return "Price not loaded";
   return new Intl.NumberFormat("es-AR", {
@@ -149,6 +158,18 @@ function ProductThumbnail({ product }: { product: ProductRecord }) {
   return <img src={product.image_url} alt={product.title} loading="lazy" onError={() => setFailed(true)} />;
 }
 
+function ProductFieldValue({ field }: { field: FieldRow }) {
+  if (field.href) {
+    return (
+      <a className="field-link" href={field.href} target="_blank" rel="noreferrer">
+        Open asset
+      </a>
+    );
+  }
+
+  return <>{field.value}</>;
+}
+
 export function ProductsExplorer({ items }: ProductsExplorerProps) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -227,8 +248,6 @@ export function ProductsExplorer({ items }: ProductsExplorerProps) {
                       </div>
 
                       <div className="chip-row">
-                        <span className="chip accent mono">{product.sku}</span>
-                        <span className="chip mono">{product.slug}</span>
                         <span className={`chip ${product.active ? "good" : "warn"}`}>
                           {product.active ? "Active" : "Inactive"}
                         </span>
@@ -278,25 +297,22 @@ export function ProductsExplorer({ items }: ProductsExplorerProps) {
 
                   <div className="product-section-grid">
                     {sections.map((section) => (
-                      <section key={section.title} className="field-details product-section-card">
-                        <h4 className="field-summary">{section.title}</h4>
+                      <details key={section.title} className="field-details product-section-card product-fold">
+                        <summary className="field-summary fold-summary">
+                          <span>{section.title}</span>
+                          <span className="fold-meta">{summarizeSection(section)}</span>
+                        </summary>
                         <dl className="field-grid product-field-grid">
                           {section.fields.map((field) => (
                             <div key={field.label} className="field-row">
                               <dt>{field.label}</dt>
                               <dd className={field.mono ? "mono" : undefined}>
-                                {field.href ? (
-                                  <a className="field-link" href={field.href} target="_blank" rel="noreferrer">
-                                    {field.value}
-                                  </a>
-                                ) : (
-                                  field.value
-                                )}
+                                <ProductFieldValue field={field} />
                               </dd>
                             </div>
                           ))}
                         </dl>
-                      </section>
+                      </details>
                     ))}
                   </div>
                 </div>

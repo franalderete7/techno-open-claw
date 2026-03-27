@@ -45,14 +45,19 @@ export function SearchToolbar({
       </div>
 
       <div className="search-toolbar-body">
-        <input
-          id={inputId}
-          type="search"
-          className="search-input"
-          placeholder={placeholder}
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-        />
+        <div className="search-input-wrap">
+          <span className="search-input-icon" aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            id={inputId}
+            type="search"
+            className="search-input"
+            placeholder={placeholder}
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+          />
+        </div>
       </div>
 
       {filters.length > 0 && activeFilter && onFilterChange ? (
