@@ -1425,24 +1425,62 @@ nav a:hover {
   text-underline-offset: 2px;
 }
 
-.product-section-grid {
-  display: grid;
+.product-section-tabs {
+  display: flex;
   gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
 }
 
-.product-section-card {
+.product-section-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.product-section-tab {
   display: grid;
-  gap: 8px;
-  align-content: start;
+  gap: 2px;
+  min-width: 136px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.product-section-tab:hover {
+  transform: translateY(-1px);
+}
+
+.product-section-tab.is-active {
+  border-color: rgba(191, 111, 77, 0.24);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.product-section-tab span:first-child {
+  color: inherit;
+  font-size: 0.83rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.product-section-tab-meta {
+  color: var(--soft-text);
+  font-size: 0.76rem;
+}
+
+.product-section-panel {
+  min-width: 0;
 }
 
 .product-field-grid {
   margin-top: 12px;
-}
-
-.product-fold {
-  padding: 10px 12px;
 }
 
 .metric {
@@ -2286,10 +2324,6 @@ nav a:hover {
   .field-grid,
   .record-meta-grid,
   .setting-feature .setting-list {
-    grid-template-columns: 1fr;
-  }
-
-  .product-section-grid {
     grid-template-columns: 1fr;
   }
 

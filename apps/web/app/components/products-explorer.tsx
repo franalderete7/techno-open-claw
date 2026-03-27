@@ -169,6 +169,7 @@ function ProductFieldValue({ field }: { field: FieldRow }) {
 export function ProductsExplorer({ items }: ProductsExplorerProps) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [activeSections, setActiveSections] = useState<Record<number, string>>({});
   const deferredQuery = useDeferredValue(query);
   const needle = deferredQuery.trim().toLowerCase();
 
@@ -227,6 +228,10 @@ export function ProductsExplorer({ items }: ProductsExplorerProps) {
         <section className="product-list reveal-grid">
           {filteredItems.map((product) => {
             const sections = buildProductSections(product);
+            const activeSectionTitle = activeSections[product.id] ?? "Pricing";
+            const activeSection =
+              sections.find((section) => section.title === activeSectionTitle) ??
+              sections[0];
 
             return (
               <article key={product.id} className="product-card">
@@ -291,26 +296,44 @@ export function ProductsExplorer({ items }: ProductsExplorerProps) {
                     </div>
                   </div>
 
-                  <div className="product-section-grid">
-                    {sections.map((section) => (
-                      <details key={section.title} className="field-details product-section-card product-fold">
-                        <summary className="field-summary fold-summary">
+                  <div className="product-section-tabs" role="tablist" aria-label={`Product sections for ${product.title}`}>
+                    {sections.map((section) => {
+                      const isActive = activeSection.title === section.title;
+
+                      return (
+                        <button
+                          key={section.title}
+                          type="button"
+                          role="tab"
+                          aria-selected={isActive}
+                          className={`product-section-tab ${isActive ? "is-active" : ""}`}
+                          onClick={() =>
+                            setActiveSections((current) => ({
+                              ...current,
+                              [product.id]: section.title,
+                            }))
+                          }
+                        >
                           <span>{section.title}</span>
-                          <span className="fold-meta">{summarizeSection(section)}</span>
-                        </summary>
-                        <dl className="field-grid product-field-grid">
-                          {section.fields.map((field) => (
-                            <div key={field.label} className="field-row">
-                              <dt>{field.label}</dt>
-                              <dd className={field.mono ? "mono" : undefined}>
-                                <ProductFieldValue field={field} />
-                              </dd>
-                            </div>
-                          ))}
-                        </dl>
-                      </details>
-                    ))}
+                          <span className="product-section-tab-meta">{summarizeSection(section)}</span>
+                        </button>
+                      );
+                    })}
                   </div>
+
+                  <section className="field-details product-section-panel">
+                    <h4 className="field-summary">{activeSection.title}</h4>
+                    <dl className="field-grid product-field-grid">
+                      {activeSection.fields.map((field) => (
+                        <div key={field.label} className="field-row">
+                          <dt>{field.label}</dt>
+                          <dd className={field.mono ? "mono" : undefined}>
+                            <ProductFieldValue field={field} />
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
                 </div>
               </article>
             );
