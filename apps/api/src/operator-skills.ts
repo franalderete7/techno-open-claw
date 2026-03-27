@@ -541,7 +541,7 @@ export function buildOperatorSkillListText() {
     ...SKILLS.map((skill) => `• ${skill.id}: ${skill.summary}`),
     "",
     "Cambios puntuales de bajo riesgo pueden ejecutarse directo.",
-    "El resto queda pendiente con botones de aprobar / editar / cancelar y fallback CONFIRM <TOKEN>.",
+    "El resto queda pendiente con botones de aprobar / editar / cancelar.",
   ];
 
   return sections.join("\n");

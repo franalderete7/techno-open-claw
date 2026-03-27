@@ -26,6 +26,45 @@ const exec = promisify(execCallback);
 const productConditionValues = ["new", "used", "like_new", "refurbished"] as const;
 const stockStatusValues = ["in_stock", "reserved", "sold", "damaged"] as const;
 
+function normalizeStockStatusValue(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, " ")
+    .replace(/\s+/g, "_");
+
+  switch (normalized) {
+    case "available":
+    case "disponible":
+    case "in_stock":
+    case "instock":
+    case "stock":
+      return "in_stock";
+    case "reserved":
+    case "reserva":
+    case "reservado":
+      return "reserved";
+    case "sold":
+    case "vendido":
+      return "sold";
+    case "damaged":
+    case "broken":
+    case "roto":
+    case "danado":
+    case "daniado":
+      return "damaged";
+    default:
+      return value;
+  }
+}
+
+const stockStatusSchema = z.preprocess(normalizeStockStatusValue, z.enum(stockStatusValues));
+
 const jsonValueSchema: z.ZodTypeAny = z.lazy(() =>
   z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema)])
 );
@@ -142,7 +181,7 @@ const listStockSchema = z.object({
   query: z.string().trim().optional(),
   product_ref: z.string().trim().optional(),
   brand: z.string().trim().optional(),
-  status: z.enum(stockStatusValues).optional(),
+  status: stockStatusSchema.optional(),
   location_code: z.string().trim().optional(),
   sold_from: z.string().datetime().optional(),
   sold_to: z.string().datetime().optional(),
@@ -169,7 +208,7 @@ const createStockSchema = z.object({
   imei_2: z.string().trim().optional().nullable(),
   color: z.string().trim().optional().nullable(),
   battery_health: z.coerce.number().int().min(0).max(100).optional().nullable(),
-  status: z.enum(stockStatusValues).optional(),
+  status: stockStatusSchema.optional(),
   location_code: z.string().trim().optional().nullable(),
   cost_amount: z.coerce.number().finite().nonnegative().optional().nullable(),
   currency_code: z.string().trim().min(1).optional(),
@@ -188,7 +227,7 @@ const updateStockSchema = z.object({
       imei_2: z.string().trim().nullable().optional(),
       color: z.string().trim().nullable().optional(),
       battery_health: z.coerce.number().int().min(0).max(100).nullable().optional(),
-      status: z.enum(stockStatusValues).optional(),
+      status: stockStatusSchema.optional(),
       location_code: z.string().trim().nullable().optional(),
       cost_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
       currency_code: z.string().trim().min(1).optional(),
@@ -333,7 +372,7 @@ const createStockFromImagesSchema = z.object({
   inventory_purchase_ref: z.string().trim().optional(),
   cost_amount: z.coerce.number().finite().nonnegative().optional().nullable(),
   currency_code: z.string().trim().optional(),
-  status: z.enum(stockStatusValues).optional(),
+  status: stockStatusSchema.optional(),
   location_code: z.string().trim().optional().nullable(),
   acquired_at: z.string().datetime().optional().nullable(),
   metadata: z.record(z.string(), jsonValueSchema).optional(),
@@ -346,7 +385,7 @@ const createInventoryPurchaseFromImagesSchema = createInventoryPurchaseSchema.ex
 });
 
 const updateStockStatusFromImagesSchema = z.object({
-  status: z.enum(stockStatusValues),
+  status: stockStatusSchema,
   sold_at: z.string().datetime().optional().nullable(),
   location_code: z.string().trim().optional().nullable(),
 });
@@ -738,6 +777,27 @@ function buildDateRangeLabel(from?: string, to?: string) {
   return from || to || "";
 }
 
+export function formatOperatorError(error: unknown) {
+  if (error instanceof z.ZodError) {
+    const statusIssue = error.issues.find((issue) => issue.path.at(-1) === "status");
+    if (statusIssue) {
+      return 'No pude usar ese estado. Probá con "in_stock", "reserved", "sold" o "damaged".';
+    }
+
+    return "No pude validar esa acción. Revisá los datos y probá de nuevo.";
+  }
+
+  if (error instanceof Error) {
+    if (/^\s*\[/.test(error.message.trim())) {
+      return "No pude validar esa acción. Revisá los datos y probá de nuevo.";
+    }
+
+    return error.message;
+  }
+
+  return "No pude preparar esa acción. Revisá la referencia y los campos.";
+}
+
 function normalizeMatch(value: string) {
   return value
     .normalize("NFKD")
@@ -771,7 +831,7 @@ function buildProductResolutionReply(prompt: ProductResolutionPromptPayload): Op
     text: [
       `Encontré ${prompt.options.length} opciones para "${prompt.reference}".`,
       ...prompt.options.map((option, index) => buildProductResolutionOptionLabel(option, index)),
-      "Respondé 1/2/3, primero/segundo, o tocá un botón.",
+      "Elegí una.",
     ].join("\n"),
     buttons: prompt.options.slice(0, 5).map((option, index) => [
       {
@@ -786,10 +846,9 @@ function buildPurchaseResolutionReply(prompt: PurchaseResolutionPromptPayload): 
   return {
     kind: "reply",
     text: [
-      "Toda unidad de stock tiene que quedar vinculada a una compra.",
-      `Elegí una compra para "${prompt.reference}" o creá una nueva.`,
+      `Elegí la compra para "${prompt.reference}" o creá una nueva.`,
       ...prompt.options.map((option, index) => buildPurchaseResolutionOptionLabel(option, index)),
-      "Respondé 1/2/3, primero/segundo, o tocá un botón.",
+      "Elegí una.",
     ].join("\n"),
     buttons: prompt.options.slice(0, 5).map((option, index) => [
       {
@@ -1296,6 +1355,28 @@ function parseSyntheticMenuIntent(text: string): MenuIntent | null {
   return (match?.[1] as MenuIntent | undefined) ?? null;
 }
 
+function parseWorkflowHelpIntent(text: string): MenuIntent | null {
+  const trimmed = text.trim().toLowerCase();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/(como|cómo|ayuda|explicame|explícame).*(crear|cargar).*(stock|inventario|unidad)/i.test(trimmed)) {
+    return /(foto|fotos|imagen|imagenes|im[áa]genes|imei)/i.test(trimmed) ? "stock_from_images_help" : "stock_create_help";
+  }
+
+  if (/(como|cómo|ayuda|explicame|explícame).*(crear).*(compra|purchase)/i.test(trimmed)) {
+    return "purchases_create_help";
+  }
+
+  if (/(como|cómo|ayuda|explicame|explícame).*(actualizar|cambiar|subir|bajar).*(costo|costos|precio|precios)/i.test(trimmed)) {
+    return "products_bulk_reprice_help";
+  }
+
+  return null;
+}
+
 function parseBroadMenuIntent(text: string): MenuIntent | null {
   const trimmed = text.trim().toLowerCase();
 
@@ -1332,8 +1413,7 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
   switch (intent) {
     case "home":
       return {
-        text:
-          "¿Qué querés hacer? Puedo gestionar productos, stock, compras, settings y reportes. También podés escribirlo en lenguaje natural, por ejemplo: “actualizá esta lista de costos”, “cargá stock con estas fotos” o “marcá estas unidades como vendidas”.",
+        text: "¿Qué querés hacer? También podés escribir directo cosas como “actualizá esta lista de costos”, “cargá stock con estas fotos” o “marcá estas unidades como vendidas”.",
         buttons: [
           [
             { text: "Productos", callback_data: buildOperatorCallbackData("menu", "products") },
@@ -1350,7 +1430,7 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
       };
     case "products":
       return {
-        text: "Productos: podés listar con filtros, crear, editar precios, recalcular listas de costos o archivar/borrar. ¿Qué querés hacer?",
+        text: "Productos. ¿Qué querés hacer?",
         buttons: [
           [
             { text: "Listar / filtrar", callback_data: buildOperatorCallbackData("menu", "products_list_help") },
@@ -1366,7 +1446,7 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
       };
     case "stock":
       return {
-        text: "Stock: podés listar, crear manualmente, cargar desde fotos, editar estado/ubicación/IMEI o marcar vendido desde fotos. ¿Qué querés hacer?",
+        text: "Stock. ¿Qué querés hacer?",
         buttons: [
           [
             { text: "Listar / filtrar", callback_data: buildOperatorCallbackData("menu", "stock_list_help") },
@@ -1385,18 +1465,18 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
       };
     case "purchases":
       return {
-        text: "Compras: podés listar compras, crear una compra manual o crear compra + stock desde fotos.",
+        text: "Compras. ¿Qué querés hacer?",
         buttons: [
           [
             { text: "Listar", callback_data: buildOperatorCallbackData("menu", "purchases_list_help") },
-            { text: "Crear con fotos", callback_data: buildOperatorCallbackData("menu", "purchases_create_help") },
+            { text: "Crear", callback_data: buildOperatorCallbackData("menu", "purchases_create_help") },
           ],
           [{ text: "Inicio", callback_data: buildOperatorCallbackData("menu", "home") }],
         ],
       };
     case "settings":
       return {
-        text: "Settings: podés listar claves o actualizar valores JSON/escalares del store. ¿Qué querés hacer?",
+        text: "Settings. ¿Qué querés hacer?",
         buttons: [
           [
             { text: "Listar", callback_data: buildOperatorCallbackData("menu", "settings_list_help") },
@@ -1407,7 +1487,7 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
       };
     case "reports":
       return {
-        text: "Reportes rápidos. También podés pedir filtros más específicos por texto.",
+        text: "Reportes rápidos.",
         buttons: [
           [
             { text: "Vendidos 30 días", callback_data: buildOperatorCallbackData("menu", "report_sold_last_30d") },
@@ -1421,23 +1501,19 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
       };
     case "products_list_help":
       return {
-        text:
-          "Decime qué querés listar y con qué filtros. Ejemplos: “listá Samsung entre 400000 y 900000”, “mostrá Apple activos con stock”, “buscá A56 8/256”.",
+        text: "Decime qué querés listar. Ejemplos: “listá Samsung entre 400000 y 900000”, “mostrá Apple activos con stock”, “buscá A56 8/256”.",
       };
     case "products_create_help":
       return {
-        text:
-          "Para crear un producto, mandame al menos SKU y título. Si adjuntás una foto, la tomo como image_url por defecto. Ejemplo: “crear producto sku samsung-a56-5g-8-256 titulo Samsung A56 5G 8/256 promo 589000”.",
+        text: "Para crear un producto necesito al menos SKU y título. Si mandás una foto, la uso como imagen. Ejemplo: “crear producto sku samsung-a56-5g-8-256 titulo Samsung A56 5G 8/256 promo 589000”.",
       };
     case "products_update_help":
       return {
-        text:
-          "Decime el producto y el cambio. Ejemplos: “cambiá el precio del A56 8/256 a 579000”, “desactivá iPhone 16 128”, “poné 3 días de entrega al A36”. Si hay varias coincidencias, te muestro botones para elegir.",
+        text: "Decime el producto y el cambio. Si hay varias coincidencias, te muestro opciones para elegir.",
       };
     case "products_bulk_reprice_help":
       return {
-        text:
-          "Pegame una lista con nombre completo y costo USD nuevo, una línea por producto. Ejemplo: “Samsung A17 6/128 = 155” y “Samsung A56 8/256 = 282”. Yo resuelvo SKU, recalculo y te muestro preview con botones.",
+        text: "Pegame una lista con nombre completo y costo USD nuevo, una línea por producto. Yo resuelvo SKU, recalculo y te muestro preview con botones.",
       };
     case "products_delete_help":
       return {
@@ -1446,28 +1522,38 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
       };
     case "stock_list_help":
       return {
-        text:
-          "Podés filtrar stock por estado, marca, producto, ubicación o fechas. Ejemplos: “listá stock vendido el último mes”, “mostrá stock Samsung en SALTA”, “buscá imei 356...”.",
+        text: "Podés filtrar por estado, marca, producto, ubicación o fechas. Ejemplos: “listá stock vendido el último mes”, “mostrá stock Samsung en SALTA”, “buscá imei 356...”.",
       };
     case "stock_create_help":
       return {
         text:
-          "Para crear stock, indicame el producto, la compra asociada y los datos físicos. Ejemplo: “crear stock del A56 8/256 para la compra PUR-AB12CD34 imei1 123 imei2 456 ubicación SALTA”. Si no decís la compra, te hago elegir una. Si mandaste fotos con IMEI, mejor usá la opción de cargar con fotos.",
+          "Para crear stock necesito producto + compra. Si ya mandaste fotos con IMEI, usá “cargá stock con estas fotos”. Si es manual, decime producto, compra e IMEI/serial y yo preparo todo.",
+        buttons: [
+          [
+            { text: "Cargar con fotos", callback_data: buildOperatorCallbackData("menu", "stock_from_images_help") },
+            { text: "Crear compra", callback_data: buildOperatorCallbackData("menu", "purchases_create_help") },
+          ],
+          [{ text: "Volver a Stock", callback_data: buildOperatorCallbackData("menu", "stock") }],
+        ],
       };
     case "stock_from_images_help":
       return {
         text:
-          "Mandame primero las fotos con IMEIs y después pedime algo como: “cargá stock del iPhone 17 Pro Max con estas fotos” o “creá stock del A17 en SALTA con estas imágenes”. Siempre las voy a vincular a una compra existente o te ofrezco crear una nueva.",
+          "Mandame las fotos con IMEI y después decime “cargá stock del iPhone 17 Pro Max con estas fotos”. Siempre las voy a vincular a una compra existente o te hago elegir / crear una.",
+        buttons: [
+          [
+            { text: "Crear compra", callback_data: buildOperatorCallbackData("menu", "purchases_create_help") },
+            { text: "Volver a Stock", callback_data: buildOperatorCallbackData("menu", "stock") },
+          ],
+        ],
       };
     case "stock_update_help":
       return {
-        text:
-          "Podés cambiar estado, ubicación, IMEI, serial o costo. Ejemplos: “marcá como sold el imei 356...”, “mové el stock 44 a SALTA”.",
+        text: "Podés cambiar estado, ubicación, IMEI, serial o costo. Ejemplos: “marcá como sold el imei 356...”, “mové el stock 44 a SALTA”.",
       };
     case "stock_mark_from_images_help":
       return {
-        text:
-          "Mandame las fotos de IMEI y después pedime: “marcá estas unidades como vendidas” o “pasá estas unidades a reserved”. Yo las cruzo contra stock y te muestro preview.",
+        text: "Mandame las fotos de IMEI y después pedime “marcá estas unidades como vendidas” o “pasá estas unidades a reserved”.",
       };
     case "stock_delete_help":
       return {
@@ -1476,13 +1562,18 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
       };
     case "purchases_list_help":
       return {
-        text:
-          "Podés pedirme compras por proveedor, estado o número. Ejemplos: “listá compras received”, “mostrá compras de Juan” o “detalle de la compra PUR-AB12CD34”.",
+        text: "Podés pedirme compras por proveedor, estado o número. Ejemplos: “listá compras received”, “mostrá compras de Juan” o “detalle de la compra PUR-AB12CD34”.",
       };
     case "purchases_create_help":
       return {
         text:
-          "Mandame primero las fotos y después algo como: “registrá compra desde estas imágenes, 10 iPhone 17 Pro Max, total 5000 USD, Fran 50% cash y Agus 50% crypto”. Así creo la compra y dejo todas las unidades vinculadas desde el inicio.",
+          "Podés crear una compra sola o compra + stock desde fotos. Si ya tenés imágenes, mandame algo como: “registrá compra desde estas imágenes, 10 iPhone 17 Pro Max, total 5000 USD, Fran 50% cash y Agus 50% crypto”.",
+        buttons: [
+          [
+            { text: "Crear con fotos", callback_data: buildOperatorCallbackData("menu", "stock_from_images_help") },
+            { text: "Volver a Compras", callback_data: buildOperatorCallbackData("menu", "purchases") },
+          ],
+        ],
       };
     case "settings_list_help":
       return {
@@ -1664,7 +1755,7 @@ const OPERATOR_SCHEMA_GUIDE = [
   "- public.conversations stores thread headers by channel_thread_key. public.messages stores the actual interaction timeline. Each Telegram inbound and outbound message is saved in public.messages.",
   "- Product images can use public URLs. If the operator attached a Telegram image, the API can persist it on the VPS and provide a /media/... URL for image_url.",
   "- Recent Telegram image batches can be used to extract IMEIs and serials for bulk stock creation or stock status updates. Those flows must preview matches before execution.",
-  "- public.operator_confirmations stores pending write actions. Low-risk single-row writes can auto-execute. Higher-risk actions use inline approve/edit/cancel buttons, with CONFIRM <TOKEN> and CANCEL <TOKEN> as fallback.",
+  "- public.operator_confirmations stores pending write actions. Low-risk single-row writes can auto-execute. Higher-risk actions use inline approve/edit/cancel buttons.",
   "- public.audit_logs stores executed mutations and important operator actions.",
   "- public.orders and public.order_items store commercial orders. They are readable in the operator chat even if writes are not yet exposed there.",
   "Mutation rules:",
@@ -1695,16 +1786,20 @@ function buildDraftPrompts(params: {
     "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, delete_product, create_inventory_purchase, update_inventory_purchase, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
     "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
     "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
+    "If the operator asks for a concrete mutation that can be prepared safely, prefer mode=write over mode=chat. Do not answer with an execution plan when the command layer can already prepare the action.",
+    "If the workflow has multiple steps and there is no single combined command, choose the first required deterministic step and keep the reply minimal.",
     "If the user asks for full row, all columns, entire row, toda la fila, or all information about a product/stock/customer/setting, prefer the matching get_*_details read command instead of any list_* command.",
     "Use recent thread history to resolve follow-up references like 'that one', 'same product', 'that SKU', 'those settings', or 'do it now'.",
     "If the reference is clear from recent thread history, do not ask the operator to repeat it.",
     "Never invent IDs. Keep product_ref, stock_ref, customer_ref and setting keys as plain text from the user's request.",
+    "User-facing reply text must sound like an ops assistant, not like schema docs. Never mention internal tool names, table names, or confirmation tokens unless the operator explicitly asks.",
     "For update commands, only include the fields the user explicitly wants to change.",
     "If the user pastes multiple product names each with different cost_usd values, prefer bulk_reprice_products with one item per row.",
     "For delete commands, only use them if the user explicitly asked to delete, remove, or permanently erase.",
     "For product archive/deactivate intent, use update_product with active=false.",
     "If the operator changes cost_usd, logistics_usd, usd_rate, or cuotas_qty on a product, the server will recalculate derived pricing fields from settings. You should frame the action as a repricing preview, not as a manual field edit list only.",
     "If the operator refers to the latest Telegram images for new stock or sold devices, prefer the image-based stock commands rather than requesting manual IMEIs.",
+    "Normalize stock status wording like available/disponible to in_stock.",
     "When the user asks for lists by brand, price range, RAM, storage, sold date, acquisition date, location, stock status, or image presence, use the available filter fields instead of plain text only.",
     "For price and numeric values, use numbers, not strings, when possible.",
     "If the message is just a greeting like hey/hola, reply briefly in reply and use mode=chat.",
@@ -2240,13 +2335,7 @@ async function storeConfirmation(actor: ActorContext, prepared: PreparedMutation
 function buildPendingActionReply(prepared: PreparedMutation, token: string): OperatorMessageResult {
   return {
     kind: "reply",
-    text: [
-      prepared.summary,
-      "",
-      "Revisá la acción y aprobala si está bien.",
-      `• Aprobar: botón o CONFIRM ${token}`,
-      `• Cancelar: botón o CANCEL ${token}`,
-    ].join("\n"),
+    text: [prepared.summary, "", "¿Lo hago?"].join("\n"),
     buttons: [
       [
         { text: "Aprobar", callback_data: buildOperatorCallbackData("approve", token) },
@@ -3891,7 +3980,7 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
           warnings: z.array(z.string()).optional(),
           cost_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
           currency_code: z.string(),
-          status: z.enum(stockStatusValues),
+          status: stockStatusSchema,
           location_code: z.string().nullable().optional(),
           acquired_at: z.string().datetime().nullable().optional(),
           metadata: z.record(z.string(), z.unknown()).optional(),
@@ -3984,7 +4073,7 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
             warnings: z.array(z.string()).optional(),
             cost_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
             currency_code: z.string(),
-            status: z.enum(stockStatusValues),
+            status: stockStatusSchema,
             location_code: z.string().nullable().optional(),
             acquired_at: z.string().datetime().nullable().optional(),
             metadata: z.record(z.string(), z.unknown()).optional(),
@@ -4072,7 +4161,7 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
         .object({
           stock_unit_id: z.coerce.number().int().positive(),
           sku: z.string(),
-          status: z.enum(stockStatusValues),
+          status: stockStatusSchema,
           reference: z.string().nullable().optional(),
         })
         .parse(payload);
@@ -4129,7 +4218,7 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
     case "update_stock_status_from_images": {
       const parsed = z
         .object({
-          status: z.enum(stockStatusValues),
+          status: stockStatusSchema,
           sold_at: z.string().datetime().nullable().optional(),
           apply_sold_at: z.boolean().optional(),
           location_code: z.string().nullable().optional(),
@@ -4287,11 +4376,11 @@ async function confirmPendingAction(actor: ActorContext, token: string) {
   const pending = rows[0];
 
   if (!pending) {
-    return `No encontré una acción pendiente para ${token}.`;
+    return "No encontré una acción pendiente para aprobar.";
   }
 
   if (pending.status !== "pending") {
-    return `La acción ${token} ya no está pendiente (${pending.status}).`;
+    return `Esa acción ya no está pendiente (${pending.status}).`;
   }
 
   if (new Date(pending.expires_at).getTime() < Date.now()) {
@@ -4304,7 +4393,7 @@ async function confirmPendingAction(actor: ActorContext, token: string) {
       token,
       command: pending.command,
     });
-    return `La acción ${token} venció. Pedime una nueva.`;
+    return "Esa acción venció. Pedime una nueva.";
   }
 
   const client = await pool.connect();
@@ -4329,7 +4418,7 @@ async function confirmPendingAction(actor: ActorContext, token: string) {
       payload: pending.payload,
       result_text: resultText,
     });
-    return `${resultText}\n\nToken ${token} ejecutado.`;
+    return resultText;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -4353,7 +4442,7 @@ async function cancelPendingAction(actor: ActorContext, token: string) {
   );
 
   if (result.rowCount === 0) {
-    return `No encontré una acción pendiente para cancelar con token ${token}.`;
+    return "No encontré una acción pendiente para cancelar.";
   }
 
   await saveOperatorEventMessage(actor, `Acción cancelada: ${token}`, {
@@ -4361,7 +4450,7 @@ async function cancelPendingAction(actor: ActorContext, token: string) {
     token,
   });
 
-  return `Acción ${token} cancelada.`;
+  return "Listo, cancelado.";
 }
 
 function buildChatPrompts(params: {
@@ -4378,6 +4467,7 @@ function buildChatPrompts(params: {
     OPERATOR_SKILL_GUIDE,
     "You must never claim a mutation happened unless the deterministic command layer executed it.",
     "If the user asks for a mutation but there is not enough information, ask for the missing field or exact reference.",
+    "Keep the reply short and natural. Do not dump schema explanations, command names, or validation rules unless explicitly asked.",
     "Use recent thread history to resolve follow-up references and preserve conversational continuity.",
     "Recent thread history:",
     params.conversationMemory,
@@ -4707,6 +4797,12 @@ export async function startTelegramOperatorTurn(actor: ActorContext): Promise<Op
     return { kind: "reply", text: menuReply.text, buttons: menuReply.buttons };
   }
 
+  const workflowHelpIntent = parseWorkflowHelpIntent(actor.userMessage);
+  if (workflowHelpIntent) {
+    const menuReply = buildOperatorMenuReply(workflowHelpIntent);
+    return { kind: "reply", text: menuReply.text, buttons: menuReply.buttons };
+  }
+
   const broadMenuIntent = parseBroadMenuIntent(actor.userMessage);
   if (broadMenuIntent) {
     const menuReply = buildOperatorMenuReply(broadMenuIntent);
@@ -4794,7 +4890,7 @@ export async function resolveTelegramOperatorDraft(
 
       return {
         kind: "reply",
-        text: `${resultText}\n\nEjecutado directamente porque era un cambio puntual de bajo riesgo.`,
+        text: resultText,
       };
     }
 
@@ -4854,7 +4950,7 @@ export async function resolveTelegramOperatorDraft(
       }
     }
 
-    const message = error instanceof Error ? error.message : "No pude preparar esa acción. Revisá la referencia y los campos.";
+    const message = formatOperatorError(error);
     return {
       kind: "reply",
       text: message,

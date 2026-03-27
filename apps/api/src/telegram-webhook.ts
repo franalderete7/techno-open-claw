@@ -27,7 +27,7 @@ import {
 } from "./telegram.js";
 import { transcribeAudio } from "./sales-agent.js";
 import { storeTelegramImage } from "./media-storage.js";
-import { handleTelegramOperatorMessage, renderOperatorChatReply } from "./telegram-operator.js";
+import { formatOperatorError, handleTelegramOperatorMessage, renderOperatorChatReply } from "./telegram-operator.js";
 import { sendThinkingMessage, streamTelegramResponse } from "./telegram-streaming.js";
 import {
   saveConversationMessage,
@@ -508,7 +508,7 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
     } catch (error) {
       request.log.error({ error }, "Telegram operator flow failed");
 
-        const fallbackText = error instanceof Error ? error.message : "No pude procesar esa instrucción.";
+        const fallbackText = formatOperatorError(error);
 
       try {
         const telegramResponses = await sendTelegramTextMessages({
