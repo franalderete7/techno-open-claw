@@ -202,11 +202,11 @@ async function getCheckoutRowForUpdate(client: PoolClient, orderId: number, toke
         sci.metadata
       from public.storefront_checkout_intents sci
       join public.orders o on o.id = sci.order_id
-      left join public.products p on p.id = sci.product_id
+      join public.products p on p.id = sci.product_id
       where sci.order_id = $1
         and sci.token = $2
       limit 1
-      for update
+      for update of sci, o
     `,
     [orderId, token]
   );
