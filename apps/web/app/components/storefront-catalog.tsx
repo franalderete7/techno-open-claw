@@ -36,6 +36,11 @@ const FAQ_ITEMS = [
     answer:
       "Si. Cuando avanzas por WhatsApp te enviamos el link de pago preparado para ese modelo y ese importe.",
   },
+  {
+    question: "Puedo comparar por RAM, memoria o precio?",
+    answer:
+      "Si. La barra de busqueda y los filtros de arriba estan pensados para encontrar rapido el equipo por marca, RAM, memoria o precio.",
+  },
 ];
 
 function formatMoney(amount: number | null) {
@@ -228,11 +233,6 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
     store.whatsapp_url,
     "Hola! Quiero comprar un equipo en TechnoStore Salta."
   );
-  const paymentIntroUrl = buildWhatsAppUrl(
-    store.whatsapp_url,
-    "Hola! Quiero avanzar con un pago y recibir el link del equipo que elija."
-  );
-
   function goToPage(nextPage: number) {
     const bounded = Math.max(1, Math.min(totalPages, nextPage));
     setPage(bounded);
@@ -288,31 +288,8 @@ export function StorefrontCatalog({ store, products, eyebrow, title, lead }: Sto
           <div className="chip-row">
             <span className="chip accent">{products.length} equipos</span>
             <span className="chip good">{availableCount} publicados</span>
-            <span className="chip">Pago por link</span>
-            {store.address ? <span className="chip">{store.address}</span> : null}
           </div>
         </div>
-
-        <aside className="storefront-callout" id="pago">
-          <p className="storefront-callout-label">Compra simple</p>
-          <h2>Paga desde WhatsApp.</h2>
-          <p>
-            Elegis el modelo, abrimos la conversacion con el equipo cargado y te enviamos el link de pago listo para
-            seguir.
-          </p>
-          <div className="storefront-callout-points">
-            <span>Precio final en ARS</span>
-            <span>Link de pago del equipo elegido</span>
-            <span>Retiro o entrega coordinada</span>
-          </div>
-          {store.hours ? <p className="storefront-callout-meta">Horario: {store.hours}</p> : null}
-          {paymentIntroUrl ? (
-            <a className="storefront-pay-button storefront-pay-button-inline" href={paymentIntroUrl} target="_blank" rel="noreferrer">
-              <WhatsAppIcon />
-              Quiero que me asesoren
-            </a>
-          ) : null}
-        </aside>
       </section>
 
       <section className="storefront-toolbar storefront-section" id="modelos">

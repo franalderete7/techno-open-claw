@@ -21,12 +21,8 @@ type ProductSection = {
 };
 
 function summarizeSection(section: ProductSection) {
-  const visible = section.fields
-    .filter((field) => field.value !== "null" && field.value !== "")
-    .slice(0, 2)
-    .map((field) => `${field.label}: ${field.value}`);
-
-  return visible.length > 0 ? visible.join(" • ") : `${section.fields.length} fields`;
+  const visibleCount = section.fields.filter((field) => field.value !== "null" && field.value !== "").length;
+  return `${visibleCount || section.fields.length} fields`;
 }
 
 function formatMoney(amount: number | null, currency: string) {

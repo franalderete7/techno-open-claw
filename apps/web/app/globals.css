@@ -266,8 +266,8 @@ nav a:hover {
 .storefront-hero {
   position: relative;
   display: grid;
-  gap: 16px;
-  padding: 22px 18px 20px;
+  gap: 12px;
+  padding: 18px 18px 16px;
   border: 0.5px solid var(--line);
   border-radius: 30px;
   background:
@@ -298,25 +298,25 @@ nav a:hover {
 .storefront-hero-copy {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
 .storefront-title {
   margin: 0;
   font-family: var(--font-serif), serif;
-  font-size: clamp(2.3rem, 6vw, 4.6rem);
-  line-height: 0.95;
+  font-size: clamp(2rem, 5.4vw, 4.1rem);
+  line-height: 0.94;
   letter-spacing: -0.055em;
-  max-width: 11ch;
+  max-width: 10ch;
 }
 
 .storefront-lead {
-  max-width: 39rem;
+  max-width: 34rem;
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: 1.02rem;
-  line-height: 1.58;
+  font-size: 0.98rem;
+  line-height: 1.5;
 }
 
 .storefront-callout {
@@ -379,9 +379,16 @@ nav a:hover {
   display: grid;
   gap: 14px;
   padding: 14px;
+  position: sticky;
+  top: 116px;
+  z-index: 12;
   border: 0.5px solid var(--line);
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.74);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 12px 28px rgba(52, 30, 18, 0.08),
+    0 0 0 1px rgba(191, 111, 77, 0.03);
 }
 
 .storefront-toolbar-controls {
@@ -411,6 +418,17 @@ nav a:hover {
   background: rgba(255, 255, 255, 0.9);
   color: var(--text);
   font: inherit;
+}
+
+.storefront-search input {
+  box-shadow: inset 0 0 0 1px rgba(191, 111, 77, 0.03);
+}
+
+.storefront-search input:focus,
+.storefront-select select:focus {
+  outline: none;
+  border-color: rgba(191, 111, 77, 0.32);
+  box-shadow: 0 0 0 4px rgba(191, 111, 77, 0.08);
 }
 
 .storefront-filter-row {
@@ -1332,12 +1350,14 @@ nav a:hover {
   margin: 0;
 }
 
-.field-details > summary.field-summary {
+.field-details > summary.field-summary,
+.schema-fold > summary.field-summary {
   cursor: pointer;
   list-style: none;
 }
 
-.field-details > summary.field-summary::-webkit-details-marker {
+.field-details > summary.field-summary::-webkit-details-marker,
+.schema-fold > summary.field-summary::-webkit-details-marker {
   display: none;
 }
 
@@ -1363,7 +1383,8 @@ nav a:hover {
   line-height: 1;
 }
 
-.field-details[open] > .fold-summary::after {
+.field-details[open] > .fold-summary::after,
+.schema-fold[open] > .fold-summary::after {
   content: "−";
 }
 
@@ -2090,10 +2111,20 @@ nav a:hover {
   overflow-wrap: anywhere;
 }
 
-.schema-fold,
 .record-fold,
 .schema-relationship-panel {
   padding: 10px 12px;
+}
+
+.schema-fold {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 0.5px solid var(--line);
+}
+
+.schema-fold > .schema-column-list {
+  margin-top: 0;
 }
 
 .schema-relationship-panel > .schema-relationship-grid,
@@ -2238,6 +2269,10 @@ nav a:hover {
     top: 74px;
   }
 
+  .storefront-toolbar {
+    top: 102px;
+  }
+
   .catalog-card-head {
     flex-direction: column;
   }
@@ -2336,8 +2371,8 @@ nav a:hover {
   }
 
   .storefront-hero {
-    grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
-    padding: 24px;
+    grid-template-columns: 1fr;
+    padding: 20px;
   }
 
   .storefront-toolbar {

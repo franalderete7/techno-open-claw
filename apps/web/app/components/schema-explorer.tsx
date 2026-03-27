@@ -133,7 +133,7 @@ export function SchemaExplorer({ tables, relationships }: SchemaExplorerProps) {
                 </div>
 
                 {table.columns.length > previewColumns.length ? (
-                  <details className="field-details schema-fold">
+                  <details className="schema-fold">
                     <summary className="field-summary fold-summary">
                       <span>Columns</span>
                       <span className="fold-meta">
