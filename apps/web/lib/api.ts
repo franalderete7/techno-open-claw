@@ -404,6 +404,122 @@ export type SchemaResponse = {
   relationships: SchemaRelationshipRecord[];
 };
 
+export type MetaAdsOverviewResponse = {
+  configured: {
+    app_id: boolean;
+    app_secret: boolean;
+    access_token: boolean;
+    ad_account_id: boolean;
+    business_id: boolean;
+    api_version: string;
+    base_url: string;
+    missing_required: string[];
+    missing_optional: string[];
+  };
+  fetched_at: string;
+  warnings: string[];
+  ads_manager: {
+    account: {
+      id: string;
+      account_id?: string | null;
+      name?: string | null;
+      account_status?: number | null;
+      currency?: string | null;
+      timezone_name?: string | null;
+      timezone_offset_hours_utc?: number | null;
+      balance?: string | null;
+      amount_spent?: string | null;
+      disable_reason?: number | null;
+      created_time?: string | null;
+    } | null;
+    insights_window_days: number;
+    insights: {
+      account_currency?: string | null;
+      spend?: string | null;
+      impressions?: string | null;
+      reach?: string | null;
+      clicks?: string | null;
+      ctr?: string | null;
+      cpc?: string | null;
+      cpm?: string | null;
+      date_start?: string | null;
+      date_stop?: string | null;
+    } | null;
+    instagram_accounts: Array<{
+      id: string;
+      username?: string | null;
+      profile_pic?: string | null;
+    }>;
+    campaigns: Array<{
+      id: string;
+      name?: string | null;
+      objective?: string | null;
+      status?: string | null;
+      effective_status?: string | null;
+      buying_type?: string | null;
+      bid_strategy?: string | null;
+      daily_budget?: string | null;
+      lifetime_budget?: string | null;
+      start_time?: string | null;
+      stop_time?: string | null;
+      updated_time?: string | null;
+    }>;
+    ad_sets: Array<{
+      id: string;
+      name?: string | null;
+      campaign_id?: string | null;
+      status?: string | null;
+      effective_status?: string | null;
+      optimization_goal?: string | null;
+      billing_event?: string | null;
+      bid_strategy?: string | null;
+      daily_budget?: string | null;
+      lifetime_budget?: string | null;
+      start_time?: string | null;
+      end_time?: string | null;
+      updated_time?: string | null;
+    }>;
+    ads: Array<{
+      id: string;
+      name?: string | null;
+      campaign_id?: string | null;
+      adset_id?: string | null;
+      status?: string | null;
+      effective_status?: string | null;
+      updated_time?: string | null;
+      creative?: {
+        id?: string | null;
+        name?: string | null;
+      } | null;
+    }>;
+  };
+  business_suite: {
+    business: {
+      id: string;
+      name?: string | null;
+      verification_status?: string | null;
+      created_time?: string | null;
+    } | null;
+    owned_ad_accounts: Array<{
+      id: string;
+      account_id?: string | null;
+      name?: string | null;
+      account_status?: number | null;
+      currency?: string | null;
+      timezone_name?: string | null;
+    }>;
+    pages: Array<{
+      id: string;
+      name?: string | null;
+      link?: string | null;
+      instagram_business_account?: {
+        id?: string | null;
+        username?: string | null;
+      } | null;
+    }>;
+  };
+};
+
 export type StorefrontPaymentIntentCreateResponse = {
   order_id: number;
   token: string;
@@ -477,6 +593,19 @@ export async function getAudit(limit = 100) {
 
 export async function getSchema() {
   return apiFetch<SchemaResponse>("/v1/schema");
+}
+
+export async function getMetaAdsOverview(options?: { days?: number; limit?: number }) {
+  const params = new URLSearchParams();
+  if (options?.days != null) {
+    params.set("days", String(options.days));
+  }
+  if (options?.limit != null) {
+    params.set("limit", String(options.limit));
+  }
+
+  const query = params.toString();
+  return apiFetch<MetaAdsOverviewResponse>(`/v1/meta/ads/overview${query ? `?${query}` : ""}`);
 }
 
 export async function createStorefrontPaymentIntent(payload: {

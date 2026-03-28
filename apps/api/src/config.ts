@@ -66,6 +66,18 @@ const configSchema = z.object({
   GALIOPAY_SUCCESS_URL: z.string().default(""),
   GALIOPAY_FAILURE_URL: z.string().default(""),
   GALIOPAY_SANDBOX: envBoolean.default(false),
+  META_APP_ID: z.string().default(""),
+  META_APP_SECRET: z.string().default(""),
+  META_ACCESS_TOKEN: z.string().default(process.env.META_ADS_ACCESS_TOKEN ?? ""),
+  META_AD_ACCOUNT_ID: z.string().default(
+    process.env.META_AD_ACCOUNT_IDS
+      ?.split(",")
+      .map((entry) => entry.trim())
+      .find(Boolean) ?? ""
+  ),
+  META_BUSINESS_ID: z.string().default(""),
+  META_API_VERSION: z.string().default("v25.0"),
+  META_GRAPH_API_BASE: z.string().default("https://graph.facebook.com"),
 });
 
 export const config = configSchema.parse(process.env);

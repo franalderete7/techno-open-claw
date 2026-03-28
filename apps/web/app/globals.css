@@ -2385,6 +2385,24 @@ nav a:hover {
   overflow: auto;
 }
 
+.ads-note {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ads-note-line {
+  margin: 0;
+}
+
+.ads-warning-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: var(--soft-text);
+}
+
 .quick-search-panel {
   gap: 16px;
 }
