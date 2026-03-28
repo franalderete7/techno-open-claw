@@ -1,8 +1,17 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type { MetaAdsOverviewResponse } from "../../lib/api";
 
 type AdsExplorerProps = {
   snapshot: MetaAdsOverviewResponse;
+};
+
+type StatusSummary = {
+  total: number;
+  active: number;
+  paused: number;
+  archived: number;
+  other: number;
 };
 
 function asNumber(value: string | number | null | undefined) {
@@ -78,16 +87,87 @@ function buildInstagramAccounts(snapshot: MetaAdsOverviewResponse) {
 
 function statusTone(status: string | null | undefined) {
   const normalized = (status ?? "").toLowerCase();
-  if (normalized.includes("active")) return "good";
+  if (normalized.includes("active") && !normalized.includes("inactive")) return "good";
   if (normalized.includes("paused")) return "warn";
   if (normalized.includes("deleted") || normalized.includes("archived")) return "danger";
   return "";
+}
+
+function normalizeLifecycleStatus(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function buildStatusSummary<T>(items: T[], getStatus: (item: T) => string | null | undefined): StatusSummary {
+  const summary: StatusSummary = {
+    total: items.length,
+    active: 0,
+    paused: 0,
+    archived: 0,
+    other: 0,
+  };
+
+  for (const item of items) {
+    const status = normalizeLifecycleStatus(getStatus(item));
+
+    if (status.includes("paused")) {
+      summary.paused += 1;
+    } else if (status.includes("active") && !status.includes("inactive")) {
+      summary.active += 1;
+    } else if (status.includes("deleted") || status.includes("archived")) {
+      summary.archived += 1;
+    } else {
+      summary.other += 1;
+    }
+  }
+
+  return summary;
+}
+
+function SummaryChips({ summary }: { summary: StatusSummary }) {
+  return (
+    <div className="chip-row ads-summary-chips">
+      <span className="chip accent">{summary.total} total</span>
+      <span className="chip good">{summary.active} active</span>
+      <span className="chip warn">{summary.paused} paused</span>
+      {summary.archived > 0 ? <span className="chip danger">{summary.archived} archived</span> : null}
+      {summary.other > 0 ? <span className="chip">{summary.other} other</span> : null}
+    </div>
+  );
+}
+
+function AdsObjectSection(props: {
+  title: string;
+  copy: string;
+  summary: StatusSummary;
+  empty: string;
+  children: ReactNode;
+}) {
+  const { title, copy, summary, empty, children } = props;
+
+  return (
+    <details className="field-details ads-fold">
+      <summary className="field-summary fold-summary ads-fold-summary">
+        <div className="ads-fold-heading">
+          <strong className="ads-fold-title">{title}</strong>
+          <span className="ads-fold-copy">{copy}</span>
+        </div>
+        <SummaryChips summary={summary} />
+      </summary>
+
+      <div className="ads-fold-body">
+        {summary.total === 0 ? <p className="empty">{empty}</p> : children}
+      </div>
+    </details>
+  );
 }
 
 export function AdsExplorer({ snapshot }: AdsExplorerProps) {
   const spendCurrency = snapshot.ads_manager.insights?.account_currency ?? snapshot.ads_manager.account?.currency ?? "ARS";
   const instagramAccounts = buildInstagramAccounts(snapshot);
   const pagesWithInstagram = snapshot.business_suite.pages.filter((page) => Boolean(page.instagram_business_account?.id));
+  const campaignSummary = buildStatusSummary(snapshot.ads_manager.campaigns, (campaign) => campaign.effective_status ?? campaign.status);
+  const adSetSummary = buildStatusSummary(snapshot.ads_manager.ad_sets, (adSet) => adSet.effective_status ?? adSet.status);
+  const adsSummary = buildStatusSummary(snapshot.ads_manager.ads, (ad) => ad.effective_status ?? ad.status);
 
   return (
     <div className="page-stack">
@@ -101,14 +181,17 @@ export function AdsExplorer({ snapshot }: AdsExplorerProps) {
         <article className="stat-card">
           <span className="stat-label">Campaigns</span>
           <strong className="stat-value">{snapshot.ads_manager.campaigns.length}</strong>
+          <span className="stat-note">{campaignSummary.active} active · {campaignSummary.paused} paused</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Ad Sets</span>
           <strong className="stat-value">{snapshot.ads_manager.ad_sets.length}</strong>
+          <span className="stat-note">{adSetSummary.active} active · {adSetSummary.paused} paused</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Ads</span>
           <strong className="stat-value">{snapshot.ads_manager.ads.length}</strong>
+          <span className="stat-note">{adsSummary.active} active · {adsSummary.paused} paused</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Business Pages</span>
@@ -361,167 +444,149 @@ export function AdsExplorer({ snapshot }: AdsExplorerProps) {
         )}
       </article>
 
-      <article className="table-card">
-        <div className="panel-header">
-          <div>
-            <h3 className="panel-title">Campaigns</h3>
-            <p className="panel-copy">Campaign-level objects from the configured ad account.</p>
-          </div>
-        </div>
-
-        {snapshot.ads_manager.campaigns.length === 0 ? (
-          <p className="empty">No campaigns were returned.</p>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Objective</th>
-                  <th>Budget</th>
-                  <th>Updated</th>
+      <AdsObjectSection
+        title="Campaigns"
+        copy="Campaign-level objects from the configured ad account."
+        summary={campaignSummary}
+        empty="No campaigns were returned."
+      >
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Objective</th>
+                <th>Budget</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snapshot.ads_manager.campaigns.map((campaign) => (
+                <tr key={campaign.id}>
+                  <td>
+                    <div className="value-stack">
+                      <strong>{formatText(campaign.name)}</strong>
+                      <span className="mono">{campaign.id}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="chip-row">
+                      <span className={`chip ${statusTone(campaign.status)}`}>{formatText(campaign.status)}</span>
+                      <span className={`chip ${statusTone(campaign.effective_status)}`}>
+                        {formatText(campaign.effective_status)}
+                      </span>
+                    </div>
+                  </td>
+                  <td>{formatText(campaign.objective)}</td>
+                  <td>{formatMoney(campaign.daily_budget ?? campaign.lifetime_budget, spendCurrency)}</td>
+                  <td>{formatDate(campaign.updated_time)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {snapshot.ads_manager.campaigns.map((campaign) => (
-                  <tr key={campaign.id}>
-                    <td>
-                      <div className="value-stack">
-                        <strong>{formatText(campaign.name)}</strong>
-                        <span className="mono">{campaign.id}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="chip-row">
-                        <span className={`chip ${statusTone(campaign.status)}`}>{formatText(campaign.status)}</span>
-                        <span className={`chip ${statusTone(campaign.effective_status)}`}>
-                          {formatText(campaign.effective_status)}
-                        </span>
-                      </div>
-                    </td>
-                    <td>{formatText(campaign.objective)}</td>
-                    <td>{formatMoney(campaign.daily_budget ?? campaign.lifetime_budget, spendCurrency)}</td>
-                    <td>{formatDate(campaign.updated_time)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </article>
-
-      <article className="table-card">
-        <div className="panel-header">
-          <div>
-            <h3 className="panel-title">Ad Sets</h3>
-            <p className="panel-copy">Delivery and optimization layer under each campaign.</p>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
+      </AdsObjectSection>
 
-        {snapshot.ads_manager.ad_sets.length === 0 ? (
-          <p className="empty">No ad sets were returned.</p>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Campaign</th>
-                  <th>Optimization</th>
-                  <th>Budget</th>
+      <AdsObjectSection
+        title="Ad Sets"
+        copy="Delivery and optimization layer under each campaign."
+        summary={adSetSummary}
+        empty="No ad sets were returned."
+      >
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Campaign</th>
+                <th>Optimization</th>
+                <th>Budget</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snapshot.ads_manager.ad_sets.map((adSet) => (
+                <tr key={adSet.id}>
+                  <td>
+                    <div className="value-stack">
+                      <strong>{formatText(adSet.name)}</strong>
+                      <span className="mono">{adSet.id}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="chip-row">
+                      <span className={`chip ${statusTone(adSet.status)}`}>{formatText(adSet.status)}</span>
+                      <span className={`chip ${statusTone(adSet.effective_status)}`}>
+                        {formatText(adSet.effective_status)}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="mono">{formatText(adSet.campaign_id)}</td>
+                  <td>{formatText(adSet.optimization_goal ?? adSet.billing_event)}</td>
+                  <td>{formatMoney(adSet.daily_budget ?? adSet.lifetime_budget, spendCurrency)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {snapshot.ads_manager.ad_sets.map((adSet) => (
-                  <tr key={adSet.id}>
-                    <td>
-                      <div className="value-stack">
-                        <strong>{formatText(adSet.name)}</strong>
-                        <span className="mono">{adSet.id}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="chip-row">
-                        <span className={`chip ${statusTone(adSet.status)}`}>{formatText(adSet.status)}</span>
-                        <span className={`chip ${statusTone(adSet.effective_status)}`}>
-                          {formatText(adSet.effective_status)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="mono">{formatText(adSet.campaign_id)}</td>
-                    <td>{formatText(adSet.optimization_goal ?? adSet.billing_event)}</td>
-                    <td>{formatMoney(adSet.daily_budget ?? adSet.lifetime_budget, spendCurrency)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </article>
-
-      <article className="table-card">
-        <div className="panel-header">
-          <div>
-            <h3 className="panel-title">Ads</h3>
-            <p className="panel-copy">Actual ad objects and linked creatives where Meta returns them.</p>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
+      </AdsObjectSection>
 
-        {snapshot.ads_manager.ads.length === 0 ? (
-          <p className="empty">No ads were returned.</p>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Ad</th>
-                  <th>Status</th>
-                  <th>Campaign / Ad Set</th>
-                  <th>Creative</th>
-                  <th>Updated</th>
+      <AdsObjectSection
+        title="Ads"
+        copy="Actual ad objects and linked creatives where Meta returns them."
+        summary={adsSummary}
+        empty="No ads were returned."
+      >
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Ad</th>
+                <th>Status</th>
+                <th>Campaign / Ad Set</th>
+                <th>Creative</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snapshot.ads_manager.ads.map((ad) => (
+                <tr key={ad.id}>
+                  <td>
+                    <div className="value-stack">
+                      <strong>{formatText(ad.name)}</strong>
+                      <span className="mono">{ad.id}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="chip-row">
+                      <span className={`chip ${statusTone(ad.status)}`}>{formatText(ad.status)}</span>
+                      <span className={`chip ${statusTone(ad.effective_status)}`}>{formatText(ad.effective_status)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="value-stack">
+                      <span className="mono">campaign {formatText(ad.campaign_id)}</span>
+                      <span className="mono">ad set {formatText(ad.adset_id)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    {ad.creative?.id ? (
+                      <div className="value-stack">
+                        <strong>{formatText(ad.creative.name)}</strong>
+                        <span className="mono">{ad.creative.id}</span>
+                      </div>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
+                  <td>{formatDate(ad.updated_time)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {snapshot.ads_manager.ads.map((ad) => (
-                  <tr key={ad.id}>
-                    <td>
-                      <div className="value-stack">
-                        <strong>{formatText(ad.name)}</strong>
-                        <span className="mono">{ad.id}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="chip-row">
-                        <span className={`chip ${statusTone(ad.status)}`}>{formatText(ad.status)}</span>
-                        <span className={`chip ${statusTone(ad.effective_status)}`}>{formatText(ad.effective_status)}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="value-stack">
-                        <span className="mono">campaign {formatText(ad.campaign_id)}</span>
-                        <span className="mono">ad set {formatText(ad.adset_id)}</span>
-                      </div>
-                    </td>
-                    <td>
-                      {ad.creative?.id ? (
-                        <div className="value-stack">
-                          <strong>{formatText(ad.creative.name)}</strong>
-                          <span className="mono">{ad.creative.id}</span>
-                        </div>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td>{formatDate(ad.updated_time)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </article>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </AdsObjectSection>
     </div>
   );
 }

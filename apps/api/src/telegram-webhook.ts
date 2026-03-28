@@ -290,6 +290,8 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
             : callbackAction.action === "pick"
               ? callbackAction.value.startsWith("purchase:")
                 ? `__pick_purchase:${callbackAction.value.slice("purchase:".length)}__`
+                : callbackAction.value.startsWith("meta:")
+                  ? `__pick_meta:${callbackAction.value.slice("meta:".length)}__`
                 : `__pick_product:${callbackAction.value}__`
             : `${callbackAction.action === "approve" ? "CONFIRM" : "CANCEL"} ${callbackAction.value}`;
 

@@ -13,6 +13,9 @@ type GraphErrorPayload = {
   };
 };
 
+export type MetaEntityKind = "campaign" | "ad_set" | "ad";
+export type MetaWritableStatus = "ACTIVE" | "PAUSED";
+
 export type MetaAdAccountRecord = {
   id: string;
   account_id?: string | null;
@@ -152,6 +155,12 @@ type MetaOverviewOptions = {
   limit?: number;
 };
 
+type MetaListOptions = {
+  query?: string;
+  status?: string;
+  limit?: number;
+};
+
 function normalizeAdAccountId(rawValue: string) {
   const trimmed = rawValue.trim();
   if (!trimmed) return "";
@@ -228,6 +237,227 @@ async function metaGraphGet<T>(path: string, params: Record<string, string | num
   }
 
   return parsedBody;
+}
+
+async function metaGraphPost<T>(
+  path: string,
+  params: Record<string, string | number | boolean | undefined>,
+  accessToken: string
+) {
+  const url = new URL(`${config.META_GRAPH_API_BASE.replace(/\/$/, "")}/${config.META_API_VERSION.replace(/^\//, "")}${path}`);
+  const body = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value == null || value === "") {
+      continue;
+    }
+
+    body.set(key, String(value));
+  }
+
+  body.set("access_token", accessToken);
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+    },
+    body: body.toString(),
+  });
+
+  const rawBody = await response.text();
+  const parsedBody = rawBody ? (JSON.parse(rawBody) as T & GraphErrorPayload) : ({} as T & GraphErrorPayload);
+
+  if (!response.ok) {
+    const error = parsedBody.error;
+    const message = error?.message ?? `Meta Graph API request failed with ${response.status}`;
+    throw new Error(message);
+  }
+
+  return parsedBody;
+}
+
+function getMetaAccessTokenOrThrow() {
+  const token = config.META_ACCESS_TOKEN.trim();
+  if (!token) {
+    throw new Error("META_ACCESS_TOKEN is missing.");
+  }
+
+  return token;
+}
+
+function getMetaAdAccountIdOrThrow() {
+  const adAccountId = normalizeAdAccountId(config.META_AD_ACCOUNT_ID);
+  if (!adAccountId) {
+    throw new Error("META_AD_ACCOUNT_ID is missing.");
+  }
+
+  return adAccountId;
+}
+
+function normalizeFilterStatus(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function matchesFilterStatus(statuses: Array<string | null | undefined>, filter: string | undefined) {
+  const normalizedFilter = normalizeFilterStatus(filter);
+  if (!normalizedFilter || normalizedFilter === "all") {
+    return true;
+  }
+
+  return statuses.some((status) => normalizeFilterStatus(status) === normalizedFilter);
+}
+
+function matchesQuery(values: Array<string | null | undefined>, query: string | undefined) {
+  const needle = (query ?? "").trim().toLowerCase();
+  if (!needle) {
+    return true;
+  }
+
+  return values.some((value) => (value ?? "").toLowerCase().includes(needle));
+}
+
+function limitItems<T>(items: T[], limit = 50) {
+  const nextLimit = Math.max(1, Math.min(200, Math.trunc(limit) || 50));
+  return items.slice(0, nextLimit);
+}
+
+export async function getMetaCampaign(id: string, accessToken = getMetaAccessTokenOrThrow()) {
+  return metaGraphGet<MetaCampaignRecord>(
+    `/${id}`,
+    {
+      fields:
+        "id,name,objective,status,effective_status,buying_type,bid_strategy,daily_budget,lifetime_budget,start_time,stop_time,updated_time",
+    },
+    accessToken
+  );
+}
+
+export async function getMetaAdSet(id: string, accessToken = getMetaAccessTokenOrThrow()) {
+  return metaGraphGet<MetaAdSetRecord>(
+    `/${id}`,
+    {
+      fields:
+        "id,name,campaign_id,status,effective_status,optimization_goal,billing_event,bid_strategy,daily_budget,lifetime_budget,start_time,end_time,updated_time",
+    },
+    accessToken
+  );
+}
+
+export async function getMetaAd(id: string, accessToken = getMetaAccessTokenOrThrow()) {
+  return metaGraphGet<MetaAdRecord>(
+    `/${id}`,
+    {
+      fields: "id,name,campaign_id,adset_id,status,effective_status,updated_time,creative{id,name}",
+    },
+    accessToken
+  );
+}
+
+export async function listMetaCampaigns(options: MetaListOptions = {}) {
+  const accessToken = getMetaAccessTokenOrThrow();
+  const adAccountId = getMetaAdAccountIdOrThrow();
+  const response = await metaGraphGet<GraphListResponse<MetaCampaignRecord>>(
+    `/${adAccountId}/campaigns`,
+    {
+      limit: Math.max(1, Math.min(200, Math.trunc(options.limit ?? 50) || 50)),
+      fields:
+        "id,name,objective,status,effective_status,buying_type,bid_strategy,daily_budget,lifetime_budget,start_time,stop_time,updated_time",
+    },
+    accessToken
+  );
+
+  return limitItems(
+    (response.data ?? []).filter(
+      (campaign) =>
+        matchesQuery([campaign.id, campaign.name, campaign.objective], options.query) &&
+        matchesFilterStatus([campaign.effective_status, campaign.status], options.status)
+    ),
+    options.limit ?? 50
+  );
+}
+
+export async function listMetaAdSets(options: MetaListOptions = {}) {
+  const accessToken = getMetaAccessTokenOrThrow();
+  const adAccountId = getMetaAdAccountIdOrThrow();
+  const response = await metaGraphGet<GraphListResponse<MetaAdSetRecord>>(
+    `/${adAccountId}/adsets`,
+    {
+      limit: Math.max(1, Math.min(200, Math.trunc(options.limit ?? 50) || 50)),
+      fields:
+        "id,name,campaign_id,status,effective_status,optimization_goal,billing_event,bid_strategy,daily_budget,lifetime_budget,start_time,end_time,updated_time",
+    },
+    accessToken
+  );
+
+  return limitItems(
+    (response.data ?? []).filter(
+      (adSet) =>
+        matchesQuery([adSet.id, adSet.name, adSet.campaign_id, adSet.optimization_goal], options.query) &&
+        matchesFilterStatus([adSet.effective_status, adSet.status], options.status)
+    ),
+    options.limit ?? 50
+  );
+}
+
+export async function listMetaAds(options: MetaListOptions = {}) {
+  const accessToken = getMetaAccessTokenOrThrow();
+  const adAccountId = getMetaAdAccountIdOrThrow();
+  const response = await metaGraphGet<GraphListResponse<MetaAdRecord>>(
+    `/${adAccountId}/ads`,
+    {
+      limit: Math.max(1, Math.min(200, Math.trunc(options.limit ?? 50) || 50)),
+      fields: "id,name,campaign_id,adset_id,status,effective_status,updated_time,creative{id,name}",
+    },
+    accessToken
+  );
+
+  return limitItems(
+    (response.data ?? []).filter(
+      (ad) =>
+        matchesQuery([ad.id, ad.name, ad.campaign_id, ad.adset_id, ad.creative?.id ?? null, ad.creative?.name ?? null], options.query) &&
+        matchesFilterStatus([ad.effective_status, ad.status], options.status)
+    ),
+    options.limit ?? 50
+  );
+}
+
+export async function updateMetaCampaign(
+  id: string,
+  changes: {
+    status?: MetaWritableStatus;
+    daily_budget?: string | number;
+    lifetime_budget?: string | number;
+  }
+) {
+  const accessToken = getMetaAccessTokenOrThrow();
+  await metaGraphPost<{ success?: boolean }>(`/${id}`, changes, accessToken);
+  return getMetaCampaign(id, accessToken);
+}
+
+export async function updateMetaAdSet(
+  id: string,
+  changes: {
+    status?: MetaWritableStatus;
+    daily_budget?: string | number;
+    lifetime_budget?: string | number;
+  }
+) {
+  const accessToken = getMetaAccessTokenOrThrow();
+  await metaGraphPost<{ success?: boolean }>(`/${id}`, changes, accessToken);
+  return getMetaAdSet(id, accessToken);
+}
+
+export async function updateMetaAd(
+  id: string,
+  changes: {
+    status?: MetaWritableStatus;
+  }
+) {
+  const accessToken = getMetaAccessTokenOrThrow();
+  await metaGraphPost<{ success?: boolean }>(`/${id}`, changes, accessToken);
+  return getMetaAd(id, accessToken);
 }
 
 async function safeLoad<T>(label: string, warnings: string[], fallback: T, callback: () => Promise<T>) {

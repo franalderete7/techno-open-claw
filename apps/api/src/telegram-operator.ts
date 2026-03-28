@@ -16,6 +16,20 @@ import {
   updateInventoryPurchase,
 } from "./inventory-purchases.js";
 import {
+  getMetaAd,
+  getMetaAdSet,
+  getMetaCampaign,
+  listMetaAds,
+  listMetaAdSets,
+  listMetaCampaigns,
+  type MetaAdRecord,
+  type MetaAdSetRecord,
+  type MetaCampaignRecord,
+  updateMetaAd,
+  updateMetaAdSet,
+  updateMetaCampaign,
+} from "./meta-ads.js";
+import {
   countRecentTelegramImageBatch,
   extractStockCandidatesFromRecentImages,
   type ExtractedStockCandidate,
@@ -25,6 +39,8 @@ const exec = promisify(execCallback);
 
 const productConditionValues = ["new", "used", "like_new", "refurbished"] as const;
 const stockStatusValues = ["in_stock", "reserved", "sold", "damaged"] as const;
+const metaFilterStatusValues = ["active", "paused", "archived", "deleted"] as const;
+const metaWritableStatusValues = ["ACTIVE", "PAUSED"] as const;
 
 function normalizeStockStatusValue(value: unknown) {
   if (typeof value !== "string") {
@@ -64,6 +80,60 @@ function normalizeStockStatusValue(value: unknown) {
 }
 
 const stockStatusSchema = z.preprocess(normalizeStockStatusValue, z.enum(stockStatusValues));
+
+function normalizeMetaFilterStatusValue(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, " ")
+    .replace(/\s+/g, "_");
+
+  switch (normalized) {
+    case "active":
+    case "activo":
+    case "activa":
+    case "activas":
+    case "activos":
+    case "running":
+      return "active";
+    case "paused":
+    case "pause":
+    case "pausado":
+    case "pausada":
+    case "pausadas":
+    case "pausados":
+      return "paused";
+    case "archived":
+    case "archivado":
+    case "archivada":
+      return "archived";
+    case "deleted":
+    case "borrado":
+    case "eliminado":
+      return "deleted";
+    default:
+      return value;
+  }
+}
+
+function normalizeMetaWritableStatusValue(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const normalized = normalizeMetaFilterStatusValue(value);
+  if (normalized === "active") return "ACTIVE";
+  if (normalized === "paused") return "PAUSED";
+  return value;
+}
+
+const metaFilterStatusSchema = z.preprocess(normalizeMetaFilterStatusValue, z.enum(metaFilterStatusValues));
+const metaWritableStatusSchema = z.preprocess(normalizeMetaWritableStatusValue, z.enum(metaWritableStatusValues));
 
 const jsonValueSchema: z.ZodTypeAny = z.lazy(() =>
   z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema)])
@@ -339,6 +409,66 @@ const getInventoryPurchaseDetailsSchema = z.object({
   purchase_ref: z.string().trim().min(1),
 });
 
+const listMetaCampaignsSchema = z.object({
+  query: z.string().trim().optional(),
+  status: metaFilterStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  all: booleanishSchema.optional(),
+});
+
+const listMetaAdSetsSchema = z.object({
+  query: z.string().trim().optional(),
+  status: metaFilterStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  all: booleanishSchema.optional(),
+});
+
+const listMetaAdsSchema = z.object({
+  query: z.string().trim().optional(),
+  status: metaFilterStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  all: booleanishSchema.optional(),
+});
+
+const updateMetaCampaignSchema = z.object({
+  campaign_ref: z.string().trim().min(1),
+  changes: z
+    .object({
+      status: metaWritableStatusSchema.optional(),
+      daily_budget: z.coerce.number().finite().positive().optional(),
+      lifetime_budget: z.coerce.number().finite().positive().optional(),
+    })
+    .refine((value) => Object.keys(value).length > 0, "Provide at least one Meta campaign field to update.")
+    .refine(
+      (value) => !(value.daily_budget != null && value.lifetime_budget != null),
+      "Choose only one budget field at a time."
+    ),
+});
+
+const updateMetaAdSetSchema = z.object({
+  ad_set_ref: z.string().trim().min(1),
+  changes: z
+    .object({
+      status: metaWritableStatusSchema.optional(),
+      daily_budget: z.coerce.number().finite().positive().optional(),
+      lifetime_budget: z.coerce.number().finite().positive().optional(),
+    })
+    .refine((value) => Object.keys(value).length > 0, "Provide at least one Meta ad set field to update.")
+    .refine(
+      (value) => !(value.daily_budget != null && value.lifetime_budget != null),
+      "Choose only one budget field at a time."
+    ),
+});
+
+const updateMetaAdSchema = z.object({
+  ad_ref: z.string().trim().min(1),
+  changes: z
+    .object({
+      status: metaWritableStatusSchema,
+    })
+    .refine((value) => Object.keys(value).length > 0, "Provide at least one Meta ad field to update."),
+});
+
 const createInventoryPurchaseSchema = z.object({
   supplier_name: z.string().trim().optional().nullable(),
   currency_code: z.string().trim().optional(),
@@ -410,6 +540,9 @@ export const draftSchema = z.object({
       "list_conversations",
       "list_inventory_purchases",
       "get_inventory_purchase_details",
+      "list_meta_campaigns",
+      "list_meta_ad_sets",
+      "list_meta_ads",
       "create_product",
       "update_product",
       "bulk_update_products",
@@ -417,6 +550,9 @@ export const draftSchema = z.object({
       "delete_product",
       "create_inventory_purchase",
       "update_inventory_purchase",
+      "update_meta_campaign",
+      "update_meta_ad_set",
+      "update_meta_ad",
       "create_stock_unit",
       "create_stock_from_images",
       "create_inventory_purchase_from_images",
@@ -514,7 +650,29 @@ type PurchaseResolutionPromptPayload = {
   options: PurchaseResolutionOption[];
 };
 
-type ResolutionPromptPayload = ProductResolutionPromptPayload | PurchaseResolutionPromptPayload;
+type MetaObjectResolutionOption = {
+  id: string;
+  name: string | null;
+  status: string | null;
+  effective_status: string | null;
+  entity_kind: "campaign" | "ad_set" | "ad";
+};
+
+type MetaObjectResolutionPromptPayload = {
+  kind: "meta_object_resolution_prompt";
+  mode: "read" | "write";
+  command: ReadCommandName | WriteCommandName;
+  params: Record<string, unknown>;
+  reference: string;
+  reference_path: ProductResolutionPathPart[];
+  entity_kind: "campaign" | "ad_set" | "ad";
+  options: MetaObjectResolutionOption[];
+};
+
+type ResolutionPromptPayload =
+  | ProductResolutionPromptPayload
+  | PurchaseResolutionPromptPayload
+  | MetaObjectResolutionPromptPayload;
 
 type ReadCommandName =
   | "help"
@@ -532,7 +690,10 @@ type ReadCommandName =
   | "list_orders"
   | "list_conversations"
   | "list_inventory_purchases"
-  | "get_inventory_purchase_details";
+  | "get_inventory_purchase_details"
+  | "list_meta_campaigns"
+  | "list_meta_ad_sets"
+  | "list_meta_ads";
 
 type WriteCommandName =
   | "create_product"
@@ -542,6 +703,9 @@ type WriteCommandName =
   | "delete_product"
   | "create_inventory_purchase"
   | "update_inventory_purchase"
+  | "update_meta_campaign"
+  | "update_meta_ad_set"
+  | "update_meta_ad"
   | "create_stock_unit"
   | "create_stock_from_images"
   | "create_inventory_purchase_from_images"
@@ -629,6 +793,20 @@ type ConversationMemoryRow = QueryResultRow & {
   media_url: string | null;
 };
 
+type MetaObjectRow = {
+  id: string;
+  name: string | null;
+  status: string | null;
+  effective_status: string | null;
+  entity_kind: "campaign" | "ad_set" | "ad";
+  objective?: string | null;
+  campaign_id?: string | null;
+  adset_id?: string | null;
+  daily_budget?: string | null;
+  lifetime_budget?: string | null;
+  updated_time?: string | null;
+};
+
 class ProductReferenceAmbiguityError extends Error {
   reference: string;
   options: ProductResolutionOption[];
@@ -650,6 +828,27 @@ class PurchaseReferenceAmbiguityError extends Error {
     super(`Necesito elegir una compra para "${reference}".`);
     this.name = "PurchaseReferenceAmbiguityError";
     this.reference = reference;
+    this.options = options;
+    this.referencePath = referencePath;
+  }
+}
+
+class MetaObjectReferenceAmbiguityError extends Error {
+  reference: string;
+  entityKind: "campaign" | "ad_set" | "ad";
+  options: MetaObjectResolutionOption[];
+  referencePath: ProductResolutionPathPart[];
+
+  constructor(
+    reference: string,
+    entityKind: "campaign" | "ad_set" | "ad",
+    options: MetaObjectResolutionOption[],
+    referencePath: ProductResolutionPathPart[]
+  ) {
+    super(`Necesito elegir un ${entityKind} para "${reference}".`);
+    this.name = "MetaObjectReferenceAmbiguityError";
+    this.reference = reference;
+    this.entityKind = entityKind;
     this.options = options;
     this.referencePath = referencePath;
   }
@@ -756,6 +955,21 @@ function formatMoney(amount: string | number | null, currency = "ARS") {
   }).format(numeric);
 }
 
+function formatNumber(value: string | number | null | undefined) {
+  if (value == null) {
+    return "-";
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return String(value);
+  }
+
+  return new Intl.NumberFormat("es-AR", {
+    maximumFractionDigits: 0,
+  }).format(numeric);
+}
+
 function formatPercentValue(value: string | number | null) {
   if (value == null) {
     return "-";
@@ -781,6 +995,11 @@ export function formatOperatorError(error: unknown) {
   if (error instanceof z.ZodError) {
     const statusIssue = error.issues.find((issue) => issue.path.at(-1) === "status");
     if (statusIssue) {
+      const issueText = statusIssue.message.toLowerCase();
+      if (issueText.includes("active") || issueText.includes("paused")) {
+        return 'No pude usar ese estado. Para Meta Ads usá "active" o "paused".';
+      }
+
       return 'No pude usar ese estado. Probá con "in_stock", "reserved", "sold" o "damaged".';
     }
 
@@ -862,6 +1081,69 @@ function buildPurchaseResolutionReply(prompt: PurchaseResolutionPromptPayload): 
   };
 }
 
+function buildMetaObjectResolutionOptionLabel(option: MetaObjectResolutionOption, index: number) {
+  return `${index + 1}. ${option.name || option.id} · ${option.effective_status || option.status || "-"} · ${option.id}`;
+}
+
+function buildMetaObjectResolutionReply(prompt: MetaObjectResolutionPromptPayload): OperatorMessageResult {
+  return {
+    kind: "reply",
+    text: [
+      `Encontré ${prompt.options.length} opciones para "${prompt.reference}".`,
+      ...prompt.options.map((option, index) => buildMetaObjectResolutionOptionLabel(option, index)),
+      "Elegí una.",
+    ].join("\n"),
+    buttons: prompt.options.slice(0, 5).map((option, index) => [
+      {
+        text: `${index + 1}. ${option.name || option.id}`,
+        callback_data: buildOperatorCallbackData("pick", `meta:${prompt.entity_kind}:${option.id}`),
+      },
+    ]),
+  };
+}
+
+function getMetaEntityLabel(entityKind: "campaign" | "ad_set" | "ad") {
+  switch (entityKind) {
+    case "campaign":
+      return "campaña";
+    case "ad_set":
+      return "ad set";
+    case "ad":
+      return "anuncio";
+  }
+}
+
+function getMetaEntityLabelPlural(entityKind: "campaign" | "ad_set" | "ad") {
+  switch (entityKind) {
+    case "campaign":
+      return "campañas";
+    case "ad_set":
+      return "ad sets";
+    case "ad":
+      return "anuncios";
+  }
+}
+
+function formatMetaBudget(value: string | number | null | undefined) {
+  if (value == null) {
+    return "-";
+  }
+
+  return formatNumber(value);
+}
+
+function formatMetaObjectLine(row: MetaObjectRow) {
+  const budget = row.daily_budget ?? row.lifetime_budget;
+  return [
+    `• ${row.name || row.id}`,
+    row.effective_status || row.status || "-",
+    budget != null ? `presupuesto ${formatMetaBudget(budget)}` : "",
+    `id ${row.id}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function findProductReferencePaths(
   value: unknown,
   reference: string,
@@ -915,6 +1197,34 @@ function findPurchaseReferencePaths(
     }
 
     return findPurchaseReferencePaths(nestedValue, reference, [...path, key]);
+  });
+}
+
+function findMetaReferencePaths(
+  value: unknown,
+  reference: string,
+  path: ProductResolutionPathPart[] = []
+): ProductResolutionPathPart[][] {
+  const normalizedReference = normalizeMatch(reference);
+
+  if (typeof value === "string" && normalizeMatch(value) === normalizedReference) {
+    return [path];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findMetaReferencePaths(item, reference, [...path, index]));
+  }
+
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    if (key !== "campaign_ref" && key !== "ad_set_ref" && key !== "ad_ref" && key !== "changes") {
+      return [];
+    }
+
+    return findMetaReferencePaths(nestedValue, reference, [...path, key]);
   });
 }
 
@@ -993,6 +1303,25 @@ function resolvePurchaseSelectionFromPrompt(text: string, prompt: PurchaseResolu
     (normalized === "new" || normalized === "crear compra nueva"
       ? prompt.options.find((option) => option.is_create_new)
       : null)
+  );
+}
+
+function resolveMetaObjectSelectionFromPrompt(text: string, prompt: MetaObjectResolutionPromptPayload) {
+  const normalized = normalizeMatch(text.replace(/^__pick_meta:/, "").replace(/__$/, ""));
+  if (!normalized) {
+    return null;
+  }
+
+  const ordinalIndex = extractOrdinalIndex(text);
+  if (ordinalIndex != null && ordinalIndex >= 0 && ordinalIndex < prompt.options.length) {
+    return prompt.options[ordinalIndex];
+  }
+
+  return (
+    prompt.options.find((option) => normalizeMatch(`${option.entity_kind} ${option.id}`) === normalized) ||
+    prompt.options.find((option) => normalizeMatch(option.id) === normalized) ||
+    prompt.options.find((option) => normalizeMatch(option.name || "") === normalized) ||
+    prompt.options.find((option) => normalizeMatch(option.name || "").includes(normalized))
   );
 }
 
@@ -1750,6 +2079,8 @@ const OPERATOR_SCHEMA_GUIDE = [
   "- public.inventory_purchases stores inbound stock purchases. Stable refs: id or purchase_number. Common editable fields: supplier_name, currency_code, total_amount, status, acquired_at, notes, metadata.",
   "- public.inventory_purchase_funders stores how a purchase was funded. Fields: funder_name, payment_method, amount_amount, currency_code, share_pct, notes.",
   "- stock_units can link directly to inventory_purchases through inventory_purchase_id.",
+  "- Meta Ads live reads come from the configured ad account and business. Read commands can list campaigns, ad sets, and ads by status or text query.",
+  "- Meta Ads write commands can only activate, pause, or change budget fields on campaigns/ad sets, and activate/pause ads. Those changes must always stay behind inline approval buttons.",
   "- public.settings stores key/value configuration. Stable ref: key. update_setting requires key and value. delete_setting removes the key.",
   "- public.customers stores operator and customer contacts. Stable refs: id, external_ref, phone, email. create_customer requires at least one of external_ref, phone, or email.",
   "- public.conversations stores thread headers by channel_thread_key. public.messages stores the actual interaction timeline. Each Telegram inbound and outbound message is saved in public.messages.",
@@ -1782,8 +2113,8 @@ function buildDraftPrompts(params: {
     "Convert the operator request into a strict JSON decision for the automation flow.",
     "Think in natural operator intents like listing, filtering, creating, editing, archiving, deleting, moving stock, or changing settings. Do not mention internal tool names in user-facing reply text.",
     "Return JSON only. No prose. No markdown.",
-    "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, get_product_details, list_stock, get_stock_details, list_settings, get_setting_details, list_customers, get_customer_details, list_orders, list_conversations, list_inventory_purchases, get_inventory_purchase_details.",
-    "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, delete_product, create_inventory_purchase, update_inventory_purchase, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
+    "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, get_product_details, list_stock, get_stock_details, list_settings, get_setting_details, list_customers, get_customer_details, list_orders, list_conversations, list_inventory_purchases, get_inventory_purchase_details, list_meta_campaigns, list_meta_ad_sets, list_meta_ads.",
+    "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, delete_product, create_inventory_purchase, update_inventory_purchase, update_meta_campaign, update_meta_ad_set, update_meta_ad, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
     "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
     "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
     "If the operator asks for a concrete mutation that can be prepared safely, prefer mode=write over mode=chat. Do not answer with an execution plan when the command layer can already prepare the action.",
@@ -1800,6 +2131,7 @@ function buildDraftPrompts(params: {
     "If the operator changes cost_usd, logistics_usd, usd_rate, or cuotas_qty on a product, the server will recalculate derived pricing fields from settings. You should frame the action as a repricing preview, not as a manual field edit list only.",
     "If the operator refers to the latest Telegram images for new stock or sold devices, prefer the image-based stock commands rather than requesting manual IMEIs.",
     "Normalize stock status wording like available/disponible to in_stock.",
+    "Normalize Meta Ads status wording like activa/activo to ACTIVE and pausada/pausado to PAUSED when preparing updates.",
     "When the user asks for lists by brand, price range, RAM, storage, sold date, acquisition date, location, stock status, or image presence, use the available filter fields instead of plain text only.",
     "For price and numeric values, use numbers, not strings, when possible.",
     "If the message is just a greeting like hey/hola, reply briefly in reply and use mode=chat.",
@@ -2107,6 +2439,197 @@ async function resolveInventoryPurchaseForOperator(purchaseRef: string) {
   return rows[0];
 }
 
+function mapMetaCampaignRow(row: MetaCampaignRecord): MetaObjectRow {
+  return {
+    id: row.id,
+    name: row.name ?? null,
+    status: row.status ?? null,
+    effective_status: row.effective_status ?? null,
+    entity_kind: "campaign",
+    objective: row.objective ?? null,
+    daily_budget: row.daily_budget ?? null,
+    lifetime_budget: row.lifetime_budget ?? null,
+    updated_time: row.updated_time ?? null,
+  };
+}
+
+function mapMetaAdSetRow(row: MetaAdSetRecord): MetaObjectRow {
+  return {
+    id: row.id,
+    name: row.name ?? null,
+    status: row.status ?? null,
+    effective_status: row.effective_status ?? null,
+    entity_kind: "ad_set",
+    campaign_id: row.campaign_id ?? null,
+    daily_budget: row.daily_budget ?? null,
+    lifetime_budget: row.lifetime_budget ?? null,
+    updated_time: row.updated_time ?? null,
+  };
+}
+
+function mapMetaAdRow(row: MetaAdRecord): MetaObjectRow {
+  return {
+    id: row.id,
+    name: row.name ?? null,
+    status: row.status ?? null,
+    effective_status: row.effective_status ?? null,
+    entity_kind: "ad",
+    campaign_id: row.campaign_id ?? null,
+    adset_id: row.adset_id ?? null,
+    updated_time: row.updated_time ?? null,
+  };
+}
+
+async function resolveMetaCampaign(campaignRef: string) {
+  const trimmed = campaignRef.trim();
+  const rowsMap = new Map<string, MetaObjectRow>();
+
+  if (/^\d+$/.test(trimmed)) {
+    try {
+      const direct = await getMetaCampaign(trimmed);
+      rowsMap.set(direct.id, mapMetaCampaignRow(direct));
+    } catch {
+      // Ignore direct lookup failure and fall back to filtered listing.
+    }
+  }
+
+  const rows = await listMetaCampaigns({ query: trimmed, limit: 100 });
+  for (const row of rows) {
+    rowsMap.set(row.id, mapMetaCampaignRow(row));
+  }
+
+  const options = Array.from(rowsMap.values());
+  if (options.length === 0) {
+    throw new Error(`No encontré una campaña para "${campaignRef}".`);
+  }
+
+  const normalizedReference = normalizeMatch(trimmed);
+  const exactRows = options.filter(
+    (row) => row.id === trimmed || normalizeMatch(row.name || "") === normalizedReference
+  );
+
+  if (exactRows.length === 1) {
+    return exactRows[0];
+  }
+
+  if (options.length > 1) {
+    throw new MetaObjectReferenceAmbiguityError(
+      campaignRef,
+      "campaign",
+      options.slice(0, 5).map((row) => ({
+        id: row.id,
+        name: row.name,
+        status: row.status,
+        effective_status: row.effective_status,
+        entity_kind: "campaign",
+      })),
+      []
+    );
+  }
+
+  return options[0];
+}
+
+async function resolveMetaAdSet(adSetRef: string) {
+  const trimmed = adSetRef.trim();
+  const rowsMap = new Map<string, MetaObjectRow>();
+
+  if (/^\d+$/.test(trimmed)) {
+    try {
+      const direct = await getMetaAdSet(trimmed);
+      rowsMap.set(direct.id, mapMetaAdSetRow(direct));
+    } catch {
+      // Ignore direct lookup failure and fall back to filtered listing.
+    }
+  }
+
+  const rows = await listMetaAdSets({ query: trimmed, limit: 100 });
+  for (const row of rows) {
+    rowsMap.set(row.id, mapMetaAdSetRow(row));
+  }
+
+  const options = Array.from(rowsMap.values());
+  if (options.length === 0) {
+    throw new Error(`No encontré un ad set para "${adSetRef}".`);
+  }
+
+  const normalizedReference = normalizeMatch(trimmed);
+  const exactRows = options.filter(
+    (row) => row.id === trimmed || normalizeMatch(row.name || "") === normalizedReference
+  );
+
+  if (exactRows.length === 1) {
+    return exactRows[0];
+  }
+
+  if (options.length > 1) {
+    throw new MetaObjectReferenceAmbiguityError(
+      adSetRef,
+      "ad_set",
+      options.slice(0, 5).map((row) => ({
+        id: row.id,
+        name: row.name,
+        status: row.status,
+        effective_status: row.effective_status,
+        entity_kind: "ad_set",
+      })),
+      []
+    );
+  }
+
+  return options[0];
+}
+
+async function resolveMetaAdEntity(adRef: string) {
+  const trimmed = adRef.trim();
+  const rowsMap = new Map<string, MetaObjectRow>();
+
+  if (/^\d+$/.test(trimmed)) {
+    try {
+      const direct = await getMetaAd(trimmed);
+      rowsMap.set(direct.id, mapMetaAdRow(direct));
+    } catch {
+      // Ignore direct lookup failure and fall back to filtered listing.
+    }
+  }
+
+  const rows = await listMetaAds({ query: trimmed, limit: 100 });
+  for (const row of rows) {
+    rowsMap.set(row.id, mapMetaAdRow(row));
+  }
+
+  const options = Array.from(rowsMap.values());
+  if (options.length === 0) {
+    throw new Error(`No encontré un anuncio para "${adRef}".`);
+  }
+
+  const normalizedReference = normalizeMatch(trimmed);
+  const exactRows = options.filter(
+    (row) => row.id === trimmed || normalizeMatch(row.name || "") === normalizedReference
+  );
+
+  if (exactRows.length === 1) {
+    return exactRows[0];
+  }
+
+  if (options.length > 1) {
+    throw new MetaObjectReferenceAmbiguityError(
+      adRef,
+      "ad",
+      options.slice(0, 5).map((row) => ({
+        id: row.id,
+        name: row.name,
+        status: row.status,
+        effective_status: row.effective_status,
+        entity_kind: "ad",
+      })),
+      []
+    );
+  }
+
+  return options[0];
+}
+
 async function getLatestPendingConfirmation(actor: ActorContext) {
   const rows = await query<{
     id: number;
@@ -2143,7 +2666,9 @@ async function getLatestResolutionPrompt(actor: ActorContext): Promise<Resolutio
           'product_resolution_prompt',
           'product_resolution_selected',
           'purchase_resolution_prompt',
-          'purchase_resolution_selected'
+          'purchase_resolution_selected',
+          'meta_object_resolution_prompt',
+          'meta_object_resolution_selected'
         )
       order by created_at desc, id desc
       limit 1
@@ -2157,63 +2682,63 @@ async function getLatestResolutionPrompt(actor: ActorContext): Promise<Resolutio
   }
 
   if (payload.kind === "product_resolution_prompt") {
-  if (
-    (payload.mode !== "read" && payload.mode !== "write") ||
-    typeof payload.command !== "string" ||
-    !isRecord(payload.params) ||
-    typeof payload.reference !== "string" ||
-    !Array.isArray(payload.reference_path) ||
-    !Array.isArray(payload.options)
-  ) {
-    return null;
-  }
+    if (
+      (payload.mode !== "read" && payload.mode !== "write") ||
+      typeof payload.command !== "string" ||
+      !isRecord(payload.params) ||
+      typeof payload.reference !== "string" ||
+      !Array.isArray(payload.reference_path) ||
+      !Array.isArray(payload.options)
+    ) {
+      return null;
+    }
 
-  const referencePath = payload.reference_path.filter(
-    (part): part is ProductResolutionPathPart => typeof part === "string" || typeof part === "number"
-  );
+    const referencePath = payload.reference_path.filter(
+      (part): part is ProductResolutionPathPart => typeof part === "string" || typeof part === "number"
+    );
 
-  const options = payload.options
-    .filter((option): option is ProductResolutionOption => {
-      return (
-        isRecord(option) &&
-        typeof option.id === "number" &&
-        typeof option.sku === "string" &&
-        typeof option.slug === "string" &&
-        typeof option.title === "string" &&
-        typeof option.currency_code === "string"
-      );
-    })
-    .map((option) => ({
-      id: option.id,
-      sku: option.sku,
-      slug: option.slug,
-      title: option.title,
-      price_amount:
-        option.price_amount == null || typeof option.price_amount === "string" || typeof option.price_amount === "number"
-          ? option.price_amount
-          : null,
-      promo_price_ars:
-        option.promo_price_ars == null ||
-        typeof option.promo_price_ars === "string" ||
-        typeof option.promo_price_ars === "number"
-          ? option.promo_price_ars
-          : null,
-      currency_code: option.currency_code,
-    }));
+    const options = payload.options
+      .filter((option): option is ProductResolutionOption => {
+        return (
+          isRecord(option) &&
+          typeof option.id === "number" &&
+          typeof option.sku === "string" &&
+          typeof option.slug === "string" &&
+          typeof option.title === "string" &&
+          typeof option.currency_code === "string"
+        );
+      })
+      .map((option) => ({
+        id: option.id,
+        sku: option.sku,
+        slug: option.slug,
+        title: option.title,
+        price_amount:
+          option.price_amount == null || typeof option.price_amount === "string" || typeof option.price_amount === "number"
+            ? option.price_amount
+            : null,
+        promo_price_ars:
+          option.promo_price_ars == null ||
+          typeof option.promo_price_ars === "string" ||
+          typeof option.promo_price_ars === "number"
+            ? option.promo_price_ars
+            : null,
+        currency_code: option.currency_code,
+      }));
 
-  if (referencePath.length === 0 || options.length === 0) {
-    return null;
-  }
+    if (referencePath.length === 0 || options.length === 0) {
+      return null;
+    }
 
-  return {
-    kind: "product_resolution_prompt",
-    mode: payload.mode,
-    command: payload.command as ReadCommandName | WriteCommandName,
-    params: payload.params,
-    reference: payload.reference,
-    reference_path: referencePath,
-    options,
-  };
+    return {
+      kind: "product_resolution_prompt",
+      mode: payload.mode,
+      command: payload.command as ReadCommandName | WriteCommandName,
+      params: payload.params,
+      reference: payload.reference,
+      reference_path: referencePath,
+      options,
+    };
   }
 
   if (payload.kind === "purchase_resolution_prompt") {
@@ -2266,6 +2791,58 @@ async function getLatestResolutionPrompt(actor: ActorContext): Promise<Resolutio
       params: payload.params,
       reference: payload.reference,
       reference_path: referencePath,
+      options,
+    };
+  }
+
+  if (payload.kind === "meta_object_resolution_prompt") {
+    if (
+      (payload.mode !== "read" && payload.mode !== "write") ||
+      typeof payload.command !== "string" ||
+      !isRecord(payload.params) ||
+      typeof payload.reference !== "string" ||
+      !Array.isArray(payload.reference_path) ||
+      !Array.isArray(payload.options) ||
+      (payload.entity_kind !== "campaign" && payload.entity_kind !== "ad_set" && payload.entity_kind !== "ad")
+    ) {
+      return null;
+    }
+
+    const referencePath = payload.reference_path.filter(
+      (part): part is ProductResolutionPathPart => typeof part === "string" || typeof part === "number"
+    );
+
+    const options = payload.options
+      .filter((option): option is MetaObjectResolutionOption => {
+        return (
+          isRecord(option) &&
+          typeof option.id === "string" &&
+          (typeof option.name === "string" || option.name == null) &&
+          (typeof option.status === "string" || option.status == null) &&
+          (typeof option.effective_status === "string" || option.effective_status == null) &&
+          (option.entity_kind === "campaign" || option.entity_kind === "ad_set" || option.entity_kind === "ad")
+        );
+      })
+      .map((option) => ({
+        id: option.id,
+        name: option.name ?? null,
+        status: option.status ?? null,
+        effective_status: option.effective_status ?? null,
+        entity_kind: option.entity_kind,
+      }));
+
+    if (referencePath.length === 0 || options.length === 0) {
+      return null;
+    }
+
+    return {
+      kind: "meta_object_resolution_prompt",
+      mode: payload.mode,
+      command: payload.command as ReadCommandName | WriteCommandName,
+      params: payload.params,
+      reference: payload.reference,
+      reference_path: referencePath,
+      entity_kind: payload.entity_kind,
       options,
     };
   }
@@ -2872,6 +3449,72 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
 
       return formatRecordDump(`Fila completa de compra ${detail.purchase_number}:`, detail as Record<string, unknown>);
     }
+    case "list_meta_campaigns": {
+      const parsed = listMetaCampaignsSchema.parse(params);
+      const limit = parsed.all ? 100 : parsed.limit ?? 24;
+      const rows = await listMetaCampaigns({
+        query: parsed.query,
+        status: parsed.status,
+        limit,
+      });
+
+      if (rows.length === 0) {
+        return "No encontré campañas Meta con ese criterio.";
+      }
+
+      const filters = [parsed.query ? `texto=${parsed.query}` : "", parsed.status ? `estado=${parsed.status}` : ""]
+        .filter(Boolean)
+        .join(" · ");
+
+      return [
+        `${getMetaEntityLabelPlural("campaign")} Meta${filters ? ` (${filters})` : ""} · ${rows.length}`,
+        ...rows.map((row) => formatMetaObjectLine(mapMetaCampaignRow(row))),
+      ].join("\n");
+    }
+    case "list_meta_ad_sets": {
+      const parsed = listMetaAdSetsSchema.parse(params);
+      const limit = parsed.all ? 100 : parsed.limit ?? 24;
+      const rows = await listMetaAdSets({
+        query: parsed.query,
+        status: parsed.status,
+        limit,
+      });
+
+      if (rows.length === 0) {
+        return "No encontré ad sets Meta con ese criterio.";
+      }
+
+      const filters = [parsed.query ? `texto=${parsed.query}` : "", parsed.status ? `estado=${parsed.status}` : ""]
+        .filter(Boolean)
+        .join(" · ");
+
+      return [
+        `${getMetaEntityLabelPlural("ad_set")} Meta${filters ? ` (${filters})` : ""} · ${rows.length}`,
+        ...rows.map((row) => formatMetaObjectLine(mapMetaAdSetRow(row))),
+      ].join("\n");
+    }
+    case "list_meta_ads": {
+      const parsed = listMetaAdsSchema.parse(params);
+      const limit = parsed.all ? 100 : parsed.limit ?? 24;
+      const rows = await listMetaAds({
+        query: parsed.query,
+        status: parsed.status,
+        limit,
+      });
+
+      if (rows.length === 0) {
+        return "No encontré anuncios Meta con ese criterio.";
+      }
+
+      const filters = [parsed.query ? `texto=${parsed.query}` : "", parsed.status ? `estado=${parsed.status}` : ""]
+        .filter(Boolean)
+        .join(" · ");
+
+      return [
+        `${getMetaEntityLabelPlural("ad")} Meta${filters ? ` (${filters})` : ""} · ${rows.length}`,
+        ...rows.map((row) => formatMetaObjectLine(mapMetaAdRow(row))),
+      ].join("\n");
+    }
     case "list_conversations": {
       const parsed = listConversationsSchema.parse(params);
       const limit = parsed.all ? 200 : parsed.limit ?? 36;
@@ -3180,6 +3823,93 @@ async function prepareWriteCommand(
           purchase_id: purchase.id,
           purchase_number: purchase.purchase_number,
           changes: nextChanges,
+        },
+      };
+    }
+    case "update_meta_campaign": {
+      const parsed = updateMetaCampaignSchema.parse(rawParams);
+      const campaign = await resolveMetaCampaign(parsed.campaign_ref);
+
+      return {
+        command,
+        summary: [
+          "Actualizar campaña Meta",
+          `• ${campaign.name || campaign.id}`,
+          `• ID: ${campaign.id}`,
+          campaign.effective_status || campaign.status ? `• Estado actual: ${campaign.effective_status || campaign.status}` : "",
+          parsed.changes.status ? `• Nuevo estado: ${parsed.changes.status}` : "",
+          parsed.changes.daily_budget != null ? `• Presupuesto diario: ${formatMetaBudget(parsed.changes.daily_budget)}` : "",
+          parsed.changes.lifetime_budget != null
+            ? `• Presupuesto vitalicio: ${formatMetaBudget(parsed.changes.lifetime_budget)}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        payload: {
+          campaign_id: campaign.id,
+          name: campaign.name,
+          current_status: campaign.effective_status || campaign.status,
+          current_daily_budget: campaign.daily_budget ?? null,
+          current_lifetime_budget: campaign.lifetime_budget ?? null,
+          changes: parsed.changes,
+        },
+      };
+    }
+    case "update_meta_ad_set": {
+      const parsed = updateMetaAdSetSchema.parse(rawParams);
+      const adSet = await resolveMetaAdSet(parsed.ad_set_ref);
+
+      return {
+        command,
+        summary: [
+          "Actualizar ad set Meta",
+          `• ${adSet.name || adSet.id}`,
+          `• ID: ${adSet.id}`,
+          adSet.campaign_id ? `• Campaign ID: ${adSet.campaign_id}` : "",
+          adSet.effective_status || adSet.status ? `• Estado actual: ${adSet.effective_status || adSet.status}` : "",
+          parsed.changes.status ? `• Nuevo estado: ${parsed.changes.status}` : "",
+          parsed.changes.daily_budget != null ? `• Presupuesto diario: ${formatMetaBudget(parsed.changes.daily_budget)}` : "",
+          parsed.changes.lifetime_budget != null
+            ? `• Presupuesto vitalicio: ${formatMetaBudget(parsed.changes.lifetime_budget)}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        payload: {
+          ad_set_id: adSet.id,
+          name: adSet.name,
+          campaign_id: adSet.campaign_id ?? null,
+          current_status: adSet.effective_status || adSet.status,
+          current_daily_budget: adSet.daily_budget ?? null,
+          current_lifetime_budget: adSet.lifetime_budget ?? null,
+          changes: parsed.changes,
+        },
+      };
+    }
+    case "update_meta_ad": {
+      const parsed = updateMetaAdSchema.parse(rawParams);
+      const ad = await resolveMetaAdEntity(parsed.ad_ref);
+
+      return {
+        command,
+        summary: [
+          "Actualizar anuncio Meta",
+          `• ${ad.name || ad.id}`,
+          `• ID: ${ad.id}`,
+          ad.campaign_id ? `• Campaign ID: ${ad.campaign_id}` : "",
+          ad.adset_id ? `• Ad set ID: ${ad.adset_id}` : "",
+          ad.effective_status || ad.status ? `• Estado actual: ${ad.effective_status || ad.status}` : "",
+          parsed.changes.status ? `• Nuevo estado: ${parsed.changes.status}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        payload: {
+          ad_id: ad.id,
+          name: ad.name,
+          campaign_id: ad.campaign_id ?? null,
+          adset_id: ad.adset_id ?? null,
+          current_status: ad.effective_status || ad.status,
+          changes: parsed.changes,
         },
       };
     }
@@ -3835,6 +4565,83 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
         title: parsed.title,
       });
       return `Producto borrado.\n• ID: ${parsed.product_id}\n• SKU: ${parsed.sku}`;
+    }
+    case "update_meta_campaign": {
+      const parsed = z
+        .object({
+          campaign_id: z.string().trim().min(1),
+          name: z.string().nullable().optional(),
+          current_status: z.string().nullable().optional(),
+          current_daily_budget: z.union([z.string(), z.number()]).nullable().optional(),
+          current_lifetime_budget: z.union([z.string(), z.number()]).nullable().optional(),
+          changes: updateMetaCampaignSchema.shape.changes,
+        })
+        .parse(payload);
+
+      const result = await updateMetaCampaign(parsed.campaign_id, parsed.changes);
+      await writeAudit(client, actor, "telegram.meta.campaign.updated", "meta_campaign", parsed.campaign_id, parsed.changes);
+      return [
+        "Campaña actualizada.",
+        `• ${result.name || parsed.name || parsed.campaign_id}`,
+        `• ID: ${result.id}`,
+        `• Estado: ${result.effective_status || result.status || "-"}`,
+        result.daily_budget != null ? `• Presupuesto diario: ${formatMetaBudget(result.daily_budget)}` : "",
+        result.lifetime_budget != null ? `• Presupuesto vitalicio: ${formatMetaBudget(result.lifetime_budget)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    case "update_meta_ad_set": {
+      const parsed = z
+        .object({
+          ad_set_id: z.string().trim().min(1),
+          name: z.string().nullable().optional(),
+          campaign_id: z.string().nullable().optional(),
+          current_status: z.string().nullable().optional(),
+          current_daily_budget: z.union([z.string(), z.number()]).nullable().optional(),
+          current_lifetime_budget: z.union([z.string(), z.number()]).nullable().optional(),
+          changes: updateMetaAdSetSchema.shape.changes,
+        })
+        .parse(payload);
+
+      const result = await updateMetaAdSet(parsed.ad_set_id, parsed.changes);
+      await writeAudit(client, actor, "telegram.meta.ad_set.updated", "meta_ad_set", parsed.ad_set_id, parsed.changes);
+      return [
+        "Ad set actualizado.",
+        `• ${result.name || parsed.name || parsed.ad_set_id}`,
+        `• ID: ${result.id}`,
+        result.campaign_id ? `• Campaign ID: ${result.campaign_id}` : "",
+        `• Estado: ${result.effective_status || result.status || "-"}`,
+        result.daily_budget != null ? `• Presupuesto diario: ${formatMetaBudget(result.daily_budget)}` : "",
+        result.lifetime_budget != null ? `• Presupuesto vitalicio: ${formatMetaBudget(result.lifetime_budget)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    case "update_meta_ad": {
+      const parsed = z
+        .object({
+          ad_id: z.string().trim().min(1),
+          name: z.string().nullable().optional(),
+          campaign_id: z.string().nullable().optional(),
+          adset_id: z.string().nullable().optional(),
+          current_status: z.string().nullable().optional(),
+          changes: updateMetaAdSchema.shape.changes,
+        })
+        .parse(payload);
+
+      const result = await updateMetaAd(parsed.ad_id, parsed.changes);
+      await writeAudit(client, actor, "telegram.meta.ad.updated", "meta_ad", parsed.ad_id, parsed.changes);
+      return [
+        "Anuncio actualizado.",
+        `• ${result.name || parsed.name || parsed.ad_id}`,
+        `• ID: ${result.id}`,
+        result.campaign_id ? `• Campaign ID: ${result.campaign_id}` : "",
+        result.adset_id ? `• Ad set ID: ${result.adset_id}` : "",
+        `• Estado: ${result.effective_status || result.status || "-"}`,
+      ]
+        .filter(Boolean)
+        .join("\n");
     }
     case "create_inventory_purchase": {
       const parsed = createInventoryPurchaseSchema.parse(payload);
@@ -4554,6 +5361,184 @@ function parseExplicitDetailCommand(text: string): { command: ReadCommandName; p
   return { command, params: { [paramKey]: ref } };
 }
 
+function parseLooseLocaleNumber(value: string) {
+  const trimmed = value.replace(/[^\d,.-]/g, "").trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized =
+    trimmed.includes(",") && trimmed.includes(".")
+      ? trimmed.replace(/\./g, "").replace(",", ".")
+      : trimmed.includes(",")
+        ? trimmed.replace(",", ".")
+        : trimmed;
+
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function cleanMetaReferenceText(value: string) {
+  return value
+    .replace(/^[\s:,-]+/, "")
+    .replace(/\b(?:la|el|los|las|de|del|al|para|en)\b/gi, " ")
+    .replace(/\b(?:a|en|por)\b\s*$/i, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseMetaStatusFilter(text: string) {
+  if (/\b(active|activo|activa|activos|activas)\b/i.test(text)) return "active";
+  if (/\b(paused|pausado|pausada|pausados|pausadas)\b/i.test(text)) return "paused";
+  if (/\b(archived|archivado|archivada)\b/i.test(text)) return "archived";
+  if (/\b(deleted|borrado|eliminado)\b/i.test(text)) return "deleted";
+  return undefined;
+}
+
+function stripMetaReadNoise(text: string, entityPattern: RegExp, status?: string) {
+  let next = text;
+  next = next.replace(/\b(?:mostrame|mostra|mostrar|mostrame|ver|dame|decime|quiero ver|listame|lista|listá|mostra me)\b/gi, " ");
+  next = next.replace(entityPattern, " ");
+  if (status) {
+    const statusPattern =
+      status === "active"
+        ? /\b(active|activo|activa|activos|activas)\b/gi
+        : status === "paused"
+          ? /\b(paused|pausado|pausada|pausados|pausadas)\b/gi
+          : status === "archived"
+            ? /\b(archived|archivado|archivada)\b/gi
+            : /\b(deleted|borrado|eliminado)\b/gi;
+    next = next.replace(statusPattern, " ");
+  }
+
+  next = next.replace(/\b(?:de|del|la|el|los|las)\b/gi, " ");
+  next = next.replace(/\s+/g, " ").trim();
+  return next || undefined;
+}
+
+function parseQuickMetaDraft(text: string): Draft | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const entityDefinitions = [
+    {
+      entityKind: "campaign" as const,
+      readCommand: "list_meta_campaigns" as const,
+      writeCommand: "update_meta_campaign" as const,
+      refKey: "campaign_ref" as const,
+      nounPattern: /\b(campa(?:ñ|n)as?|campaigns?)\b/i,
+      budgetAllowed: true,
+    },
+    {
+      entityKind: "ad_set" as const,
+      readCommand: "list_meta_ad_sets" as const,
+      writeCommand: "update_meta_ad_set" as const,
+      refKey: "ad_set_ref" as const,
+      nounPattern: /\b(ad sets?|adsets?|conjuntos?)\b/i,
+      budgetAllowed: true,
+    },
+    {
+      entityKind: "ad" as const,
+      readCommand: "list_meta_ads" as const,
+      writeCommand: "update_meta_ad" as const,
+      refKey: "ad_ref" as const,
+      nounPattern: /\b(ads?|anuncios?)\b/i,
+      budgetAllowed: false,
+    },
+  ];
+
+  for (const definition of entityDefinitions) {
+    if (!definition.nounPattern.test(trimmed)) {
+      continue;
+    }
+
+    const readStatus = parseMetaStatusFilter(trimmed);
+    const wantsRead =
+      /\b(?:mostrame|mostra|mostrar|ver|dame|decime|listame|lista|listá)\b/i.test(trimmed) ||
+      (Boolean(readStatus) && !/\b(?:paus[aá]|pausa|deten[eé]|par[aá]|stop|activ[aá]|activa|activar|habilit[aá]|habilita|reanuda|encend[eé]|presupuesto)\b/i.test(trimmed));
+
+    if (wantsRead) {
+      const status = readStatus;
+      const query = stripMetaReadNoise(trimmed, definition.nounPattern, status);
+      return {
+        mode: "read",
+        command: definition.readCommand,
+        params: {
+          ...(status ? { status } : {}),
+          ...(query ? { query } : {}),
+          limit: 24,
+        },
+      };
+    }
+
+    const nextStatus = /\b(?:paus[aá]|pausa|deten[eé]|par[aá]|stop)\b/i.test(trimmed)
+      ? "PAUSED"
+      : /\b(?:activ[aá]|activa|activar|habilit[aá]|habilita|reanuda|encend[eé])\b/i.test(trimmed)
+        ? "ACTIVE"
+        : null;
+
+    if (nextStatus) {
+      const entityMatch = trimmed.match(definition.nounPattern);
+      const reference = cleanMetaReferenceText(trimmed.slice((entityMatch?.index ?? 0) + (entityMatch?.[0].length ?? 0)));
+      if (!reference) {
+        return {
+          mode: "clarify",
+          reply: `Decime qué ${getMetaEntityLabel(definition.entityKind)} querés ${nextStatus === "PAUSED" ? "pausar" : "activar"}.`,
+        };
+      }
+
+      return {
+        mode: "write",
+        command: definition.writeCommand,
+        params: {
+          [definition.refKey]: reference,
+          changes: { status: nextStatus },
+        },
+      };
+    }
+
+    if (definition.budgetAllowed && /\bpresupuesto\b/i.test(trimmed)) {
+      const amountMatches = [...trimmed.matchAll(/[$]?\s*([0-9][0-9.,]*)/g)];
+      const amountMatch = amountMatches.at(-1);
+      const amount = amountMatch ? parseLooseLocaleNumber(amountMatch[1]) : null;
+      const entityMatch = trimmed.match(definition.nounPattern);
+
+      if (!amountMatch || amount == null || !entityMatch) {
+        return {
+          mode: "clarify",
+          reply: `Pasame el ${getMetaEntityLabel(definition.entityKind)} y el presupuesto nuevo.`,
+        };
+      }
+
+      const reference = cleanMetaReferenceText(
+        trimmed.slice((entityMatch.index ?? 0) + entityMatch[0].length, amountMatch.index ?? trimmed.length)
+      );
+      if (!reference) {
+        return {
+          mode: "clarify",
+          reply: `Decime qué ${getMetaEntityLabel(definition.entityKind)} querés actualizar.`,
+        };
+      }
+
+      const budgetKey =
+        /\b(vitalicio|lifetime|por vida|total)\b/i.test(trimmed) ? "lifetime_budget" : "daily_budget";
+
+      return {
+        mode: "write",
+        command: definition.writeCommand,
+        params: {
+          [definition.refKey]: reference,
+          changes: { [budgetKey]: amount },
+        },
+      };
+    }
+  }
+
+  return null;
+}
+
 function parseQuickReadCommand(text: string): { command: ReadCommandName; params: Record<string, unknown> } | null {
   const trimmed = text.trim().toLowerCase();
 
@@ -4685,47 +5670,70 @@ async function tryResumePendingResolution(actor: ActorContext): Promise<Operator
     return resolveTelegramOperatorDraft(actor, resumedDraft);
   }
 
-  const selected = resolvePurchaseSelectionFromPrompt(actor.userMessage, prompt);
+  if (prompt.kind === "purchase_resolution_prompt") {
+    const selected = resolvePurchaseSelectionFromPrompt(actor.userMessage, prompt);
+    if (!selected) {
+      return null;
+    }
+
+    await saveOperatorEventMessage(
+      actor,
+      selected.is_create_new ? "Compra nueva seleccionada" : `Compra resuelta: ${selected.purchase_number}`,
+      {
+        kind: "purchase_resolution_selected",
+        reference: prompt.reference,
+        purchase_number: selected.purchase_number,
+        is_create_new: Boolean(selected.is_create_new),
+      }
+    );
+
+    if (selected.is_create_new) {
+      if (prompt.command === "create_stock_from_images") {
+        const resumedDraft: Draft = {
+          mode: "write",
+          command: "create_inventory_purchase_from_images",
+          params: {
+            ...prompt.params,
+            status: "draft",
+          },
+        };
+        return resolveTelegramOperatorDraft(actor, resumedDraft);
+      }
+
+      return {
+        kind: "reply",
+        text:
+          "Perfecto. Para esa carga primero necesito una compra nueva. Podés responder algo como: “creá compra nueva total 5000 USD, Fran 50% cash y Agus 50% crypto” o usar la opción de compra + stock desde fotos.",
+        forceReply: true,
+      };
+    }
+
+    const resumedDraft: Draft = {
+      mode: prompt.mode,
+      command: prompt.command,
+      params: setValueAtPath(prompt.params, prompt.reference_path, selected.purchase_number),
+    };
+
+    return resolveTelegramOperatorDraft(actor, resumedDraft);
+  }
+
+  const selected = resolveMetaObjectSelectionFromPrompt(actor.userMessage, prompt);
   if (!selected) {
     return null;
   }
 
-  await saveOperatorEventMessage(
-    actor,
-    selected.is_create_new ? "Compra nueva seleccionada" : `Compra resuelta: ${selected.purchase_number}`,
-    {
-      kind: "purchase_resolution_selected",
-      reference: prompt.reference,
-      purchase_number: selected.purchase_number,
-      is_create_new: Boolean(selected.is_create_new),
-    }
-  );
-
-  if (selected.is_create_new) {
-    if (prompt.command === "create_stock_from_images") {
-      const resumedDraft: Draft = {
-        mode: "write",
-        command: "create_inventory_purchase_from_images",
-        params: {
-          ...prompt.params,
-          status: "draft",
-        },
-      };
-      return resolveTelegramOperatorDraft(actor, resumedDraft);
-    }
-
-    return {
-      kind: "reply",
-      text:
-        "Perfecto. Para esa carga primero necesito una compra nueva. Podés responder algo como: “creá compra nueva total 5000 USD, Fran 50% cash y Agus 50% crypto” o usar la opción de compra + stock desde fotos.",
-      forceReply: true,
-    };
-  }
+  await saveOperatorEventMessage(actor, `${getMetaEntityLabel(prompt.entity_kind)} resuelto: ${selected.id}`, {
+    kind: "meta_object_resolution_selected",
+    reference: prompt.reference,
+    entity_kind: prompt.entity_kind,
+    entity_id: selected.id,
+    name: selected.name,
+  });
 
   const resumedDraft: Draft = {
     mode: prompt.mode,
     command: prompt.command,
-    params: setValueAtPath(prompt.params, prompt.reference_path, selected.purchase_number),
+    params: setValueAtPath(prompt.params, prompt.reference_path, selected.id),
   };
 
   return resolveTelegramOperatorDraft(actor, resumedDraft);
@@ -4812,6 +5820,23 @@ export async function startTelegramOperatorTurn(actor: ActorContext): Promise<Op
   const quickCommand = parseQuickReadCommand(actor.userMessage);
   if (quickCommand) {
     return { kind: "reply", text: await executeReadCommand(quickCommand.command, quickCommand.params) };
+  }
+
+  const quickMetaDraft = parseQuickMetaDraft(actor.userMessage);
+  if (quickMetaDraft) {
+    const result = await resolveTelegramOperatorDraft(actor, quickMetaDraft);
+    if (result.kind === "reply") {
+      return result;
+    }
+
+    return {
+      kind: "reply",
+      text: await generateChatReply({
+        systemPrompt: result.systemPrompt,
+        prompt: result.prompt,
+        imageBase64: actor.imageBase64,
+      }),
+    };
   }
 
   const snapshot = await buildOperatorSnapshot();
@@ -4947,6 +5972,35 @@ export async function resolveTelegramOperatorDraft(
       if (promptPayload) {
         await saveOperatorEventMessage(actor, `Resolución pendiente para compra: ${error.reference}`, promptPayload);
         return buildPurchaseResolutionReply(promptPayload);
+      }
+    }
+
+    if (error instanceof MetaObjectReferenceAmbiguityError) {
+      const referencePath =
+        error.referencePath.length > 0
+          ? error.referencePath
+          : findMetaReferencePaths(params, error.reference)[0] ?? [];
+      const promptPayload: MetaObjectResolutionPromptPayload | null =
+        referencePath.length > 0
+          ? {
+              kind: "meta_object_resolution_prompt",
+              mode: draft.mode,
+              command: draft.command as ReadCommandName | WriteCommandName,
+              params,
+              reference: error.reference,
+              reference_path: referencePath,
+              entity_kind: error.entityKind,
+              options: error.options,
+            }
+          : null;
+
+      if (promptPayload) {
+        await saveOperatorEventMessage(
+          actor,
+          `Resolución pendiente para ${getMetaEntityLabel(error.entityKind)}: ${error.reference}`,
+          promptPayload
+        );
+        return buildMetaObjectResolutionReply(promptPayload);
       }
     }
 

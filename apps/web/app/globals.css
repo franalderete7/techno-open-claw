@@ -2403,6 +2403,43 @@ nav a:hover {
   color: var(--soft-text);
 }
 
+.ads-fold {
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.ads-fold-summary {
+  align-items: flex-start;
+}
+
+.ads-fold-heading {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ads-fold-title {
+  color: var(--text);
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.ads-fold-copy {
+  color: var(--soft-text);
+  font-size: 0.82rem;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.ads-summary-chips {
+  justify-content: flex-end;
+}
+
+.ads-fold-body {
+  margin-top: 14px;
+}
+
 .quick-search-panel {
   gap: 16px;
 }
