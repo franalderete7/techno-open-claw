@@ -25,6 +25,7 @@ import {
 } from "./telegram.js";
 import {
   createInventoryPurchase,
+  inventoryPurchaseFunderValues,
   getInventoryPurchaseDetail,
   inventoryPurchaseStatusValues,
   listInventoryPurchases,
@@ -44,6 +45,10 @@ const messageTypeValues = ["text", "audio", "image", "video", "file", "event"] a
 const orderStatusValues = ["draft", "pending", "paid", "cancelled", "fulfilled"] as const;
 const orderSourceValues = ["manual", "telegram", "whatsapp", "web", "api"] as const;
 const actorTypeValues = ["system", "agent", "admin", "customer", "tool"] as const;
+const inventoryFunderNameSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
+  z.enum(inventoryPurchaseFunderValues)
+);
 
 const jsonValueSchema: z.ZodTypeAny = z.lazy(() =>
   z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema)])
@@ -308,6 +313,7 @@ app.register(async (protectedApp) => {
       "select count(*)::text as count from public.conversations where status = 'open'"
     );
     const [orders] = await query<{ count: string }>("select count(*)::text as count from public.orders");
+    const [inventoryPurchases] = await query<{ count: string }>("select count(*)::text as count from public.inventory_purchases");
 
     return {
       products: Number(products?.count ?? 0),
@@ -315,6 +321,7 @@ app.register(async (protectedApp) => {
       customers: Number(customers?.count ?? 0),
       openConversations: Number(openConversations?.count ?? 0),
       orders: Number(orders?.count ?? 0),
+      inventoryPurchases: Number(inventoryPurchases?.count ?? 0),
     };
   });
 
@@ -1115,7 +1122,7 @@ app.register(async (protectedApp) => {
 
   protectedApp.post("/v1/inventory-purchases", async (request, reply) => {
     const funderSchema = z.object({
-      funder_name: z.string().trim().min(1),
+      funder_name: inventoryFunderNameSchema,
       payment_method: z.string().trim().nullable().optional(),
       amount_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
       currency_code: z.string().trim().min(1).nullable().optional(),
@@ -1148,7 +1155,7 @@ app.register(async (protectedApp) => {
       purchaseId: z.coerce.number().int().positive(),
     });
     const funderSchema = z.object({
-      funder_name: z.string().trim().min(1),
+      funder_name: inventoryFunderNameSchema,
       payment_method: z.string().trim().nullable().optional(),
       amount_amount: z.coerce.number().finite().nonnegative().nullable().optional(),
       currency_code: z.string().trim().min(1).nullable().optional(),

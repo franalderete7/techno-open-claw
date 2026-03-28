@@ -106,6 +106,10 @@ export default async function HomePage() {
             <span className="stat-label">Orders</span>
             <strong className="stat-value">{dashboard.orders}</strong>
           </article>
+          <article className="stat-card">
+            <span className="stat-label">Purchases</span>
+            <strong className="stat-value">{dashboard.inventoryPurchases}</strong>
+          </article>
         </section>
       ) : null}
 

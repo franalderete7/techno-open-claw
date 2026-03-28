@@ -30,6 +30,7 @@ function buildStockFields(unit: StockRecord): FieldRow[] {
   return [
     { label: "id", value: String(unit.id), mono: true },
     { label: "product_id", value: String(unit.product_id), mono: true },
+    { label: "inventory_purchase_id", value: String(unit.inventory_purchase_id), mono: true },
     { label: "sku", value: unit.sku, mono: true },
     { label: "serial_number", value: formatNullable(unit.serial_number), mono: true },
     { label: "imei_1", value: formatNullable(unit.imei_1), mono: true },
@@ -133,6 +134,7 @@ export function StockExplorer({ items }: StockExplorerProps) {
 
               <div className="chip-row">
                 <span className="chip accent mono">{unit.sku}</span>
+                <span className="chip mono">Purchase #{unit.inventory_purchase_id}</span>
                 {unit.serial_number ? <span className="chip mono">{unit.serial_number}</span> : null}
                 {unit.imei_1 ? <span className="chip mono">IMEI1 {unit.imei_1}</span> : null}
                 {unit.imei_2 ? <span className="chip mono">IMEI2 {unit.imei_2}</span> : null}

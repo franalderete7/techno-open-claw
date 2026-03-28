@@ -2168,6 +2168,161 @@ nav a:hover {
   grid-template-columns: 1fr;
 }
 
+.purchase-list {
+  display: grid;
+  gap: 16px;
+}
+
+.purchase-card {
+  gap: 16px;
+}
+
+.purchase-insights-panel {
+  gap: 18px;
+}
+
+.purchase-toolbar-row {
+  display: grid;
+  gap: 14px;
+}
+
+.purchase-toolbar-inputs {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.toolbar-control {
+  display: grid;
+  gap: 6px;
+}
+
+.toolbar-control span {
+  color: var(--soft-text);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.toolbar-control select,
+.toolbar-control input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 0.5px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.toolbar-control select:focus,
+.toolbar-control input:focus {
+  border-color: rgba(191, 111, 77, 0.4);
+  box-shadow: 0 0 0 4px rgba(191, 111, 77, 0.08);
+}
+
+.purchase-profit-stats {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.profit-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.legend-chip::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.legend-aldegol {
+  color: #bf6f4d;
+}
+
+.legend-chueco {
+  color: #4f7f42;
+}
+
+.profit-chart {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+  align-items: end;
+}
+
+.profit-bar-group {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.profit-bar-shell {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  width: 100%;
+  min-height: 170px;
+  padding: 12px 6px 0;
+  border: 0.5px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.6));
+}
+
+.profit-bar-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 42px;
+  min-height: 8px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 0.5px rgba(52, 30, 18, 0.06);
+}
+
+.profit-bar-stack.is-negative {
+  opacity: 0.78;
+}
+
+.profit-segment {
+  width: 100%;
+}
+
+.profit-segment-aldegol {
+  background: linear-gradient(180deg, rgba(191, 111, 77, 0.92), rgba(191, 111, 77, 0.7));
+}
+
+.profit-segment-chueco {
+  background: linear-gradient(180deg, rgba(107, 153, 90, 0.92), rgba(107, 153, 90, 0.72));
+}
+
+.profit-bar-value {
+  font-size: 0.86rem;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.profit-bar-label {
+  color: var(--soft-text);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.purchase-stock-details {
+  display: grid;
+  gap: 14px;
+}
+
+.purchase-stock-table {
+  margin-top: 2px;
+}
+
 .record-card {
   display: grid;
   gap: 14px;

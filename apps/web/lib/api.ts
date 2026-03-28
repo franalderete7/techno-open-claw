@@ -52,6 +52,7 @@ export type DashboardResponse = {
   customers: number;
   openConversations: number;
   orders: number;
+  inventoryPurchases: number;
 };
 
 export type ListResponse<T> = {
@@ -108,6 +109,7 @@ export type StockRecord = {
   serial_number: string | null;
   imei_1: string | null;
   imei_2: string | null;
+  inventory_purchase_id: number;
   color: string | null;
   battery_health: number | null;
   status: string;
@@ -122,6 +124,85 @@ export type StockRecord = {
   brand: string;
   model: string;
   title: string;
+};
+
+export type InventoryPurchaseFunderRecord = {
+  id: number;
+  funder_name: string;
+  payment_method: string | null;
+  amount_amount: number | null;
+  currency_code: string;
+  share_pct: number | null;
+  notes?: string | null;
+};
+
+export type InventoryPurchaseListRecord = {
+  id: number;
+  purchase_number: string;
+  supplier_name: string | null;
+  currency_code: string;
+  total_amount: number | null;
+  status: string;
+  acquired_at: string | null;
+  created_at: string;
+  funders: InventoryPurchaseFunderRecord[];
+  funders_count: number;
+  stock_units_count: number;
+  stock_units_in_stock: number;
+  stock_units_sold: number;
+};
+
+export type InventoryPurchaseStockUnitRecord = {
+  id: number;
+  product_id: number;
+  serial_number: string | null;
+  imei_1: string | null;
+  imei_2: string | null;
+  color: string | null;
+  battery_health: number | null;
+  status: string;
+  location_code: string | null;
+  cost_amount: number | null;
+  currency_code: string;
+  acquired_at: string | null;
+  sold_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  sku: string;
+  slug: string;
+  brand: string;
+  model: string;
+  title: string;
+  sold_order_id: number | null;
+  sold_order_number: string | null;
+  sale_currency_code: string | null;
+  sale_amount: number | null;
+  sale_recorded_at: string | null;
+  usd_rate_used: number;
+  revenue_amount_ars: number | null;
+  cost_amount_ars: number | null;
+  profit_amount_ars: number | null;
+};
+
+export type InventoryPurchaseDetailRecord = {
+  id: number;
+  purchase_number: string;
+  supplier_name: string | null;
+  currency_code: string;
+  total_amount: number | null;
+  status: string;
+  acquired_at: string | null;
+  notes: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  default_usd_rate: number;
+  funders: InventoryPurchaseFunderRecord[];
+  stock_units_total: number;
+  stock_units_in_stock: number;
+  stock_units_sold: number;
+  stock_units: InventoryPurchaseStockUnitRecord[];
 };
 
 export type CustomerRecord = {
@@ -352,6 +433,22 @@ export async function getStock(limit = 50) {
 
 export async function getOrders(limit = 50) {
   return apiFetch<ListResponse<OrderRecord>>(`/v1/orders?limit=${limit}`);
+}
+
+export async function getInventoryPurchases(limit = 50, options?: { q?: string; status?: string }) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (options?.q) {
+    params.set("q", options.q);
+  }
+  if (options?.status) {
+    params.set("status", options.status);
+  }
+
+  return apiFetch<ListResponse<InventoryPurchaseListRecord>>(`/v1/inventory-purchases?${params.toString()}`);
+}
+
+export async function getInventoryPurchaseDetail(purchaseId: number) {
+  return apiFetch<InventoryPurchaseDetailRecord>(`/v1/inventory-purchases/${purchaseId}`);
 }
 
 export async function getOrderDetail(orderId: number) {

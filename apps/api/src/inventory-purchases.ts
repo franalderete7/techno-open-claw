@@ -4,6 +4,7 @@ import { pool } from "./db.js";
 type SqlExecutor = Pick<Pool, "query"> | Pick<PoolClient, "query">;
 
 export const inventoryPurchaseStatusValues = ["draft", "received", "cancelled"] as const;
+export const inventoryPurchaseFunderValues = ["aldegol", "chueco"] as const;
 
 export type InventoryPurchaseFunderInput = {
   funder_name: string;
@@ -48,6 +49,11 @@ function roundAmount(value: number, decimals = 2) {
   return Math.round(value * factor) / factor;
 }
 
+function normalizeCurrencyCode(value: string | null | undefined, fallback = "ARS") {
+  const trimmed = value?.trim().toUpperCase();
+  return trimmed || fallback;
+}
+
 function normalizeSharePct(value: unknown) {
   const numeric = asFiniteNumber(value);
   if (numeric == null) {
@@ -59,6 +65,54 @@ function normalizeSharePct(value: unknown) {
   }
 
   return roundAmount(numeric, 4);
+}
+
+function normalizeInventoryFunderName(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!inventoryPurchaseFunderValues.includes(normalized as (typeof inventoryPurchaseFunderValues)[number])) {
+    throw new Error(
+      `Funder "${value}" no es válido. Permitidos: ${inventoryPurchaseFunderValues.join(", ")}.`
+    );
+  }
+  return normalized;
+}
+
+async function getDefaultUsdRate(executor: SqlExecutor) {
+  const result = await executor.query<{ key: string; value: unknown }>(
+    `
+      select key, value
+      from public.settings
+      where key in ('pricing_default_usd_rate', 'usd_to_ars')
+      order by
+        case key
+          when 'pricing_default_usd_rate' then 0
+          when 'usd_to_ars' then 1
+          else 2
+        end
+    `
+  );
+
+  for (const row of result.rows) {
+    const numeric = asFiniteNumber(row.value);
+    if (numeric != null && numeric > 0) {
+      return numeric;
+    }
+  }
+
+  return 1;
+}
+
+function convertAmountToArs(amount: number | null, currencyCode: string | null | undefined, usdRate: number) {
+  if (amount == null) {
+    return null;
+  }
+
+  const normalizedCurrency = normalizeCurrencyCode(currencyCode);
+  if (normalizedCurrency === "USD") {
+    return roundAmount(amount * usdRate);
+  }
+
+  return roundAmount(amount);
 }
 
 function normalizeFunders(
@@ -75,7 +129,7 @@ function normalizeFunders(
         sharePct ?? (amountAmount != null && totalAmount != null && totalAmount > 0 ? roundAmount(amountAmount / totalAmount, 4) : null);
 
       return {
-        funder_name: funder.funder_name.trim(),
+        funder_name: normalizeInventoryFunderName(funder.funder_name),
         payment_method: funder.payment_method?.trim() || null,
         amount_amount: derivedAmount,
         currency_code: funder.currency_code?.trim() || purchaseCurrency,
@@ -180,7 +234,121 @@ export async function getInventoryPurchaseDetail(executor: SqlExecutor, purchase
     [purchaseId]
   );
 
-  return result.rows[0] ?? null;
+  const detail = result.rows[0] ?? null;
+  if (!detail) {
+    return null;
+  }
+
+  const defaultUsdRate = await getDefaultUsdRate(executor);
+  const stockUnitsResult = await executor.query<{
+    id: number;
+    product_id: number;
+    serial_number: string | null;
+    imei_1: string | null;
+    imei_2: string | null;
+    color: string | null;
+    battery_health: number | null;
+    status: string;
+    location_code: string | null;
+    cost_amount: string | number | null;
+    currency_code: string;
+    acquired_at: string | null;
+    sold_at: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+    sku: string;
+    slug: string;
+    brand: string;
+    model: string;
+    title: string;
+    usd_rate: string | number | null;
+    sold_order_id: number | null;
+    sold_order_number: string | null;
+    sale_currency_code: string | null;
+    sale_amount: string | number | null;
+    sale_recorded_at: string | null;
+  }>(
+    `
+      select
+        su.id,
+        su.product_id,
+        su.serial_number,
+        su.imei_1,
+        su.imei_2,
+        su.color,
+        su.battery_health,
+        su.status,
+        su.location_code,
+        su.cost_amount,
+        su.currency_code,
+        su.acquired_at,
+        su.sold_at,
+        su.metadata,
+        su.created_at,
+        su.updated_at,
+        p.sku,
+        p.slug,
+        p.brand,
+        p.model,
+        p.title,
+        p.usd_rate,
+        sale.order_id as sold_order_id,
+        sale.order_number as sold_order_number,
+        sale.currency_code as sale_currency_code,
+        sale.sale_amount,
+        sale.realized_at as sale_recorded_at
+      from public.stock_units su
+      join public.products p on p.id = su.product_id
+      left join lateral (
+        select
+          o.id as order_id,
+          o.order_number,
+          oi.currency_code,
+          (oi.unit_price_amount * oi.quantity)::numeric(12,2) as sale_amount,
+          coalesce(su.sold_at, o.updated_at, o.created_at) as realized_at
+        from public.order_items oi
+        join public.orders o on o.id = oi.order_id
+        where oi.stock_unit_id = su.id
+          and o.status in ('paid', 'fulfilled')
+        order by
+          case when o.status = 'fulfilled' then 0 else 1 end,
+          coalesce(su.sold_at, o.updated_at, o.created_at) desc,
+          oi.id desc
+        limit 1
+      ) sale on true
+      where su.inventory_purchase_id = $1
+      order by coalesce(su.sold_at, su.acquired_at, su.created_at) desc, su.id desc
+    `,
+    [purchaseId]
+  );
+
+  const stock_units = stockUnitsResult.rows.map((row) => {
+    const usdRate = asFiniteNumber(row.usd_rate) ?? defaultUsdRate;
+    const costAmount = asFiniteNumber(row.cost_amount);
+    const saleAmount = asFiniteNumber(row.sale_amount);
+    const revenue_amount_ars = convertAmountToArs(saleAmount, row.sale_currency_code, usdRate);
+    const cost_amount_ars = convertAmountToArs(costAmount, row.currency_code, usdRate);
+    const profit_amount_ars =
+      revenue_amount_ars != null && cost_amount_ars != null ? roundAmount(revenue_amount_ars - cost_amount_ars) : null;
+
+    return {
+      ...row,
+      cost_amount: costAmount,
+      sale_amount: saleAmount,
+      usd_rate_used: usdRate,
+      sale_recorded_at: row.sale_recorded_at ?? row.sold_at,
+      revenue_amount_ars,
+      cost_amount_ars,
+      profit_amount_ars,
+    };
+  });
+
+  return {
+    ...detail,
+    default_usd_rate: defaultUsdRate,
+    stock_units,
+  };
 }
 
 export async function createInventoryPurchase(executor: SqlExecutor, input: InventoryPurchaseInput) {
@@ -304,8 +472,23 @@ export async function listInventoryPurchases(
         p.status,
         p.acquired_at,
         p.created_at,
+        coalesce(
+          jsonb_agg(
+            distinct jsonb_build_object(
+              'id', f.id,
+              'funder_name', f.funder_name,
+              'payment_method', f.payment_method,
+              'amount_amount', f.amount_amount,
+              'currency_code', f.currency_code,
+              'share_pct', f.share_pct
+            )
+          ) filter (where f.id is not null),
+          '[]'::jsonb
+        ) as funders,
         coalesce(count(distinct f.id), 0)::int as funders_count,
-        coalesce(count(distinct su.id), 0)::int as stock_units_count
+        coalesce(count(distinct su.id), 0)::int as stock_units_count,
+        coalesce(count(distinct su.id) filter (where su.status = 'in_stock'), 0)::int as stock_units_in_stock,
+        coalesce(count(distinct su.id) filter (where su.status = 'sold'), 0)::int as stock_units_sold
       from public.inventory_purchases p
       left join public.inventory_purchase_funders f on f.inventory_purchase_id = p.id
       left join public.stock_units su on su.inventory_purchase_id = p.id
