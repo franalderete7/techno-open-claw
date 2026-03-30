@@ -329,21 +329,18 @@ async function deleteWorkflow(auth, workflowId) {
   await requestJson(auth, "DELETE", `/rest/workflows/${workflowId}`);
 }
 
-function buildImportDir(tmpDir, grouped) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildImportDir(tmpDir) {
   const importDir = join(tmpDir, "import");
   mkdirSync(importDir, { recursive: true });
 
   for (const workflow of CHILD_WORKFLOWS) {
     const sourcePath = join(WORKFLOW_DIR, workflow.file);
     const payload = JSON.parse(readFileSync(sourcePath, "utf8"));
-    const current = grouped.get(workflow.name)?.canonical || null;
-
-    if (current?.id) {
-      payload.id = current.id;
-    } else {
-      delete payload.id;
-    }
-
+    delete payload.id;
     payload.active = false;
     writeFileSync(join(importDir, workflow.file), `${JSON.stringify(payload, null, 2)}\n`);
   }
@@ -361,14 +358,7 @@ function importWorkflowDir(container, hostDir) {
 function patchEntryWorkflow(tmpDir, groupedAfterChildren) {
   const sourcePath = join(WORKFLOW_DIR, ENTRY_WORKFLOW.file);
   const payload = JSON.parse(readFileSync(sourcePath, "utf8"));
-  const currentEntry = groupedAfterChildren.get(ENTRY_WORKFLOW.name)?.canonical || null;
-
-  if (currentEntry?.id) {
-    payload.id = currentEntry.id;
-  } else {
-    delete payload.id;
-  }
-
+  delete payload.id;
   payload.active = false;
 
   const idByName = new Map();
@@ -466,20 +456,45 @@ async function main() {
     backupExistingWorkflows(currentGrouped, backupDir);
     log("Backed up current v18 workflow set.");
 
-    for (const { expected, matches, duplicates } of currentGrouped.values()) {
+    if (DRY_RUN) {
+    for (const { expected, matches } of currentGrouped.values()) {
+      for (const record of matches) {
+        if (!record.active) continue;
+        log(`Would unpublish current workflow: ${expected.name} (${record.id})`);
+      }
+
+      for (const record of matches) {
+        log(`Would delete existing workflow: ${expected.name} (${record.id})`);
+      }
+    }
+
+      log("Would import child workflows.");
+      log("Would patch and import the entry workflow.");
+      log("Would publish child workflows, then publish the entry workflow.");
+      log("");
+      log("Dry run complete. No workflow changes were applied.");
+      log(`Backups saved to: ${backupDir}`);
+      return;
+    }
+
+    for (const { expected, matches } of currentGrouped.values()) {
       for (const record of matches) {
         if (!record.active) continue;
         log(`Unpublishing current workflow: ${expected.name} (${record.id})`);
         unpublishWorkflow(n8nContainer, auth, record.id);
       }
+    }
 
-      for (const duplicate of duplicates) {
+    await sleep(1200);
+
+    for (const { expected, matches } of currentGrouped.values()) {
+      for (const record of matches) {
         try {
-          log(`Removing duplicate workflow: ${expected.name} (${duplicate.id})`);
-          await deleteWorkflow(auth, duplicate.id);
+          log(`Deleting existing workflow: ${expected.name} (${record.id})`);
+          await deleteWorkflow(auth, record.id);
         } catch (error) {
           warn(
-            `Warning: could not delete duplicate workflow ${expected.name} (${duplicate.id}). Continuing.\n${
+            `Warning: could not delete workflow ${expected.name} (${record.id}). Continuing.\n${
               error.message || error
             }`,
           );
@@ -487,7 +502,9 @@ async function main() {
       }
     }
 
-    const importDir = buildImportDir(tmpDir, currentGrouped);
+    await sleep(1200);
+
+    const importDir = buildImportDir(tmpDir);
     log("Importing child workflows...");
     importWorkflowDir(n8nContainer, importDir);
 

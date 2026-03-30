@@ -62,9 +62,9 @@ node ./scripts/deploy-n8n-v18.mjs
 What it does:
 
 - backs up the currently imported v18 workflows to `n8n/backups/v18/<timestamp>`
-- unpublishes the current v18 set
-- removes duplicate exact-name v18 workflows
-- imports the 6 child workflows first
+- unpublishes the current exact-name v18 set
+- deletes the current exact-name v18 set so the next import is clean
+- imports the 6 child workflows first as a brand-new set
 - patches the entry workflow with the real child workflow IDs
 - imports the entry workflow last
 - publishes the full v18 set in the right order
