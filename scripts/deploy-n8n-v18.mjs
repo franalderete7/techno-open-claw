@@ -16,6 +16,36 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ENV_FILE = resolve(ROOT_DIR, ".env");
+
+function loadDotEnv(filePath) {
+  if (!existsSync(filePath)) return;
+
+  const content = readFileSync(filePath, "utf8");
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex <= 0) continue;
+
+    const key = line.slice(0, separatorIndex).trim();
+    if (!key || process.env[key] != null) continue;
+
+    let value = line.slice(separatorIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  }
+}
+
+loadDotEnv(ENV_FILE);
+
 const WORKFLOW_DIR = resolve(process.env.N8N_WORKFLOW_DIR || join(ROOT_DIR, "n8n/v18"));
 const BACKUP_ROOT = resolve(
   process.env.N8N_BACKUP_DIR || join(ROOT_DIR, "n8n/backups/v18"),
