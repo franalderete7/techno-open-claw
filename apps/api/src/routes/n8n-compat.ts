@@ -59,6 +59,16 @@ type CandidateProduct = {
   image_url: string | null;
 };
 
+type MessageProductSignals = {
+  normalizedMessage: string;
+  brandKeys: string[];
+  tierKey: string | null;
+  familyNumber: number | null;
+  storageValue: number | null;
+  modelVariantToken: string | null;
+  hasSpecificIntent: boolean;
+};
+
 function normalizeText(value: string) {
   return value
     .toLowerCase()
@@ -292,6 +302,109 @@ function inferColor(product: Pick<ProductRow, "title" | "description">) {
   );
 
   return match ? match[1] : null;
+}
+
+function extractMessageBrandKeys(message: string) {
+  const brandKeys = new Set<string>();
+
+  if (/(^| )(iphone|apple|ipad|macbook)( |$)/.test(message)) brandKeys.add("apple");
+  if (/(^| )(samsung|galaxy)( |$)/.test(message)) brandKeys.add("samsung");
+  if (/(^| )(motorola|moto)( |$)/.test(message)) brandKeys.add("motorola");
+  if (/(^| )(xiaomi)( |$)/.test(message)) brandKeys.add("xiaomi");
+  if (/(^| )(redmi)( |$)/.test(message)) brandKeys.add("redmi");
+  if (/(^| )(poco)( |$)/.test(message)) brandKeys.add("redmi");
+  if (/(^| )(google|pixel)( |$)/.test(message)) brandKeys.add("google");
+
+  return [...brandKeys];
+}
+
+function extractMessageTierKey(message: string) {
+  if (/(^| )(pro max|promax)( |$)/.test(message)) return "pro_max";
+  if (/(^| )(ultra)( |$)/.test(message)) return "ultra";
+  if (/(^| )(pro)( |$)/.test(message)) return "pro";
+  if (/(^| )(plus)( |$)/.test(message)) return "plus";
+  return null;
+}
+
+function getMessageProductSignals(userMessage: string): MessageProductSignals {
+  const normalizedMessage = normalizeText(userMessage);
+  const brandKeys = extractMessageBrandKeys(normalizedMessage);
+  const tierKey = extractMessageTierKey(normalizedMessage);
+  const familyMatch = normalizedMessage.match(
+    /(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\s+([0-9]{1,3})/i
+  );
+  const storageMatch = normalizedMessage.match(/\b(64|128|256|512|1024)\b(?:\s*gb)?\b/);
+  const modelVariantMatch = normalizedMessage.match(
+    /\b(?:a\d{1,3}|s\d{1,3}|g\d{1,3}|x\d{1,3}|z\s?flip\s?\d|z\s?fold\s?\d|edge\s?\d{1,3}|note\s?\d{1,3}|reno\s?\d{1,3}|find\s?x\d{1,2})\b/i
+  );
+
+  return {
+    normalizedMessage,
+    brandKeys,
+    tierKey,
+    familyNumber: familyMatch ? Number(familyMatch[1]) : null,
+    storageValue: storageMatch ? Number(storageMatch[1]) : null,
+    modelVariantToken: modelVariantMatch ? normalizeText(modelVariantMatch[0]) : null,
+    hasSpecificIntent:
+      brandKeys.length > 0 &&
+      (familyMatch != null || storageMatch != null || tierKey != null || modelVariantMatch != null),
+  };
+}
+
+function brandKeyMatchesText(brandKey: string, text: string) {
+  const tokensByBrand: Record<string, string[]> = {
+    apple: ["apple", "iphone", "ipad", "macbook"],
+    samsung: ["samsung", "galaxy"],
+    motorola: ["motorola", "moto"],
+    xiaomi: ["xiaomi"],
+    redmi: ["redmi", "poco"],
+    google: ["google", "pixel"],
+  };
+
+  return (tokensByBrand[brandKey] ?? [brandKey]).some((token) => text.includes(token));
+}
+
+function computeCurrentIntentAdjustment(product: ProductRow, signals: MessageProductSignals) {
+  if (!signals.hasSpecificIntent) {
+    return 0;
+  }
+
+  const haystack = normalizeText(`${product.brand} ${product.model} ${product.title} ${product.description ?? ""}`);
+  let adjustment = 0;
+
+  if (signals.brandKeys.length > 0) {
+    const brandMatches = signals.brandKeys.some((brandKey) => brandKeyMatchesText(brandKey, haystack));
+    adjustment += brandMatches ? 14 : -30;
+  }
+
+  if (signals.familyNumber != null) {
+    adjustment += new RegExp(`(?:^|\\s)${signals.familyNumber}(?:\\s|$)`).test(haystack) ? 10 : -12;
+  }
+
+  if (signals.modelVariantToken) {
+    adjustment += haystack.includes(signals.modelVariantToken) ? 12 : -14;
+  }
+
+  if (signals.tierKey) {
+    const tierPatterns: Record<string, RegExp> = {
+      pro_max: /\bpro max\b|\bpromax\b/,
+      ultra: /\bultra\b/,
+      pro: /\bpro\b/,
+      plus: /\bplus\b/,
+    };
+
+    adjustment += (tierPatterns[signals.tierKey]?.test(haystack) ?? false) ? 7 : -8;
+  }
+
+  if (signals.storageValue != null) {
+    adjustment += new RegExp(`\\b${signals.storageValue}\\s*gb\\b`, "i").test(
+      `${product.model} ${product.title} ${product.description ?? ""}`
+    )
+      ? 5
+      : -6;
+  }
+
+  return adjustment;
 }
 
 function scoreCandidate(product: ProductRow, userMessage: string) {
@@ -718,14 +831,21 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     );
 
     const interestedProductKey = customerState.interestedProduct?.trim().toLowerCase() || null;
+    const currentProductSignals = getMessageProductSignals(userMessage);
 
     const rawCandidateProducts = productRows
       .map((product) => {
         const productKey = product.sku.trim().toLowerCase();
-        const interestedProductBoost = interestedProductKey && productKey === interestedProductKey ? 40 : 0;
+        const currentIntentAdjustment = computeCurrentIntentAdjustment(product, currentProductSignals);
+        const interestedProductBoost =
+          interestedProductKey && productKey === interestedProductKey
+            ? currentProductSignals.hasSpecificIntent
+              ? Math.max(0, 12 + currentIntentAdjustment)
+              : 14
+            : 0;
 
         return {
-          score: scoreCandidate(product, userMessage) + interestedProductBoost,
+          score: scoreCandidate(product, userMessage) + currentIntentAdjustment + interestedProductBoost,
           product_id: product.id,
           product_key: product.sku,
           product_name: product.title,
