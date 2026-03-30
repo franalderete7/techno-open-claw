@@ -51,7 +51,37 @@ Import all of these:
 - `TechnoStore_v18_state_update.json`
 - `TechnoStore_v18_entry.json`
 
-## CLI import from the VPS host
+## Automated deploy from the VPS host
+
+Use this first:
+
+```bash
+node ./scripts/deploy-n8n-v18.mjs
+```
+
+What it does:
+
+- backs up the currently imported v18 workflows to `n8n/backups/v18/<timestamp>`
+- unpublishes the current v18 set
+- removes duplicate exact-name v18 workflows
+- imports the 6 child workflows first
+- patches the entry workflow with the real child workflow IDs
+- imports the entry workflow last
+- publishes the full v18 set in the right order
+
+If your n8n container name is not auto-detected:
+
+```bash
+N8N_CONTAINER_NAME=n8n-n8n-1 node ./scripts/deploy-n8n-v18.mjs
+```
+
+Optional dry run:
+
+```bash
+node ./scripts/deploy-n8n-v18.mjs --dry-run
+```
+
+## Raw CLI import from the VPS host
 
 If n8n runs in Docker on the VPS, use:
 
@@ -65,18 +95,7 @@ Optional override if the container name is not auto-detected:
 N8N_CONTAINER_NAME=n8n-n8n-1 ./scripts/import-n8n-v18.sh
 ```
 
-## After import
-
-Relink the child workflows inside the entry workflow if n8n does not resolve them automatically.
-
-Expected child workflow names:
-
-- `TechnoStore - v18 Context Builder`
-- `TechnoStore - v18 Router`
-- `TechnoStore - v18 Info Responder`
-- `TechnoStore - v18 Sales Responder`
-- `TechnoStore - v18 Validator`
-- `TechnoStore - v18 State Update`
+The raw import script only copies/imports JSON files. It does **not** archive old workflows, relink child workflow IDs, or publish the set.
 
 ## Current scope
 
