@@ -399,7 +399,22 @@ async function listActiveCatalogProducts(executor: SqlExecutor) {
         p.promo_price_ars
       from (
         select
-          p.*,
+          p.id,
+          p.sku,
+          p.slug,
+          p.brand,
+          p.model,
+          p.title,
+          p.description,
+          p.price_amount,
+          p.currency_code,
+          p.image_url,
+          p.ram_gb,
+          p.storage_gb,
+          p.color,
+          p.active,
+          p.updated_at,
+          p.promo_price_ars,
           coalesce(count(su.id), 0)::int as stock_units_total,
           coalesce(count(su.id) filter (where su.status = 'in_stock'), 0)::int as stock_units_available,
           coalesce(bool_or(su.status = 'in_stock'), false) as in_stock
