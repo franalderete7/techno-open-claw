@@ -24,6 +24,7 @@ const navItems = [
   ["Stock", "/stock"],
   ["Purchases", "/purchases"],
   ["Ads", "/ads"],
+  ["Content", "/content"],
   ["Orders", "/orders"],
   ["Customers", "/customers"],
   ["Conversations", "/conversations"],
@@ -74,7 +75,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 <span className="eyebrow">Open Claw</span>
                 <h1 className="wordmark">TechnoStore Ops</h1>
               </div>
-              <p className="masthead-meta">Catalog, purchases, ads, stock, customers, orders, workflows.</p>
+              <p className="masthead-meta">Catalog, content, purchases, ads, stock, customers, orders, workflows.</p>
             </header>
 
             <nav>

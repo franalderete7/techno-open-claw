@@ -2408,6 +2408,32 @@ nav a:hover {
   box-shadow: var(--shadow);
 }
 
+.content-grid,
+.content-brand-grid,
+.content-list {
+  display: grid;
+  gap: 14px;
+}
+
+.content-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.content-brand-grid {
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.content-card,
+.content-brand-card,
+.content-list-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 0.5px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
 .ads-fold-summary {
   align-items: flex-start;
 }
