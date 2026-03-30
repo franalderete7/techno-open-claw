@@ -68,6 +68,7 @@ What it does:
 - patches the entry workflow with the real child workflow IDs
 - imports the entry workflow last
 - publishes the full v18 set in the right order
+- restarts n8n so webhook registrations refresh against the newly published set
 
 If your n8n container name is not auto-detected:
 
@@ -79,6 +80,12 @@ Optional dry run:
 
 ```bash
 node ./scripts/deploy-n8n-v18.mjs --dry-run
+```
+
+Optional override if you explicitly do **not** want the post-deploy restart:
+
+```bash
+N8N_SKIP_RESTART=true node ./scripts/deploy-n8n-v18.mjs
 ```
 
 ## Raw CLI import from the VPS host

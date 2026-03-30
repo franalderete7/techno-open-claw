@@ -56,6 +56,7 @@ const N8N_API_BASE =
   process.env.N8N_API_BASE_URL ||
   process.env.N8N_API_BASE ||
   "http://127.0.0.1:5678";
+const N8N_SKIP_RESTART = String(process.env.N8N_SKIP_RESTART || "").toLowerCase() === "true";
 const DRY_RUN = process.argv.includes("--dry-run");
 
 const CHILD_WORKFLOWS = [
@@ -572,8 +573,8 @@ async function main() {
     log(`Publishing entry workflow: ${ENTRY_WORKFLOW.name} (${entryRecord.id})`);
     publishWorkflow(n8nContainer, auth, entryRecord.id);
 
-    if (!cliSupports(n8nContainer, "publish:workflow")) {
-      log("Restarting n8n to apply workflow activation changes...");
+    if (!N8N_SKIP_RESTART) {
+      log("Restarting n8n to refresh webhook registrations and active workflow state...");
       restartContainer(n8nContainer);
     }
 
