@@ -1649,6 +1649,104 @@ export async function syncContentJob(executor: SqlExecutor, jobId: number) {
   });
 }
 
+export async function handleOrshotWebhook(executor: SqlExecutor, payload: unknown) {
+  const body = asJsonRecord(payload);
+  const data = asJsonRecord(body.data);
+  const metadata = asJsonRecord(body.metadata);
+  const resolvedMetadata = Object.keys(metadata).length > 0 ? metadata : asJsonRecord(data.metadata);
+  const jobIdRaw = resolvedMetadata.job_id ?? body.job_id ?? data.job_id;
+  const externalJobId =
+    (typeof body.id === "string" && body.id.trim()) ||
+    (typeof data.id === "string" && data.id.trim()) ||
+    null;
+  const externalStatus =
+    (typeof body.status === "string" && body.status.trim()) ||
+    (typeof data.status === "string" && data.status.trim()) ||
+    "completed";
+  const outputUrl =
+    (typeof body.url === "string" && body.url.trim()) ||
+    (typeof data.url === "string" && data.url.trim()) ||
+    null;
+
+  const jobId =
+    typeof jobIdRaw === "number"
+      ? jobIdRaw
+      : typeof jobIdRaw === "string" && jobIdRaw.trim()
+        ? Number(jobIdRaw)
+        : null;
+
+  if (!jobId || !Number.isFinite(jobId)) {
+    return {
+      ok: true,
+      ignored: true,
+      reason: "missing_job_id",
+    };
+  }
+
+  const job = await getContentJobWithRelations(executor, jobId);
+  if (!job) {
+    return {
+      ok: true,
+      ignored: true,
+      reason: "job_not_found",
+      job_id: jobId,
+    };
+  }
+
+  if (outputUrl) {
+    const persisted = await persistRemoteOutput({
+      sourceUrl: outputUrl,
+      productId: job.product_id,
+      suggestedName: `${job.template_code ?? "orshot"}-${job.product_id ?? "shared"}`,
+    });
+
+    const assetId = await createMediaAsset(executor, {
+      productId: job.product_id,
+      brandKey: job.brand_key,
+      assetType: mapAssetTypeFromJob(job),
+      sourceKind: "orshot",
+      status: "draft",
+      title: job.title,
+      storageUrl: persisted.storage_url,
+      mimeType: persisted.mime_type,
+      externalAssetId: externalJobId,
+      metadata: {
+        orshot_webhook: body,
+      },
+    });
+
+    await createContentOutput(executor, {
+      jobId: job.id,
+      assetId,
+      variantKey: "webhook",
+      reviewStatus: "pending",
+      outputUrl: persisted.storage_url,
+      generationPayload: {
+        orshot_webhook: body,
+      },
+      metadata: {
+        engine: "orshot",
+        delivery: "webhook",
+      },
+    });
+  }
+
+  await updateContentJobStatus(executor, job.id, {
+    status: outputUrl ? "review_required" : "generated",
+    external_job_id: externalJobId,
+    external_status: externalStatus,
+    completed_at: new Date().toISOString(),
+    error_message: null,
+  });
+
+  return {
+    ok: true,
+    job_id: job.id,
+    external_job_id: externalJobId,
+    external_status: externalStatus,
+  };
+}
+
 export async function getContentOverview(executor: SqlExecutor = pool) {
   await ensureContentProductProfiles(executor);
 

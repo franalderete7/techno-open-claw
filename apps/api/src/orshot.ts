@@ -85,7 +85,7 @@ export function isOrshotConfigured() {
 }
 
 export async function listOrshotStudioTemplates(options: { page?: number; limit?: number } = {}) {
-  const response = await orshotGet<OrshotListResponse<OrshotStudioTemplateRecord>>("/v1/studio/templates/get", {
+  const response = await orshotGet<OrshotListResponse<OrshotStudioTemplateRecord>>("/v1/studio/templates/all", {
     page: options.page ?? 1,
     limit: options.limit ?? 50,
   });

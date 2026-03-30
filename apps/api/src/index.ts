@@ -13,6 +13,7 @@ import {
   handleTaloWebhook,
   resolveStorefrontCheckoutHandoff,
 } from "./storefront-checkouts.js";
+import { handleOrshotWebhook } from "./content-system.js";
 import { calculateDerivedPricing, shouldRecalculatePricing } from "./pricing.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { n8nCompatRoutes } from "./routes/n8n-compat.js";
@@ -226,6 +227,10 @@ app.post("/webhooks/galiopay", async (request, reply) => {
 });
 app.post("/webhooks/talo", async (request, reply) => {
   const result = await handleTaloWebhook(request.body);
+  return reply.code(200).send(result);
+});
+app.post("/webhooks/orshot", async (request, reply) => {
+  const result = await handleOrshotWebhook(pool, request.body);
   return reply.code(200).send(result);
 });
 
