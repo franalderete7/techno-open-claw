@@ -52,7 +52,10 @@ const BACKUP_ROOT = resolve(
 );
 const CONTAINER_TMP_DIR =
   process.env.N8N_CONTAINER_TMP_DIR || "/tmp/techno-open-claw-n8n-v18-deploy";
-const N8N_API_BASE = process.env.N8N_API_BASE || "http://127.0.0.1:5678";
+const N8N_API_BASE =
+  process.env.N8N_API_BASE_URL ||
+  process.env.N8N_API_BASE ||
+  "http://127.0.0.1:5678";
 const DRY_RUN = process.argv.includes("--dry-run");
 
 const CHILD_WORKFLOWS = [

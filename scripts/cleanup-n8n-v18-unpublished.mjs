@@ -10,7 +10,10 @@ const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_FILE = resolve(ROOT_DIR, ".env");
 const CONTAINER_TMP_DIR =
   process.env.N8N_CONTAINER_TMP_DIR || "/tmp/techno-open-claw-n8n-v18-cleanup";
-const N8N_API_BASE = process.env.N8N_API_BASE || "http://127.0.0.1:5678";
+const N8N_API_BASE =
+  process.env.N8N_API_BASE_URL ||
+  process.env.N8N_API_BASE ||
+  "http://127.0.0.1:5678";
 const DRY_RUN = process.argv.includes("--dry-run");
 
 const EXPECTED_NAMES = new Set([
