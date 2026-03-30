@@ -254,16 +254,20 @@ export default async function OrderDetailPage({ params }: OrderDetailPageProps) 
                         <dd>{intent.delivery_days_snapshot ?? "-"}</dd>
                       </div>
                       <div>
-                        <dt>Galio reference</dt>
-                        <dd className="mono">{intent.galio_reference_id || "-"}</dd>
+                        <dt>Payment provider</dt>
+                        <dd>{intent.payment_provider || (intent.galio_payment_id || intent.galio_reference_id ? "galiopay" : "-")}</dd>
                       </div>
                       <div>
-                        <dt>Galio payment ID</dt>
-                        <dd className="mono">{intent.galio_payment_id || "-"}</dd>
+                        <dt>Payment reference</dt>
+                        <dd className="mono">{intent.payment_reference_id || intent.galio_reference_id || "-"}</dd>
                       </div>
                       <div>
-                        <dt>Galio status</dt>
-                        <dd>{intent.galio_payment_status || "-"}</dd>
+                        <dt>Payment ID</dt>
+                        <dd className="mono">{intent.payment_id || intent.galio_payment_id || "-"}</dd>
+                      </div>
+                      <div>
+                        <dt>Payment status</dt>
+                        <dd>{intent.payment_status || intent.galio_payment_status || "-"}</dd>
                       </div>
                       <div>
                         <dt>Paid at</dt>
@@ -287,10 +291,15 @@ export default async function OrderDetailPage({ params }: OrderDetailPageProps) 
                       </div>
                     ) : null}
 
-                    {intent.galio_payment_url ? (
+                    {(intent.payment_url || intent.galio_payment_url) ? (
                       <div className="message-asset">
-                        <a className="message-link mono" href={intent.galio_payment_url} target="_blank" rel="noreferrer">
-                          {intent.galio_payment_url}
+                        <a
+                          className="message-link mono"
+                          href={intent.payment_url || intent.galio_payment_url || "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {intent.payment_url || intent.galio_payment_url}
                         </a>
                       </div>
                     ) : null}

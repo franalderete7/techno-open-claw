@@ -1,6 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { pool, query } from "../db.js";
-import { ensureStorefrontCheckoutHandoff, resolveStorefrontCheckoutHandoff } from "../storefront-checkouts.js";
+import {
+  ensureStorefrontCheckoutHandoff,
+  getDefaultCheckoutPaymentProvider,
+  resolveStorefrontCheckoutHandoff,
+} from "../storefront-checkouts.js";
 
 type NotesState = {
   tags: string[];
@@ -985,7 +989,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
             ready: false,
             status: "failed",
             url: null,
-            provider: "galiopay",
+            provider: getDefaultCheckoutPaymentProvider(),
             message: error instanceof Error ? error.message : "No se pudo preparar el link de pago.",
           },
         };
@@ -1025,7 +1029,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
             ready: false,
             status: "failed",
             url: null,
-            provider: "galiopay",
+            provider: getDefaultCheckoutPaymentProvider(),
             message: error instanceof Error ? error.message : "No se pudo preparar el link de pago.",
           },
         };

@@ -10,6 +10,7 @@ import { inferMediaContentType, openMediaStream, resolveMediaFilePath } from "./
 import {
   createStorefrontPaymentIntent,
   handleGalioPayWebhook,
+  handleTaloWebhook,
   resolveStorefrontCheckoutHandoff,
 } from "./storefront-checkouts.js";
 import { calculateDerivedPricing, shouldRecalculatePricing } from "./pricing.js";
@@ -220,6 +221,10 @@ app.get("/media/*", async (request, reply) => {
 app.post("/webhooks/telegram", handleTelegramWebhook);
 app.post("/webhooks/galiopay", async (request, reply) => {
   const result = await handleGalioPayWebhook(request.body);
+  return reply.code(200).send(result);
+});
+app.post("/webhooks/talo", async (request, reply) => {
+  const result = await handleTaloWebhook(request.body);
   return reply.code(200).send(result);
 });
 
@@ -1669,6 +1674,11 @@ app.register(async (protectedApp) => {
             sci.currency_code,
             sci.image_url_snapshot,
             sci.delivery_days_snapshot,
+            sci.payment_provider,
+            sci.payment_reference_id,
+            sci.payment_url,
+            sci.payment_id,
+            sci.payment_status,
             sci.galio_reference_id,
             sci.galio_payment_url,
             sci.galio_proof_token,

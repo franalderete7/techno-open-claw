@@ -3,8 +3,10 @@ import type { PoolClient } from "pg";
 import { config } from "./config.js";
 import { pool } from "./db.js";
 import { createGalioPaymentLink, getGalioPayment, hasGalioPayConfig } from "./galiopay.js";
+import { createTaloPayment, getTaloPayment, hasTaloConfig } from "./talo.js";
 
 type CheckoutChannel = "storefront" | "whatsapp" | "telegram" | "api";
+export type CheckoutPaymentProvider = "galiopay" | "talo";
 
 type CreateStorefrontPaymentIntentInput = {
   productId: number;
@@ -47,7 +49,7 @@ type StorefrontHandoffResult = {
     ready: boolean;
     status: string | null;
     url: string | null;
-    provider: "galiopay";
+    provider: CheckoutPaymentProvider;
     message: string | null;
   } | null;
 };
@@ -64,8 +66,15 @@ type CheckoutRow = {
   currency_code: string;
   title_snapshot: string;
   unit_price_amount: string | number;
+  customer_phone: string | null;
+  customer_name: string | null;
   image_url_snapshot: string | null;
   delivery_days_snapshot: number | null;
+  payment_provider: CheckoutPaymentProvider;
+  payment_reference_id: string | null;
+  payment_url: string | null;
+  payment_id: string | null;
+  payment_status: string | null;
   galio_reference_id: string | null;
   galio_payment_url: string | null;
   galio_proof_token: string | null;
@@ -154,6 +163,14 @@ function buildWhatsAppRedirectUrl(message: string) {
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
+export function getDefaultCheckoutPaymentProvider(): CheckoutPaymentProvider {
+  if (hasTaloConfig()) {
+    return "talo";
+  }
+
+  return "galiopay";
+}
+
 function createIntentToken() {
   return randomBytes(12).toString("hex");
 }
@@ -189,8 +206,15 @@ async function getCheckoutRowForUpdate(client: PoolClient, orderId: number, toke
         sci.currency_code,
         sci.title_snapshot,
         sci.unit_price_amount,
+        sci.customer_phone,
+        sci.customer_name,
         sci.image_url_snapshot,
         sci.delivery_days_snapshot,
+        sci.payment_provider,
+        sci.payment_reference_id,
+        sci.payment_url,
+        sci.payment_id,
+        sci.payment_status,
         sci.galio_reference_id,
         sci.galio_payment_url,
         sci.galio_proof_token,
@@ -327,6 +351,30 @@ function buildFailureUrl(sourceHost: string | null) {
   return `https://${sourceHost}/pago/error`;
 }
 
+function buildTaloWebhookUrl() {
+  if (config.TALO_WEBHOOK_URL) {
+    return config.TALO_WEBHOOK_URL;
+  }
+
+  if (config.PUBLIC_API_BASE_URL) {
+    return `${config.PUBLIC_API_BASE_URL.replace(/\/$/, "")}/webhooks/talo`;
+  }
+
+  return null;
+}
+
+function buildTaloRedirectUrl(sourceHost: string | null) {
+  if (config.TALO_REDIRECT_URL) {
+    return config.TALO_REDIRECT_URL;
+  }
+
+  if (!sourceHost) {
+    return null;
+  }
+
+  return `https://${sourceHost}`;
+}
+
 export async function createStorefrontPaymentIntent({
   productId,
   sourceHost,
@@ -337,6 +385,7 @@ export async function createStorefrontPaymentIntent({
   customerName,
 }: CreateStorefrontPaymentIntentInput): Promise<StorefrontPaymentIntentResult> {
   const client = await pool.connect();
+  const paymentProvider = getDefaultCheckoutPaymentProvider();
 
   try {
     await client.query("begin");
@@ -427,6 +476,7 @@ export async function createStorefrontPaymentIntent({
           order_id,
           product_id,
           token,
+          payment_provider,
           channel,
           source_host,
           customer_phone,
@@ -437,12 +487,13 @@ export async function createStorefrontPaymentIntent({
           image_url_snapshot,
           delivery_days_snapshot,
           metadata
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       `,
       [
         order.id,
         product.id,
         token,
+        paymentProvider,
         channel,
         sourceHost ?? null,
         customerPhone?.trim() || null,
@@ -453,6 +504,7 @@ export async function createStorefrontPaymentIntent({
         product.image_url,
         product.delivery_days ?? null,
         {
+          payment_provider: paymentProvider,
           source_path: sourcePath ?? null,
           product_slug: product.slug,
         },
@@ -499,53 +551,121 @@ export async function resolveStorefrontCheckoutHandoff(orderId: number, token: s
       return { ok: false, order: null, payment: null };
     }
 
-    let paymentUrl = checkout.galio_payment_url;
-    let paymentStatus = checkout.galio_payment_status || checkout.checkout_status;
+    const paymentProvider =
+      checkout.payment_provider ||
+      (checkout.galio_reference_id || checkout.galio_payment_url || checkout.galio_payment_id ? "galiopay" : getDefaultCheckoutPaymentProvider());
+    let paymentUrl = checkout.payment_url || checkout.galio_payment_url;
+    let paymentStatus = checkout.payment_status || checkout.galio_payment_status || checkout.checkout_status;
+    let paymentReferenceId = checkout.payment_reference_id || checkout.galio_reference_id;
 
-    if (checkout.checkout_status !== "paid" && !paymentUrl && hasGalioPayConfig()) {
-      const referenceId = checkout.galio_reference_id || `toc-order-${checkout.order_id}-checkout-${checkout.checkout_id}`;
-      const paymentLink = await createGalioPaymentLink({
-        referenceId,
-        title: checkout.title_snapshot,
-        unitPrice: toNumber(checkout.unit_price_amount) ?? 0,
-        currencyCode: checkout.currency_code,
-        imageUrl: absolutePublicUrl(checkout.image_url_snapshot),
-        successUrl: buildSuccessUrl(checkout.source_host),
-        failureUrl: buildFailureUrl(checkout.source_host),
-      });
+    if (checkout.checkout_status !== "paid" && !paymentUrl) {
+      const referenceId = paymentReferenceId || `toc-order-${checkout.order_id}-checkout-${checkout.checkout_id}`;
 
-      paymentUrl = paymentLink.url;
-      paymentStatus = "link_created";
+      if (paymentProvider === "talo" && hasTaloConfig()) {
+        const payment = await createTaloPayment({
+          externalId: referenceId,
+          title: checkout.title_snapshot,
+          unitPrice: toNumber(checkout.unit_price_amount) ?? 0,
+          currencyCode: checkout.currency_code,
+          customerName: checkout.customer_name,
+          customerPhone: checkout.customer_phone,
+          webhookUrl: buildTaloWebhookUrl(),
+          redirectUrl: buildTaloRedirectUrl(checkout.source_host),
+        });
 
-      await client.query(
-        `
-          update public.storefront_checkout_intents
-          set
-            status = 'link_created',
-            galio_reference_id = $2,
-            galio_payment_url = $3,
-            galio_proof_token = $4,
-            galio_payment_status = 'link_created',
-            metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('last_galiopay_link', $5::jsonb)
-          where id = $1
-        `,
-        [checkout.checkout_id, referenceId, paymentLink.url, paymentLink.proofToken, paymentLink.raw]
-      );
+        paymentUrl = payment.paymentUrl;
+        paymentStatus = payment.status || "PENDING";
+        paymentReferenceId = payment.externalId || referenceId;
 
-      await client.query(
-        `
-          update public.orders
-          set status = 'pending'
-          where id = $1
-            and status = 'draft'
-        `,
-        [checkout.order_id]
-      );
+        await client.query(
+          `
+            update public.storefront_checkout_intents
+            set
+              status = 'link_created',
+              payment_provider = 'talo',
+              payment_reference_id = $2,
+              payment_url = $3,
+              payment_id = $4,
+              payment_status = $5,
+              metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object(
+                'last_talo_payment', $6::jsonb,
+                'talo_alias', $7::text,
+                'talo_cvu', $8::text,
+                'talo_expiration_timestamp', $9::text
+              )
+            where id = $1
+          `,
+          [
+            checkout.checkout_id,
+            paymentReferenceId,
+            payment.paymentUrl,
+            payment.id,
+            payment.status || "PENDING",
+            payment.raw,
+            payment.alias,
+            payment.cvu,
+            payment.expirationTimestamp,
+          ]
+        );
 
-      await writeSystemAuditLog(client, "storefront.checkout_intent.link_created", "order", String(checkout.order_id), {
-        checkout_id: checkout.checkout_id,
-        galio_reference_id: referenceId,
-      });
+        await writeSystemAuditLog(client, "storefront.checkout_intent.link_created", "order", String(checkout.order_id), {
+          checkout_id: checkout.checkout_id,
+          payment_provider: "talo",
+          payment_reference_id: paymentReferenceId,
+          payment_id: payment.id,
+        });
+      } else if (hasGalioPayConfig()) {
+        const paymentLink = await createGalioPaymentLink({
+          referenceId,
+          title: checkout.title_snapshot,
+          unitPrice: toNumber(checkout.unit_price_amount) ?? 0,
+          currencyCode: checkout.currency_code,
+          imageUrl: absolutePublicUrl(checkout.image_url_snapshot),
+          successUrl: buildSuccessUrl(checkout.source_host),
+          failureUrl: buildFailureUrl(checkout.source_host),
+        });
+
+        paymentUrl = paymentLink.url;
+        paymentStatus = "link_created";
+        paymentReferenceId = referenceId;
+
+        await client.query(
+          `
+            update public.storefront_checkout_intents
+            set
+              status = 'link_created',
+              payment_provider = 'galiopay',
+              payment_reference_id = $2,
+              payment_url = $3,
+              payment_status = 'link_created',
+              galio_reference_id = $2,
+              galio_payment_url = $3,
+              galio_proof_token = $4,
+              galio_payment_status = 'link_created',
+              metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('last_galiopay_link', $5::jsonb)
+            where id = $1
+          `,
+          [checkout.checkout_id, referenceId, paymentLink.url, paymentLink.proofToken, paymentLink.raw]
+        );
+
+        await writeSystemAuditLog(client, "storefront.checkout_intent.link_created", "order", String(checkout.order_id), {
+          checkout_id: checkout.checkout_id,
+          payment_provider: "galiopay",
+          payment_reference_id: referenceId,
+        });
+      }
+
+      if (paymentUrl) {
+        await client.query(
+          `
+            update public.orders
+            set status = 'pending'
+            where id = $1
+              and status = 'draft'
+          `,
+          [checkout.order_id]
+        );
+      }
     }
 
     await client.query("commit");
@@ -574,7 +694,7 @@ export async function resolveStorefrontCheckoutHandoff(orderId: number, token: s
         ready: Boolean(paymentUrl),
         status: paymentStatus,
         url: paymentUrl,
-        provider: "galiopay",
+        provider: paymentProvider,
         message: paymentUrl ? "Link de pago listo para enviar por WhatsApp." : "El link de pago todavía no está listo.",
       },
     };
@@ -649,6 +769,36 @@ function mapWebhookStatus(status: string | null) {
   } as const;
 }
 
+function mapTaloWebhookStatus(status: string | null) {
+  const normalized = String(status ?? "").trim().toUpperCase();
+
+  if (normalized === "SUCCESS" || normalized === "OVERPAID") {
+    return {
+      checkoutStatus: "paid",
+      orderStatus: "paid",
+    } as const;
+  }
+
+  if (normalized === "EXPIRED") {
+    return {
+      checkoutStatus: "expired",
+      orderStatus: "cancelled",
+    } as const;
+  }
+
+  if (normalized === "UNDERPAID") {
+    return {
+      checkoutStatus: "failed",
+      orderStatus: "pending",
+    } as const;
+  }
+
+  return {
+    checkoutStatus: "link_created",
+    orderStatus: "pending",
+  } as const;
+}
+
 export async function handleGalioPayWebhook(payload: unknown) {
   const body = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
   const paymentId = typeof body.id === "string" ? body.id : null;
@@ -704,6 +854,11 @@ export async function handleGalioPayWebhook(payload: unknown) {
         update public.storefront_checkout_intents
         set
           status = $2,
+          payment_provider = 'galiopay',
+          payment_reference_id = coalesce($7, payment_reference_id),
+          payment_url = coalesce(galio_payment_url, payment_url),
+          payment_id = coalesce($3, payment_id),
+          payment_status = $4,
           galio_payment_id = coalesce($3, galio_payment_id),
           galio_payment_status = $4,
           paid_at = case when $2 = 'paid' then coalesce(paid_at, now()) else paid_at end,
@@ -713,7 +868,7 @@ export async function handleGalioPayWebhook(payload: unknown) {
           )
         where id = $1
       `,
-      [checkout.id, mapped.checkoutStatus, paymentId, finalStatus, body, verifiedPayment?.raw ?? null]
+      [checkout.id, mapped.checkoutStatus, paymentId, finalStatus, body, verifiedPayment?.raw ?? null, referenceId]
     );
 
     await client.query(
@@ -739,6 +894,126 @@ export async function handleGalioPayWebhook(payload: unknown) {
       updated: true,
       referenceId,
       paymentId,
+      status: finalStatus,
+    };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function handleTaloWebhook(payload: unknown) {
+  const body = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  const paymentId =
+    (typeof body.paymentId === "string" && body.paymentId) ||
+    (typeof body.id === "string" && body.id) ||
+    null;
+  const externalId =
+    (typeof body.externalId === "string" && body.externalId) ||
+    (typeof body.external_id === "string" && body.external_id) ||
+    null;
+
+  if (!paymentId && !externalId) {
+    return {
+      ok: true,
+      ignored: true,
+      reason: "missing_payment_identifier",
+    };
+  }
+
+  const verifiedPayment = paymentId && hasTaloConfig() ? await getTaloPayment(paymentId).catch(() => null) : null;
+  const resolvedPaymentId = verifiedPayment?.id || paymentId;
+  const resolvedExternalId = verifiedPayment?.externalId || externalId;
+  const finalStatus = verifiedPayment?.status || null;
+  const mapped = mapTaloWebhookStatus(finalStatus);
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    const lookup = await client.query<{ id: number; order_id: number }>(
+      `
+        select id, order_id
+        from public.storefront_checkout_intents
+        where ($1::text is not null and payment_id = $1)
+           or ($2::text is not null and payment_reference_id = $2)
+        order by id desc
+        limit 1
+        for update
+      `,
+      [resolvedPaymentId, resolvedExternalId]
+    );
+
+    const checkout = lookup.rows[0];
+
+    if (!checkout) {
+      await client.query("commit");
+      return {
+        ok: true,
+        ignored: true,
+        reason: "checkout_not_found",
+      };
+    }
+
+    await client.query(
+      `
+        update public.storefront_checkout_intents
+        set
+          status = $2,
+          payment_provider = 'talo',
+          payment_reference_id = coalesce($3, payment_reference_id),
+          payment_id = coalesce($4, payment_id),
+          payment_status = $5,
+          paid_at = case when $2 = 'paid' then coalesce(paid_at, now()) else paid_at end,
+          metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object(
+            'last_talo_webhook', $6::jsonb,
+            'last_talo_payment', $7::jsonb,
+            'talo_alias', $8::text,
+            'talo_cvu', $9::text,
+            'talo_expiration_timestamp', $10::text
+          )
+        where id = $1
+      `,
+      [
+        checkout.id,
+        mapped.checkoutStatus,
+        resolvedExternalId,
+        resolvedPaymentId,
+        finalStatus,
+        body,
+        verifiedPayment?.raw ?? null,
+        verifiedPayment?.alias ?? null,
+        verifiedPayment?.cvu ?? null,
+        verifiedPayment?.expirationTimestamp ?? null,
+      ]
+    );
+
+    await client.query(
+      `
+        update public.orders
+        set status = $2
+        where id = $1
+      `,
+      [checkout.order_id, mapped.orderStatus]
+    );
+
+    await writeSystemAuditLog(client, "storefront.checkout_intent.payment_webhook", "order", String(checkout.order_id), {
+      checkout_id: checkout.id,
+      payment_provider: "talo",
+      payment_reference_id: resolvedExternalId,
+      payment_id: resolvedPaymentId,
+      status: finalStatus,
+    });
+
+    await client.query("commit");
+
+    return {
+      ok: true,
+      updated: true,
+      externalId: resolvedExternalId,
+      paymentId: resolvedPaymentId,
       status: finalStatus,
     };
   } catch (error) {

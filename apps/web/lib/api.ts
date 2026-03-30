@@ -298,6 +298,11 @@ export type OrderCheckoutIntentRecord = {
   currency_code: string;
   image_url_snapshot: string | null;
   delivery_days_snapshot: number | null;
+  payment_provider: string | null;
+  payment_reference_id: string | null;
+  payment_url: string | null;
+  payment_id: string | null;
+  payment_status: string | null;
   galio_reference_id: string | null;
   galio_payment_url: string | null;
   galio_proof_token: string | null;
