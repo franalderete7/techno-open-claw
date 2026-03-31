@@ -168,6 +168,8 @@ async function taloRequest(path: string, init: RequestInit, retryOnAuthFailure =
 function mapTaloPayment(raw: unknown): TaloPaymentResponse {
   const record = asRecord(raw);
   const dataRecord = asRecord(record?.data);
+  const quotes = Array.isArray(dataRecord?.quotes) ? dataRecord?.quotes : Array.isArray(record?.quotes) ? record?.quotes : [];
+  const firstQuote = asRecord(quotes[0]);
   const transferQuote = asRecord(dataRecord?.transfer_quote);
   const transferDetails = asRecord(dataRecord?.transfer_details);
 
@@ -178,10 +180,12 @@ function mapTaloPayment(raw: unknown): TaloPaymentResponse {
       pickText(record, "external_id", "externalId") || pickText(dataRecord, "external_id", "externalId"),
     paymentUrl: pickText(record, "payment_url", "paymentUrl") || pickText(dataRecord, "payment_url", "paymentUrl"),
     alias:
+      pickText(firstQuote, "alias") ||
       pickText(transferQuote, "alias") ||
       pickText(transferDetails, "alias") ||
       pickNestedText(record, ["data", "transfer_quote", "alias"]),
     cvu:
+      pickText(firstQuote, "cvu", "address") ||
       pickText(transferQuote, "cvu") ||
       pickText(transferDetails, "cvu") ||
       pickNestedText(record, ["data", "transfer_quote", "cvu"]),
@@ -233,12 +237,12 @@ export async function createTaloPayment({
     motive: title,
     client_data: {
       ...nameParts,
-      phone_number: customerPhone || undefined,
+      phone: customerPhone || undefined,
       email: customerEmail || undefined,
     },
   };
 
-  const raw = await taloRequest("/payments", {
+  const raw = await taloRequest("/payments/", {
     method: "POST",
     body: JSON.stringify(payload),
   });

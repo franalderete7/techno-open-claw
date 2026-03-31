@@ -1452,6 +1452,11 @@ export async function runContentJob(executor: SqlExecutor, jobId: number) {
   });
 
   if (job.engine === "orshot") {
+    const referenceAsset = job.product_id ? await findApprovedProductReferenceAsset(executor, job.product_id) : null;
+    if (!variables.product_reference_image_url && referenceAsset?.storage_url) {
+      variables.product_reference_image_url = referenceAsset.storage_url;
+    }
+
     const templateId = (job.input_json.provider_template_id as string | undefined)?.trim() || (templateConfig.provider_template_id as string | undefined)?.trim();
     if (!templateId) {
       throw new Error(`Template ${job.template_code} needs definition_json.provider_template_id before it can run on Orshot.`);
