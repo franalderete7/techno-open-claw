@@ -5567,7 +5567,81 @@ function parseQuickReadCommand(text: string): { command: ReadCommandName; params
     return detailCommand;
   }
 
+  const productSearchCommand = parseQuickProductSearchCommand(text);
+  if (productSearchCommand) {
+    return productSearchCommand;
+  }
+
   return null;
+}
+
+function parseQuickProductSearchCommand(text: string): { command: ReadCommandName; params: Record<string, unknown> } | null {
+  const normalized = normalizeMatch(text);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const hasSearchVerb =
+    /\b(search|find|look|show|list|browse|buscar|busca|mostrar|mostrame|lista|listar|ver)\b/.test(normalized) ||
+    normalized.includes("look for") ||
+    normalized.includes("show me");
+  const hasProductNoun = /\b(product|products|producto|productos|catalog|catalogo|catalogos)\b/.test(normalized);
+  const hasDeviceHint =
+    /\b(iphone|samsung|galaxy|xiaomi|redmi|poco|pixel|motorola|moto|infinix|realme|oppo|vivo|nokia|oneplus)\b/.test(
+      normalized
+    );
+
+  if (!hasSearchVerb || (!hasProductNoun && !hasDeviceHint)) {
+    return null;
+  }
+
+  const wantsCheapest =
+    /\b(cheap|cheapest|economico|economica|barato|barata)\b/.test(normalized) ||
+    normalized.includes("mas barato") ||
+    normalized.includes("mas barata");
+  const wantsInStock = /\b(in stock|available|available now|disponible|disponibles|stock)\b/.test(normalized);
+  const wantsImages = /\b(with image|with images|image|images|con imagen|con imagenes)\b/.test(normalized);
+
+  const query = normalized
+    .replace(/\bsearch for\b/g, " ")
+    .replace(/\blook for\b/g, " ")
+    .replace(/\bshow me\b/g, " ")
+    .replace(/\b(search|find|look|show|list|browse|buscar|busca|mostrar|mostrame|lista|listar|ver)\b/g, " ")
+    .replace(/\b(product|products|producto|productos|catalog|catalogo|catalogos)\b/g, " ")
+    .replace(/\b(cheap|cheapest|economico|economica|barato|barata)\b/g, " ")
+    .replace(/\b(with image|with images|image|images|con imagen|con imagenes)\b/g, " ")
+    .replace(/\b(in stock|available now|available|disponible|disponibles|stock)\b/g, " ")
+    .replace(/\b(my|the|me|a|an|el|la|los|las|un|una|unos|unas)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const params: Record<string, unknown> = {
+    active: true,
+    limit: 24,
+  };
+
+  if (query) {
+    params.query = query;
+  }
+
+  if (wantsCheapest) {
+    params.sort_by = "price";
+    params.sort_dir = "asc";
+  }
+
+  if (wantsInStock) {
+    params.in_stock = true;
+  }
+
+  if (wantsImages) {
+    params.has_image = true;
+  }
+
+  return {
+    command: "list_products",
+    params,
+  };
 }
 
 function applyAttachedImageDefaults(
