@@ -18,8 +18,10 @@ import { calculateDerivedPricing, shouldRecalculatePricing } from "./pricing.js"
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { n8nCompatRoutes } from "./routes/n8n-compat.js";
 import { metaAdsApiRoutes } from "./routes/meta-ads-api.js";
+import { metaCatalogApiRoutes } from "./routes/meta-catalog-api.js";
 import { contentApiRoutes } from "./routes/content-api.js";
 import { telegramOperatorApiRoutes } from "./routes/telegram-operator-api.js";
+import { sendMetaPurchaseEventForOrder } from "./meta-conversions.js";
 import {
   buildTelegramWebhookTargetUrl,
   deleteTelegramWebhook,
@@ -119,6 +121,12 @@ function getActorContext(request: FastifyRequest) {
     actorType: parsedActorType,
     actorId: typeof rawActorId === "string" && rawActorId.trim() ? rawActorId.trim() : null,
   };
+}
+
+function dispatchMetaPurchaseEvent(orderId: number) {
+  void sendMetaPurchaseEventForOrder(orderId).catch((error) => {
+    console.error(`Failed to send Meta purchase event for order ${orderId}:`, error);
+  });
 }
 
 async function writeAuditLog(
@@ -233,6 +241,8 @@ app.post("/webhooks/orshot", async (request, reply) => {
   const result = await handleOrshotWebhook(pool, request.body);
   return reply.code(200).send(result);
 });
+
+app.register(metaCatalogApiRoutes);
 
 app.register(async (protectedApp) => {
   protectedApp.addHook("preHandler", requireBearerToken);
@@ -1857,6 +1867,10 @@ app.register(async (protectedApp) => {
 
       await client.query("commit");
 
+      if (body.status === "paid" || body.status === "fulfilled") {
+        dispatchMetaPurchaseEvent(order.id);
+      }
+
       const rows = await query(`select * from public.orders where id = $1`, [order.id]);
       return reply.code(201).send(rows[0]);
     } catch (error) {
@@ -1891,6 +1905,29 @@ app.register(async (protectedApp) => {
 
     try {
       await client.query("begin");
+      let previousStatus: string | null = null;
+
+      if (body.status) {
+        const existingResult = await client.query<{ status: string }>(
+          `
+            select status
+            from public.orders
+            where id = $1
+            limit 1
+            for update
+          `,
+          [orderId]
+        );
+
+        const existing = existingResult.rows[0];
+
+        if (!existing) {
+          await client.query("rollback");
+          return reply.code(404).send({ error: "Order not found." });
+        }
+
+        previousStatus = existing.status;
+      }
 
       const result = await client.query(
         `
@@ -1915,6 +1952,15 @@ app.register(async (protectedApp) => {
 
       await writeAuditLog(client, request, "order.updated", "order", String(order.id), body);
       await client.query("commit");
+
+      if (
+        body.status &&
+        (body.status === "paid" || body.status === "fulfilled") &&
+        previousStatus !== "paid" &&
+        previousStatus !== "fulfilled"
+      ) {
+        dispatchMetaPurchaseEvent(order.id);
+      }
 
       return order;
     } catch (error) {

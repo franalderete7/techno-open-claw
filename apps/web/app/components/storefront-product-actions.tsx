@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { trackMetaContact, trackMetaInitiateCheckout } from "../../lib/meta-pixel";
 import { buildStorefrontConsultUrl, buildStorefrontPaymentFallbackUrl, type StorefrontProduct } from "../../lib/storefront";
 
 type StorefrontProductActionsProps = {
-  product: Pick<StorefrontProduct, "id" | "sku" | "title" | "public_price_ars">;
+  product: Pick<StorefrontProduct, "id" | "sku" | "title" | "brand" | "public_price_ars">;
   whatsappUrl: string | null;
   sourcePath?: string | null;
   note?: string | null;
@@ -42,6 +43,13 @@ export function StorefrontProductActions({
   async function handlePayNow() {
     try {
       setPending(true);
+      trackMetaInitiateCheckout({
+        sku: product.sku,
+        title: product.title,
+        brand: product.brand,
+        value: product.public_price_ars,
+        currency: "ARS",
+      });
 
       const response = await fetch("/api/storefront/payment-intents", {
         method: "POST",
@@ -97,6 +105,15 @@ export function StorefrontProductActions({
             href={consultUrl}
             target="_blank"
             rel="noreferrer"
+            onClick={() =>
+              trackMetaContact({
+                sku: product.sku,
+                title: product.title,
+                brand: product.brand,
+                value: product.public_price_ars,
+                currency: "ARS",
+              })
+            }
             data-fast-goal="click_consultar"
             data-fast-goal-product-id={String(product.id)}
             data-fast-goal-product-sku={product.sku}

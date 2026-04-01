@@ -10,6 +10,7 @@ import {
   buildStorefrontProfile,
   type StorefrontProduct,
 } from "../../lib/storefront";
+import { MetaProductViewTracker } from "../components/meta-product-view-tracker";
 import { StorefrontProductActions } from "../components/storefront-product-actions";
 
 type StorefrontProductPageProps = {
@@ -139,6 +140,14 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
         </section>
       ) : product ? (
         <section className="storefront-product-page">
+          <MetaProductViewTracker
+            sku={product.sku}
+            title={product.title}
+            brand={product.brand}
+            value={product.public_price_ars}
+            currency="ARS"
+          />
+
           <div className="storefront-product-breadcrumbs">
             <Link href="/" className="chip action-link">
               Volver al catalogo

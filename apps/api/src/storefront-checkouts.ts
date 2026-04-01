@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { config } from "./config.js";
 import { pool } from "./db.js";
 import { createGalioPaymentLink, getGalioPayment, hasGalioPayConfig } from "./galiopay.js";
+import { sendMetaPurchaseEventForOrder } from "./meta-conversions.js";
 import { createTaloPayment, getTaloPayment, hasTaloConfig } from "./talo.js";
 
 type CheckoutChannel = "storefront" | "whatsapp" | "telegram" | "api";
@@ -109,6 +110,12 @@ function toNumber(value: string | number | null | undefined) {
 function normalizePhoneDigits(value: string | null | undefined) {
   const digits = String(value ?? "").replace(/\D+/g, "");
   return digits || null;
+}
+
+function dispatchMetaPurchaseEvent(orderId: number) {
+  void sendMetaPurchaseEventForOrder(orderId).catch((error) => {
+    console.error(`Failed to send Meta purchase event for order ${orderId}:`, error);
+  });
 }
 
 function orderSourceForChannel(channel: CheckoutChannel) {
@@ -839,6 +846,7 @@ export async function handleGalioPayWebhook(payload: unknown) {
     );
 
     const checkout = lookup.rows[0];
+    let previousOrderStatus: string | null = null;
 
     if (!checkout) {
       await client.query("commit");
@@ -848,6 +856,18 @@ export async function handleGalioPayWebhook(payload: unknown) {
         reason: "checkout_not_found",
       };
     }
+
+    const orderResult = await client.query<{ status: string }>(
+      `
+        select status
+        from public.orders
+        where id = $1
+        limit 1
+        for update
+      `,
+      [checkout.order_id]
+    );
+    previousOrderStatus = orderResult.rows[0]?.status ?? null;
 
     await client.query(
       `
@@ -888,6 +908,10 @@ export async function handleGalioPayWebhook(payload: unknown) {
     });
 
     await client.query("commit");
+
+    if (mapped.orderStatus === "paid" && previousOrderStatus !== "paid" && previousOrderStatus !== "fulfilled") {
+      dispatchMetaPurchaseEvent(checkout.order_id);
+    }
 
     return {
       ok: true,
@@ -947,6 +971,7 @@ export async function handleTaloWebhook(payload: unknown) {
     );
 
     const checkout = lookup.rows[0];
+    let previousOrderStatus: string | null = null;
 
     if (!checkout) {
       await client.query("commit");
@@ -956,6 +981,18 @@ export async function handleTaloWebhook(payload: unknown) {
         reason: "checkout_not_found",
       };
     }
+
+    const orderResult = await client.query<{ status: string }>(
+      `
+        select status
+        from public.orders
+        where id = $1
+        limit 1
+        for update
+      `,
+      [checkout.order_id]
+    );
+    previousOrderStatus = orderResult.rows[0]?.status ?? null;
 
     await client.query(
       `
@@ -1008,6 +1045,10 @@ export async function handleTaloWebhook(payload: unknown) {
     });
 
     await client.query("commit");
+
+    if (mapped.orderStatus === "paid" && previousOrderStatus !== "paid" && previousOrderStatus !== "fulfilled") {
+      dispatchMetaPurchaseEvent(checkout.order_id);
+    }
 
     return {
       ok: true,

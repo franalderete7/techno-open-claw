@@ -17,6 +17,7 @@ export const metadata: Metadata = {
 
 const DATAFAST_WEBSITE_ID = "dfid_0FS4Ry9BtGqWZVGm695Zg";
 const DATAFAST_DOMAIN = "technostoresalta.com";
+const metaPixelId = process.env.META_PIXEL_ID?.trim() || "";
 
 const navItems = [
   ["Dashboard", "/"],
@@ -53,6 +54,15 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <head>
         {siteMode === "storefront" ? (
           <>
+            {metaPixelId ? (
+              <Script id="meta-pixel-base" strategy="afterInteractive">
+                {`!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+                n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
+                n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+                t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window, document,'script',
+                'https://connect.facebook.net/en_US/fbevents.js');fbq('init', '${metaPixelId}');fbq('track', 'PageView');`}
+              </Script>
+            ) : null}
             <Script id="datafast-queue" strategy="beforeInteractive">
               {`window.datafast=window.datafast||function(){window.datafast.q=window.datafast.q||[];window.datafast.q.push(arguments);};`}
             </Script>

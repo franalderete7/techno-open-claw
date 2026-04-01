@@ -90,6 +90,10 @@ const configSchema = z.object({
       .find(Boolean) ?? ""
   ),
   META_BUSINESS_ID: z.string().default(""),
+  META_CATALOG_ID: z.string().default(""),
+  META_PIXEL_ID: z.string().default(""),
+  META_CATALOG_FEED_TOKEN: z.string().default(""),
+  META_TEST_EVENT_CODE: z.string().default(""),
   META_API_VERSION: z.string().default("v25.0"),
   META_GRAPH_API_BASE: z.string().default("https://graph.facebook.com"),
 });
