@@ -326,6 +326,36 @@ export async function handleTelegramWebhook(request: FastifyRequest, reply: Fast
         });
       } catch (error) {
         request.log.error({ error }, "Telegram callback operator flow failed");
+
+        const fallbackText = formatOperatorError(error);
+
+        try {
+          const telegramResponses = await sendTelegramTextMessages({
+            botToken: config.TELEGRAM_BOT_TOKEN,
+            chatId: callbackMessage.chat.id,
+            text: fallbackText,
+            replyToMessageId: callbackMessage.message_id,
+          });
+          const telegramMessageIds = telegramResponses.map((item) => item.message_id);
+          const telegramMessageId = telegramMessageIds[0] ?? null;
+
+          await saveConversationMessage({
+            conversationId,
+            direction: "outbound",
+            senderKind: "tool",
+            messageType: "text",
+            textBody: fallbackText,
+            payload: {
+              source: "telegram-callback-error",
+              telegramMessageId,
+              telegramMessageIds,
+              callbackAction: callbackAction.action,
+              callbackValue: callbackAction.value,
+            },
+          });
+        } catch (sendError) {
+          request.log.error({ error: sendError }, "Failed to send Telegram callback error reply");
+        }
       }
     })();
 

@@ -3762,6 +3762,24 @@ async function prepareWriteCommand(
     case "delete_product": {
       const parsed = deleteProductSchema.parse(rawParams);
       const product = await resolveProduct(parsed.product_ref);
+      const [stockCount, checkoutIntentCount] = await Promise.all([
+        query<{ count: string }>("select count(*)::text as count from public.stock_units where product_id = $1", [product.id]),
+        query<{ count: string }>(
+          "select count(*)::text as count from public.storefront_checkout_intents where product_id = $1",
+          [product.id]
+        ),
+      ]);
+
+      if (Number(stockCount[0]?.count ?? 0) > 0) {
+        throw new Error(`No puedo borrar ${product.sku} porque todavía tiene unidades de stock. Archivá el producto primero.`);
+      }
+
+      if (Number(checkoutIntentCount[0]?.count ?? 0) > 0) {
+        throw new Error(
+          `No puedo borrar ${product.sku} porque tiene checkout intents del storefront asociados. Archivá el producto primero.`
+        );
+      }
+
       return {
         command,
         summary: [`Borrar producto`, `• ${product.sku}`, `• ${product.title}`].join("\n"),
@@ -4557,6 +4575,17 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
 
       if (Number(stockCount.rows[0]?.count ?? 0) > 0) {
         throw new Error(`No puedo borrar ${parsed.sku} porque todavía tiene unidades de stock. Archivá el producto primero.`);
+      }
+
+      const checkoutIntentCount = await client.query<{ count: string }>(
+        "select count(*)::text as count from public.storefront_checkout_intents where product_id = $1",
+        [parsed.product_id]
+      );
+
+      if (Number(checkoutIntentCount.rows[0]?.count ?? 0) > 0) {
+        throw new Error(
+          `No puedo borrar ${parsed.sku} porque tiene checkout intents del storefront asociados. Archivá el producto primero.`
+        );
       }
 
       await client.query("delete from public.products where id = $1", [parsed.product_id]);

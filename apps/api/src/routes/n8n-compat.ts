@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { FastifyPluginAsync } from "fastify";
 import { pool, query } from "../db.js";
 import {
@@ -63,6 +66,39 @@ type CandidateProduct = {
   image_url: string | null;
 };
 
+type StaticUsedIphoneCatalogItem = {
+  id: string;
+  source_row: number;
+  brand_key: string;
+  model_name: string;
+  family_number: number | null;
+  tier_key: string | null;
+  storage_gb: number | null;
+  color: string | null;
+  battery_health_pct: number | null;
+  battery_note: string | null;
+  condition: string;
+  source_price_usd: number;
+  sale_price_usd: number;
+};
+
+type StaticUsedIphoneCatalog = {
+  catalog_type: string;
+  currency: string;
+  markup_pct: number;
+  rounding: string;
+  source: {
+    kind: string;
+    image_path?: string;
+    captured_on?: string;
+  };
+  items: StaticUsedIphoneCatalogItem[];
+};
+
+type UsedIphoneCandidate = StaticUsedIphoneCatalogItem & {
+  score: number;
+};
+
 type MessageProductSignals = {
   normalizedMessage: string;
   brandKeys: string[];
@@ -72,6 +108,90 @@ type MessageProductSignals = {
   modelVariantToken: string | null;
   hasSpecificIntent: boolean;
 };
+
+const moduleDir = dirname(fileURLToPath(import.meta.url));
+const usedIphoneCatalogPaths = [
+  resolve(moduleDir, "../../data/used-iphone-catalog.json"),
+  resolve(process.cwd(), "data/used-iphone-catalog.json"),
+  resolve(process.cwd(), "../../data/used-iphone-catalog.json"),
+];
+
+function asNullableNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function loadStaticUsedIphoneCatalog(): StaticUsedIphoneCatalog {
+  try {
+    const catalogPath = usedIphoneCatalogPaths.find((path) => existsSync(path));
+    if (!catalogPath) {
+      throw new Error("used iphone catalog not found");
+    }
+
+    const raw = JSON.parse(readFileSync(catalogPath, "utf8")) as Partial<StaticUsedIphoneCatalog>;
+    const items = Array.isArray(raw.items)
+      ? raw.items
+          .map((entry) => {
+            const item = entry as Partial<StaticUsedIphoneCatalogItem>;
+            const id = String(item.id ?? "").trim();
+            const modelName = String(item.model_name ?? "").trim();
+            if (!id || !modelName) {
+              return null;
+            }
+
+            return {
+              id,
+              source_row: Number(item.source_row ?? 0) || 0,
+              brand_key: String(item.brand_key ?? "apple").trim() || "apple",
+              model_name: modelName,
+              family_number: asNullableNumber(item.family_number),
+              tier_key: item.tier_key == null ? null : String(item.tier_key).trim() || null,
+              storage_gb: asNullableNumber(item.storage_gb),
+              color: item.color == null ? null : String(item.color).trim() || null,
+              battery_health_pct: asNullableNumber(item.battery_health_pct),
+              battery_note: item.battery_note == null ? null : String(item.battery_note).trim() || null,
+              condition: String(item.condition ?? "used").trim() || "used",
+              source_price_usd: Number(item.source_price_usd ?? 0) || 0,
+              sale_price_usd: Number(item.sale_price_usd ?? 0) || 0,
+            } satisfies StaticUsedIphoneCatalogItem;
+          })
+          .filter((item): item is StaticUsedIphoneCatalogItem => item !== null)
+      : [];
+
+    return {
+      catalog_type: String(raw.catalog_type ?? "static_used_iphone_list"),
+      currency: String(raw.currency ?? "USD"),
+      markup_pct: Number(raw.markup_pct ?? 0) || 0,
+      rounding: String(raw.rounding ?? "ceil_to_whole_usd"),
+      source:
+        raw.source && typeof raw.source === "object"
+          ? {
+              kind: String((raw.source as Record<string, unknown>).kind ?? "unknown"),
+              image_path:
+                (raw.source as Record<string, unknown>).image_path == null
+                  ? undefined
+                  : String((raw.source as Record<string, unknown>).image_path),
+              captured_on:
+                (raw.source as Record<string, unknown>).captured_on == null
+                  ? undefined
+                  : String((raw.source as Record<string, unknown>).captured_on),
+            }
+          : { kind: "unknown" },
+      items,
+    };
+  } catch {
+    return {
+      catalog_type: "static_used_iphone_list",
+      currency: "USD",
+      markup_pct: 0,
+      rounding: "ceil_to_whole_usd",
+      source: { kind: "unavailable" },
+      items: [],
+    };
+  }
+}
+
+const staticUsedIphoneCatalog = loadStaticUsedIphoneCatalog();
 
 function normalizeText(value: string) {
   return value
@@ -440,6 +560,125 @@ function scoreCandidate(product: ProductRow, userMessage: string) {
   }
 
   return score;
+}
+
+function messageAsksForBudgetOrUsed(normalizedMessage: string) {
+  if (!normalizedMessage) {
+    return false;
+  }
+
+  return /(barato|barata|economico|economica|presupuesto|hasta|accesible|mas barato|algo mas barato|usado|usados|segunda mano|seminuevo|semi nuevo)/.test(
+    normalizedMessage
+  );
+}
+
+function looksLikeAppleReference(value: string | null | undefined) {
+  const normalized = normalizeText(value ?? "");
+  return /(iphone|apple|ipad|macbook)/.test(normalized);
+}
+
+function scoreUsedIphoneCandidate(item: StaticUsedIphoneCatalogItem, signals: MessageProductSignals) {
+  const haystack = normalizeText(
+    [
+      item.model_name,
+      item.family_number != null ? String(item.family_number) : "",
+      item.storage_gb != null ? `${item.storage_gb} gb` : "",
+      item.color ?? "",
+      item.battery_note ?? "",
+      item.condition,
+    ].join(" ")
+  );
+
+  let score = 0;
+  const messageTokens = signals.normalizedMessage.split(" ").filter((token) => token.length > 1);
+
+  for (const token of messageTokens) {
+    if (haystack.includes(token)) {
+      score += token.length >= 4 ? 6 : 2;
+    }
+  }
+
+  if (signals.brandKeys.includes("apple")) {
+    score += 10;
+  }
+
+  if (signals.familyNumber != null) {
+    score += item.family_number === signals.familyNumber ? 18 : -10;
+  }
+
+  if (signals.tierKey) {
+    score += item.tier_key === signals.tierKey ? 8 : -6;
+  }
+
+  if (signals.storageValue != null) {
+    score += item.storage_gb === signals.storageValue ? 6 : -4;
+  }
+
+  if (signals.modelVariantToken) {
+    score += haystack.includes(signals.modelVariantToken) ? 8 : -4;
+  }
+
+  if (item.condition === "sealed") {
+    score += /\bsellado\b|\bsealed\b/.test(signals.normalizedMessage) ? 8 : 2;
+  }
+
+  if (messageAsksForBudgetOrUsed(signals.normalizedMessage)) {
+    score += 6;
+  }
+
+  return score;
+}
+
+function selectUsedIphoneCandidates(params: {
+  userMessage: string;
+  customerState: NotesState;
+  limit: number;
+}) {
+  const signals = getMessageProductSignals(params.userMessage);
+  const wantsBudgetOrUsed = messageAsksForBudgetOrUsed(signals.normalizedMessage);
+  const prefersAffordableUsed =
+    wantsBudgetOrUsed &&
+    signals.familyNumber == null &&
+    signals.tierKey == null &&
+    signals.storageValue == null &&
+    !signals.modelVariantToken;
+  const hasAppleContext =
+    signals.brandKeys.includes("apple") ||
+    params.customerState.brandsMentioned.includes("apple") ||
+    looksLikeAppleReference(params.customerState.interestedProduct);
+
+  if (!hasAppleContext || staticUsedIphoneCatalog.items.length === 0) {
+    return [];
+  }
+
+  return staticUsedIphoneCatalog.items
+    .map((item) => ({
+      ...item,
+      score: scoreUsedIphoneCandidate(item, signals),
+    }))
+    .filter((item) => item.score > 0 || wantsBudgetOrUsed)
+    .sort((left, right) => {
+      if (prefersAffordableUsed) {
+        if (left.condition !== right.condition) {
+          if (left.condition === "used") return -1;
+          if (right.condition === "used") return 1;
+        }
+        if (left.sale_price_usd !== right.sale_price_usd) return left.sale_price_usd - right.sale_price_usd;
+        if ((right.battery_health_pct ?? 0) !== (left.battery_health_pct ?? 0)) {
+          return (right.battery_health_pct ?? 0) - (left.battery_health_pct ?? 0);
+        }
+        if (right.score !== left.score) return right.score - left.score;
+        return left.source_row - right.source_row;
+      }
+
+      if (right.score !== left.score) return right.score - left.score;
+      if (left.sale_price_usd !== right.sale_price_usd) return left.sale_price_usd - right.sale_price_usd;
+      if ((right.battery_health_pct ?? 0) !== (left.battery_health_pct ?? 0)) {
+        return (right.battery_health_pct ?? 0) - (left.battery_health_pct ?? 0);
+      }
+      return left.source_row - right.source_row;
+    })
+    .slice(0, params.limit);
 }
 
 function asRecord(value: unknown) {
@@ -836,6 +1075,11 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
 
     const interestedProductKey = customerState.interestedProduct?.trim().toLowerCase() || null;
     const currentProductSignals = getMessageProductSignals(userMessage);
+    const usedIphoneCandidates = selectUsedIphoneCandidates({
+      userMessage,
+      customerState,
+      limit: Math.min(6, candidateLimit),
+    });
 
     const rawCandidateProducts = productRows
       .map((product) => {
@@ -1066,6 +1310,25 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
             created_at: message.created_at,
           })),
         candidate_products: candidateProducts,
+        used_iphone_catalog: {
+          enabled: staticUsedIphoneCatalog.items.length > 0,
+          currency: staticUsedIphoneCatalog.currency,
+          markup_pct: staticUsedIphoneCatalog.markup_pct,
+          total_items: staticUsedIphoneCatalog.items.length,
+          captured_on: staticUsedIphoneCatalog.source.captured_on ?? null,
+        },
+        used_iphone_candidates: usedIphoneCandidates.map((item) => ({
+          id: item.id,
+          model_name: item.model_name,
+          family_number: item.family_number,
+          tier_key: item.tier_key,
+          storage_gb: item.storage_gb,
+          color: item.color,
+          battery_health_pct: item.battery_health_pct,
+          battery_note: item.battery_note,
+          condition: item.condition,
+          sale_price_usd: item.sale_price_usd,
+        })),
         store,
         storefront_handoff: storefrontHandoff,
       },
