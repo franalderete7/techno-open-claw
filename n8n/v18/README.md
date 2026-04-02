@@ -63,10 +63,11 @@ What it does:
 
 - backs up the currently imported v18 workflows to `n8n/backups/v18/<timestamp>`
 - unpublishes the current exact-name v18 set
-- deletes the current exact-name v18 set so the next import is clean
+- archives the current exact-name v18 set instead of deleting it
 - imports the 6 child workflows first as a brand-new set
 - patches the entry workflow with the real child workflow IDs
 - imports the entry workflow last
+- unarchives the newly imported workflows if needed
 - publishes the full v18 set in the right order
 - restarts n8n so webhook registrations refresh against the newly published set
 

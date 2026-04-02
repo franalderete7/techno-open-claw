@@ -97,10 +97,6 @@ function log(message) {
   console.log(message);
 }
 
-function warn(message) {
-  console.warn(message);
-}
-
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd || ROOT_DIR,
@@ -191,6 +187,7 @@ function loadWorkflowRecords(dir) {
       id: workflow.id == null ? null : String(workflow.id),
       name: String(workflow.name || ""),
       active: workflow.active === true,
+      archived: workflow.isArchived === true || workflow.archived === true,
       updatedAt: workflow.updatedAt || null,
       workflow,
     });
@@ -201,6 +198,7 @@ function loadWorkflowRecords(dir) {
 
 function pickCanonical(records) {
   return [...records].sort((a, b) => {
+    if (a.archived !== b.archived) return a.archived ? 1 : -1;
     if (a.active !== b.active) return a.active ? -1 : 1;
     const aTime = a.updatedAt ? Date.parse(a.updatedAt) : 0;
     const bTime = b.updatedAt ? Date.parse(b.updatedAt) : 0;
@@ -237,12 +235,13 @@ function backupExistingWorkflows(grouped, backupDir) {
     for (const record of matches) {
       const backupName = `${expected.file.replace(/\.json$/, "")}__${record.id || "no-id"}${
         record.active ? "__active" : ""
-      }.json`;
+      }${record.archived ? "__archived" : ""}.json`;
       copyFileSync(record.path, join(backupDir, backupName));
       manifest.push({
         name: record.name,
         id: record.id,
         active: record.active,
+        archived: record.archived,
         sourceFile: record.file,
         backupFile: backupName,
       });
@@ -321,6 +320,26 @@ async function requestJson(auth, method, path, body) {
   return text ? JSON.parse(text) : null;
 }
 
+async function patchWorkflow(auth, workflowId, patch) {
+  const attempts = [patch];
+
+  if ("isArchived" in patch && !("archived" in patch)) {
+    attempts.push({ ...patch, archived: patch.isArchived });
+  }
+
+  let lastError = null;
+
+  for (const body of attempts) {
+    try {
+      return await requestJson(auth, "PATCH", `/rest/workflows/${workflowId}`, body);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error(`Could not patch workflow ${workflowId}`);
+}
+
 function cliSupports(container, command) {
   const result = containerCommandAllowFailure(container, "sh", "-lc", `n8n ${command} --help >/dev/null 2>&1`);
   return result.status === 0;
@@ -358,9 +377,26 @@ function publishWorkflow(container, auth, workflowId) {
   throw new Error("No supported CLI command found to publish workflows.");
 }
 
-async function deleteWorkflow(auth, workflowId) {
+async function archiveWorkflow(container, auth, workflowId) {
   if (DRY_RUN) return;
-  await requestJson(auth, "DELETE", `/rest/workflows/${workflowId}`);
+
+  if (cliSupports(container, "archive:workflow")) {
+    containerSh(container, `n8n archive:workflow --id='${workflowId}' >/dev/null`);
+    return;
+  }
+
+  await patchWorkflow(auth, workflowId, { isArchived: true });
+}
+
+async function unarchiveWorkflow(container, auth, workflowId) {
+  if (DRY_RUN) return;
+
+  if (cliSupports(container, "unarchive:workflow")) {
+    containerSh(container, `n8n unarchive:workflow --id='${workflowId}' >/dev/null`);
+    return;
+  }
+
+  await patchWorkflow(auth, workflowId, { isArchived: false });
 }
 
 function sleep(ms) {
@@ -376,6 +412,7 @@ function buildImportDir(tmpDir) {
     const payload = JSON.parse(readFileSync(sourcePath, "utf8"));
     delete payload.id;
     payload.active = false;
+    payload.isArchived = false;
     writeFileSync(join(importDir, workflow.file), `${JSON.stringify(payload, null, 2)}\n`);
   }
 
@@ -394,6 +431,7 @@ function patchEntryWorkflow(tmpDir, groupedAfterChildren) {
   const payload = JSON.parse(readFileSync(sourcePath, "utf8"));
   delete payload.id;
   payload.active = false;
+  payload.isArchived = false;
 
   const idByName = new Map();
   for (const workflow of CHILD_WORKFLOWS) {
@@ -491,20 +529,24 @@ async function main() {
     log("Backed up current v18 workflow set.");
 
     if (DRY_RUN) {
-    for (const { expected, matches } of currentGrouped.values()) {
-      for (const record of matches) {
-        if (!record.active) continue;
-        log(`Would unpublish current workflow: ${expected.name} (${record.id})`);
-      }
+      for (const { expected, matches } of currentGrouped.values()) {
+        for (const record of matches) {
+          if (!record.active) continue;
+          log(`Would unpublish current workflow: ${expected.name} (${record.id})`);
+        }
 
-      for (const record of matches) {
-        log(`Would delete existing workflow: ${expected.name} (${record.id})`);
+        for (const record of matches) {
+          if (record.archived) {
+            log(`Would keep archived workflow as archived: ${expected.name} (${record.id})`);
+            continue;
+          }
+          log(`Would archive existing workflow: ${expected.name} (${record.id})`);
+        }
       }
-    }
 
       log("Would import child workflows.");
       log("Would patch and import the entry workflow.");
-      log("Would publish child workflows, then publish the entry workflow.");
+      log("Would unarchive imported workflows if needed, then publish child workflows and the entry workflow.");
       log("");
       log("Dry run complete. No workflow changes were applied.");
       log(`Backups saved to: ${backupDir}`);
@@ -523,16 +565,13 @@ async function main() {
 
     for (const { expected, matches } of currentGrouped.values()) {
       for (const record of matches) {
-        try {
-          log(`Deleting existing workflow: ${expected.name} (${record.id})`);
-          await deleteWorkflow(auth, record.id);
-        } catch (error) {
-          warn(
-            `Warning: could not delete workflow ${expected.name} (${record.id}). Continuing.\n${
-              error.message || error
-            }`,
-          );
+        if (record.archived) {
+          log(`Keeping archived workflow archived: ${expected.name} (${record.id})`);
+          continue;
         }
+
+        log(`Archiving existing workflow: ${expected.name} (${record.id})`);
+        await archiveWorkflow(n8nContainer, auth, record.id);
       }
     }
 
@@ -562,6 +601,10 @@ async function main() {
       if (!record?.id) {
         throw new Error(`Missing workflow after import: ${workflow.name}`);
       }
+      if (record.archived) {
+        log(`Unarchiving child workflow before publish: ${workflow.name} (${record.id})`);
+        await unarchiveWorkflow(n8nContainer, auth, record.id);
+      }
       log(`Publishing child workflow: ${workflow.name} (${record.id})`);
       publishWorkflow(n8nContainer, auth, record.id);
     }
@@ -569,6 +612,10 @@ async function main() {
     const entryRecord = finalGrouped.get(ENTRY_WORKFLOW.name)?.canonical;
     if (!entryRecord?.id) {
       throw new Error("Missing entry workflow after import.");
+    }
+    if (entryRecord.archived) {
+      log(`Unarchiving entry workflow before publish: ${ENTRY_WORKFLOW.name} (${entryRecord.id})`);
+      await unarchiveWorkflow(n8nContainer, auth, entryRecord.id);
     }
     log(`Publishing entry workflow: ${ENTRY_WORKFLOW.name} (${entryRecord.id})`);
     publishWorkflow(n8nContainer, auth, entryRecord.id);

@@ -741,7 +741,7 @@ const hasModelVariantToken = Boolean(modelVariantMatch);
 const asksPriceDirectly = /(precio|cuanto sale|cu[aá]nto sale|valor|costo|cotizacion|cotizaci[oó]n)/.test(normalized);
 const asksCatalogLink = /(catalogo|cat[aá]logo|pagina|p[aá]gina|sitio|web|pasame el link|mandame el link|pasame la pagina|pasame la web|ver modelos|ver equipos|verlo aca|verlo ac[aá]|mostrame el link)/.test(normalized);
 const asksComparison = /(cual de los dos|cu[aá]l de los dos|compar|versus|\\bvs\\b|mejor)/.test(normalized);
-const wantsHoursInfo = /(horario|horarios|abren|cierran|hora|abierto|abierta|abiertos|abiertas|atienden|atencion|atención|abren hoy|hoy esta abierto|hoy esta abierta|hoy estan abiertos|hoy estan abiertas)/.test(normalized);
+const wantsHoursInfo = /(horario|horarios|abren|cierran|hora|abierto|abierta|abiertos|abiertas|atienden|atencion|atención|abren hoy|hoy esta abierto|hoy esta abierta|hoy estan abiertos|hoy estan abiertas|feriado|feriados)/.test(normalized);
 const wantsStoreInfo = wantsHoursInfo || /(ubicacion|direccion|sucursal|medios de pago|medio de pago|envio|envios|warranty|garantia|como llego|donde estan|donde quedan|retiro|mapa)/.test(normalized);
 const asksBudget = /(barato|barata|economico|economica|presupuesto|hasta|accesible|mas barato|algo mas barato|usado|usados|segunda mano|seminuevo|semi nuevo)/.test(normalized);
 const asksUsedIphones = /(usado|usados|segunda mano|seminuevo|semi nuevo)/.test(normalized);
@@ -1143,7 +1143,8 @@ const message = String(data.user_message || '')
   .trim();
 
 const wantsLocation = /(ubicacion|direccion|sucursal|como llego|donde estan|donde quedan|mapa)/.test(message);
-const wantsHours = /(horario|horarios|abren|cierran|hora|abierto|abierta|abiertos|abiertas|atienden|atencion|atención|abren hoy|hoy esta abierto|hoy esta abierta|hoy estan abiertos|hoy estan abiertas)/.test(message);
+const wantsHours = /(horario|horarios|abren|cierran|hora|abierto|abierta|abiertos|abiertas|atienden|atencion|atención|abren hoy|hoy esta abierto|hoy esta abierta|hoy estan abiertos|hoy estan abiertas|feriado|feriados)/.test(message);
+const asksHolidayHours = /(feriado|feriados)/.test(message);
 const wantsPayments = /(pago|pagos|cuotas|tarjeta|transferencia|efectivo|crypto|mercado pago|link de pago)/.test(message);
 const wantsShipping = /(envio|envios|despacho|retiro)/.test(message);
 const wantsWarranty = /(garantia|warranty)/.test(message);
@@ -1206,7 +1207,8 @@ switch (router.route_key) {
       if (store.store_address) parts.push('Estamos en ' + store.store_address + '.');
       stateDelta.share_store_location = wantsLocation;
     }
-    if (wantsHours && store.store_hours) parts.push('Hoy estamos atendiendo. Horario: ' + store.store_hours);
+    if (asksHolidayHours) parts.push('En feriados seguimos atendiendo normalmente.');
+    if (wantsHours && store.store_hours) parts.push((asksHolidayHours ? 'Horario habitual: ' : 'Hoy estamos atendiendo. Horario: ') + store.store_hours);
     if (wantsPayments) {
       if (store.store_payment_methods) parts.push('Medios de pago: ' + store.store_payment_methods + '.');
       parts.push(paymentProcess);
