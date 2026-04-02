@@ -320,6 +320,14 @@ async function requestJson(auth, method, path, body) {
   return text ? JSON.parse(text) : null;
 }
 
+function workflowApiPaths(auth, workflowId) {
+  const suffixes = auth.apiBase.includes("/api/v1")
+    ? [`/workflows/${workflowId}`, `/rest/workflows/${workflowId}`]
+    : [`/rest/workflows/${workflowId}`, `/api/v1/workflows/${workflowId}`];
+
+  return [...new Set(suffixes)];
+}
+
 async function patchWorkflow(auth, workflowId, patch) {
   const attempts = [patch];
 
@@ -329,11 +337,13 @@ async function patchWorkflow(auth, workflowId, patch) {
 
   let lastError = null;
 
-  for (const body of attempts) {
-    try {
-      return await requestJson(auth, "PATCH", `/rest/workflows/${workflowId}`, body);
-    } catch (error) {
-      lastError = error;
+  for (const path of workflowApiPaths(auth, workflowId)) {
+    for (const body of attempts) {
+      try {
+        return await requestJson(auth, "PATCH", path, body);
+      } catch (error) {
+        lastError = error;
+      }
     }
   }
 
