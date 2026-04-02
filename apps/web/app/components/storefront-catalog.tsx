@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { trackStorefrontEvent } from "../../lib/storefront-analytics";
 import { buildStorefrontProductPath, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
 import { StorefrontProductActions } from "./storefront-product-actions";
 
@@ -271,7 +272,20 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
           </Link>
 
           {generalWhatsAppUrl ? (
-            <a className="storefront-navbar-cta" href={generalWhatsAppUrl} target="_blank" rel="noreferrer">
+            <a
+              className="storefront-navbar-cta"
+              href={generalWhatsAppUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() =>
+                trackStorefrontEvent("contact", {
+                  payload: {
+                    channel: "whatsapp",
+                    placement: "storefront_navbar",
+                  },
+                })
+              }
+            >
               <WhatsAppIcon />
               WhatsApp
             </a>
@@ -508,7 +522,20 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
             ) : null}
           </div>
           {generalWhatsAppUrl ? (
-            <a className="storefront-navbar-cta" href={generalWhatsAppUrl} target="_blank" rel="noreferrer">
+            <a
+              className="storefront-navbar-cta"
+              href={generalWhatsAppUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() =>
+                trackStorefrontEvent("contact", {
+                  payload: {
+                    channel: "whatsapp",
+                    placement: "storefront_location",
+                  },
+                })
+              }
+            >
               <WhatsAppIcon />
               Hablar por WhatsApp
             </a>

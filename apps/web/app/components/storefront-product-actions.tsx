@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { trackMetaContact, trackMetaInitiateCheckout } from "../../lib/meta-pixel";
+import { getStorefrontAnalyticsContext, trackStorefrontEvent } from "../../lib/storefront-analytics";
 import { buildStorefrontConsultUrl, buildStorefrontPaymentFallbackUrl, type StorefrontProduct } from "../../lib/storefront";
 
 type StorefrontProductActionsProps = {
@@ -50,6 +51,17 @@ export function StorefrontProductActions({
         value: product.public_price_ars,
         currency: "ARS",
       });
+      trackStorefrontEvent("initiate_checkout", {
+        product_id: product.id,
+        sku: product.sku,
+        value_amount: product.public_price_ars,
+        currency_code: "ARS",
+        payload: {
+          title: product.title,
+          brand: product.brand,
+        },
+      });
+      const analytics = getStorefrontAnalyticsContext();
 
       const response = await fetch("/api/storefront/payment-intents", {
         method: "POST",
@@ -59,6 +71,15 @@ export function StorefrontProductActions({
         body: JSON.stringify({
           product_id: product.id,
           source_path: sourcePath || (typeof window !== "undefined" ? window.location.pathname : null),
+          visitor_id: analytics?.visitor_id ?? null,
+          session_id: analytics?.session_id ?? null,
+          page_url: analytics?.page_url ?? null,
+          referrer: analytics?.referrer ?? null,
+          utm_source: analytics?.utm_source ?? null,
+          utm_medium: analytics?.utm_medium ?? null,
+          utm_campaign: analytics?.utm_campaign ?? null,
+          utm_term: analytics?.utm_term ?? null,
+          utm_content: analytics?.utm_content ?? null,
         }),
       });
 
@@ -105,15 +126,26 @@ export function StorefrontProductActions({
             href={consultUrl}
             target="_blank"
             rel="noreferrer"
-            onClick={() =>
+            onClick={() => {
               trackMetaContact({
                 sku: product.sku,
                 title: product.title,
                 brand: product.brand,
                 value: product.public_price_ars,
                 currency: "ARS",
-              })
-            }
+              });
+              trackStorefrontEvent("contact", {
+                product_id: product.id,
+                sku: product.sku,
+                value_amount: product.public_price_ars,
+                currency_code: "ARS",
+                payload: {
+                  title: product.title,
+                  brand: product.brand,
+                  channel: "whatsapp",
+                },
+              });
+            }}
             data-fast-goal="click_consultar"
             data-fast-goal-product-id={String(product.id)}
             data-fast-goal-product-sku={product.sku}

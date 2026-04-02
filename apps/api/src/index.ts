@@ -20,8 +20,10 @@ import { n8nCompatRoutes } from "./routes/n8n-compat.js";
 import { metaAdsApiRoutes } from "./routes/meta-ads-api.js";
 import { metaCatalogApiRoutes } from "./routes/meta-catalog-api.js";
 import { contentApiRoutes } from "./routes/content-api.js";
+import { storefrontAnalyticsApiRoutes } from "./routes/storefront-analytics-api.js";
 import { telegramOperatorApiRoutes } from "./routes/telegram-operator-api.js";
 import { sendMetaPurchaseEventForOrder } from "./meta-conversions.js";
+import { recordStorefrontPurchaseEvent } from "./storefront-analytics.js";
 import {
   buildTelegramWebhookTargetUrl,
   deleteTelegramWebhook,
@@ -124,6 +126,9 @@ function getActorContext(request: FastifyRequest) {
 }
 
 function dispatchMetaPurchaseEvent(orderId: number) {
+  void recordStorefrontPurchaseEvent(orderId).catch((error) => {
+    console.error(`Failed to record storefront purchase event for order ${orderId}:`, error);
+  });
   void sendMetaPurchaseEventForOrder(orderId).catch((error) => {
     console.error(`Failed to send Meta purchase event for order ${orderId}:`, error);
   });
@@ -248,6 +253,7 @@ app.register(async (protectedApp) => {
   protectedApp.addHook("preHandler", requireBearerToken);
   protectedApp.register(n8nCompatRoutes, { prefix: "/rest/v1" });
   protectedApp.register(metaAdsApiRoutes);
+  protectedApp.register(storefrontAnalyticsApiRoutes);
   protectedApp.register(contentApiRoutes);
   protectedApp.register(telegramOperatorApiRoutes);
 
@@ -355,6 +361,15 @@ app.register(async (protectedApp) => {
       source_host: z.string().trim().optional().nullable(),
       source_path: z.string().trim().optional().nullable(),
       channel: z.enum(["storefront", "whatsapp", "telegram", "api"]).default("storefront"),
+      visitor_id: z.string().trim().optional().nullable(),
+      session_id: z.string().trim().optional().nullable(),
+      page_url: z.string().trim().optional().nullable(),
+      referrer: z.string().trim().optional().nullable(),
+      utm_source: z.string().trim().optional().nullable(),
+      utm_medium: z.string().trim().optional().nullable(),
+      utm_campaign: z.string().trim().optional().nullable(),
+      utm_term: z.string().trim().optional().nullable(),
+      utm_content: z.string().trim().optional().nullable(),
     });
 
     const body = schema.parse(request.body);
@@ -363,6 +378,18 @@ app.register(async (protectedApp) => {
       sourceHost: body.source_host ?? null,
       sourcePath: body.source_path ?? null,
       channel: body.channel,
+      analytics: {
+        visitorId: body.visitor_id ?? null,
+        sessionId: body.session_id ?? null,
+        pageUrl: body.page_url ?? null,
+        pagePath: body.source_path ?? null,
+        referrer: body.referrer ?? null,
+        utmSource: body.utm_source ?? null,
+        utmMedium: body.utm_medium ?? null,
+        utmCampaign: body.utm_campaign ?? null,
+        utmTerm: body.utm_term ?? null,
+        utmContent: body.utm_content ?? null,
+      },
     });
 
     await writeAuditLog(pool, request, "storefront.payment_intent.created", "order", String(intent.order_id), {

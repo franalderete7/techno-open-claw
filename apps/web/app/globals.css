@@ -2374,6 +2374,217 @@ nav a:hover {
   line-height: 1.45;
 }
 
+.growth-range-row {
+  align-items: center;
+}
+
+.growth-warning-panel {
+  background:
+    radial-gradient(circle at top right, rgba(191, 111, 77, 0.1), transparent 34%),
+    rgba(255, 255, 255, 0.82);
+}
+
+.growth-warning-list {
+  display: grid;
+  gap: 10px;
+}
+
+.growth-warning-item {
+  margin: 0;
+  padding: 10px 12px;
+  border: 0.5px solid rgba(191, 111, 77, 0.2);
+  border-radius: 14px;
+  background: rgba(191, 111, 77, 0.08);
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.growth-top-grid {
+  align-items: start;
+}
+
+.growth-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.growth-chart-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 0.5px solid var(--line);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(191, 111, 77, 0.12), transparent 28%),
+    rgba(255, 255, 255, 0.86);
+  box-shadow: var(--shadow);
+}
+
+.growth-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.growth-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.growth-chart-shell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.growth-chart-guides {
+  display: grid;
+  align-content: space-between;
+  padding: 18px 0;
+  color: var(--soft-text);
+  font-size: 0.74rem;
+}
+
+.growth-chart {
+  width: 100%;
+  height: auto;
+  border: 0.5px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.7));
+}
+
+.growth-chart-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--soft-text);
+  font-size: 0.76rem;
+}
+
+.growth-funnel {
+  display: grid;
+  gap: 12px;
+}
+
+.growth-funnel-row {
+  display: grid;
+  gap: 8px;
+}
+
+.growth-funnel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.growth-funnel-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.growth-funnel-bar,
+.growth-source-bar {
+  overflow: hidden;
+  border: 0.5px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.growth-funnel-bar {
+  height: 12px;
+}
+
+.growth-funnel-fill,
+.growth-source-fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.growth-funnel-fill.is-page_view {
+  background: rgba(182, 143, 122, 0.85);
+}
+
+.growth-funnel-fill.is-view_content {
+  background: rgba(191, 111, 77, 0.85);
+}
+
+.growth-funnel-fill.is-contact {
+  background: rgba(138, 108, 44, 0.85);
+}
+
+.growth-funnel-fill.is-initiate_checkout {
+  background: rgba(77, 105, 141, 0.85);
+}
+
+.growth-funnel-fill.is-purchase,
+.growth-source-fill {
+  background: linear-gradient(90deg, rgba(62, 106, 47, 0.92), rgba(123, 177, 85, 0.82));
+}
+
+.growth-source-list {
+  display: grid;
+  gap: 12px;
+}
+
+.growth-source-row {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 0.5px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.growth-source-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.growth-source-head > div {
+  display: grid;
+  gap: 6px;
+}
+
+.growth-source-bar {
+  height: 10px;
+}
+
+.growth-source-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--soft-text);
+  font-size: 0.82rem;
+}
+
+.growth-people-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.growth-person-card {
+  display: grid;
+  gap: 12px;
+}
+
+.growth-person-header {
+  margin-bottom: 0;
+}
+
+.growth-person-title {
+  margin: 0;
+  font-family: var(--font-serif), serif;
+  font-size: 1.18rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
 .record-note {
   margin: 0;
   padding: 12px;
@@ -2860,6 +3071,10 @@ nav a:hover {
   .storefront-faq {
     grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.15fr);
     align-items: start;
+  }
+
+  .growth-people-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .record-grid {

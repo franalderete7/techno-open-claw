@@ -141,6 +141,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
       ) : product ? (
         <section className="storefront-product-page">
           <MetaProductViewTracker
+            productId={product.id}
             sku={product.sku}
             title={product.title}
             brand={product.brand}

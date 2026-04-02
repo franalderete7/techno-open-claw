@@ -747,6 +747,111 @@ export type StorefrontPaymentIntentCreateResponse = {
   currency_code: string;
 };
 
+export type StorefrontAnalyticsOverviewResponse = {
+  generated_at: string;
+  window_days: number;
+  warnings: string[];
+  totals: {
+    events: number;
+    visitors: number;
+    sessions: number;
+    page_views: number;
+    view_contents: number;
+    contacts: number;
+    checkout_starts: number;
+    purchases: number;
+    revenue_ars: number;
+    contact_rate_pct: number | null;
+    checkout_rate_pct: number | null;
+    purchase_rate_pct: number | null;
+  };
+  funnel: Array<{
+    key: "page_view" | "view_content" | "contact" | "initiate_checkout" | "purchase";
+    label: string;
+    count: number;
+    conversion_from_previous_pct: number | null;
+    conversion_from_sessions_pct: number | null;
+  }>;
+  daily: Array<{
+    date: string;
+    page_views: number;
+    view_contents: number;
+    contacts: number;
+    checkout_starts: number;
+    purchases: number;
+    revenue_ars: number;
+  }>;
+  sources: Array<{
+    source: string;
+    sessions: number;
+    visitors: number;
+    page_views: number;
+    view_contents: number;
+    contacts: number;
+    checkout_starts: number;
+    purchases: number;
+    revenue_ars: number;
+    top_campaign: string | null;
+    landing_page: string | null;
+  }>;
+  landing_pages: Array<{
+    path: string;
+    sessions: number;
+    visitors: number;
+    view_contents: number;
+    contacts: number;
+    checkout_starts: number;
+    purchases: number;
+    revenue_ars: number;
+  }>;
+  products: Array<{
+    product_id: number | null;
+    sku: string | null;
+    title: string;
+    brand: string | null;
+    view_contents: number;
+    contacts: number;
+    checkout_starts: number;
+    purchases: number;
+    revenue_ars: number;
+    last_seen: string | null;
+  }>;
+  people: Array<{
+    visitor_id: string;
+    label: string;
+    first_seen: string;
+    last_seen: string;
+    source: string;
+    landing_page: string | null;
+    sessions: number;
+    page_views: number;
+    view_contents: number;
+    contacts: number;
+    checkout_starts: number;
+    purchases: number;
+    revenue_ars: number;
+    last_product: string | null;
+    identified_customer: string | null;
+    phone: string | null;
+    email: string | null;
+  }>;
+  recent_events: Array<{
+    id: number;
+    event_name: "page_view" | "view_content" | "contact" | "initiate_checkout" | "purchase";
+    received_from: "browser" | "server";
+    at: string;
+    source: string;
+    campaign: string | null;
+    page_path: string | null;
+    product: string | null;
+    visitor: string | null;
+    person: string | null;
+    order_number: string | null;
+    value_amount: number | null;
+    currency_code: string | null;
+  }>;
+};
+
 export async function getDashboard() {
   return apiFetch<DashboardResponse>("/v1/dashboard");
 }
@@ -825,6 +930,16 @@ export async function getMetaAdsOverview(options?: { days?: number; limit?: numb
   return apiFetch<MetaAdsOverviewResponse>(`/v1/meta/ads/overview${query ? `?${query}` : ""}`);
 }
 
+export async function getStorefrontAnalyticsOverview(options?: { days?: number }) {
+  const params = new URLSearchParams();
+  if (options?.days != null) {
+    params.set("days", String(options.days));
+  }
+
+  const query = params.toString();
+  return apiFetch<StorefrontAnalyticsOverviewResponse>(`/v1/growth/overview${query ? `?${query}` : ""}`);
+}
+
 export async function getContentOverview() {
   return apiFetch<ContentOverviewResponse>("/v1/content/overview");
 }
@@ -834,8 +949,48 @@ export async function createStorefrontPaymentIntent(payload: {
   source_host?: string | null;
   source_path?: string | null;
   channel?: "storefront" | "whatsapp" | "telegram" | "api";
+  visitor_id?: string | null;
+  session_id?: string | null;
+  page_url?: string | null;
+  referrer?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_term?: string | null;
+  utm_content?: string | null;
 }) {
   return apiRequest<StorefrontPaymentIntentCreateResponse>("/v1/storefront/payment-intents", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createStorefrontEvent(payload: {
+  event_name: "page_view" | "view_content" | "contact" | "initiate_checkout" | "purchase";
+  event_key?: string | null;
+  received_from?: "browser" | "server";
+  visitor_id?: string | null;
+  session_id?: string | null;
+  source_host?: string | null;
+  page_url?: string | null;
+  page_path?: string | null;
+  referrer?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_term?: string | null;
+  utm_content?: string | null;
+  product_id?: number | null;
+  sku?: string | null;
+  order_id?: number | null;
+  customer_id?: number | null;
+  checkout_intent_id?: number | null;
+  value_amount?: number | null;
+  currency_code?: string | null;
+  payload?: Record<string, unknown>;
+  event_time?: string | null;
+}) {
+  return apiRequest<{ ok: true; id: number | null }>("/v1/storefront/events", {
     method: "POST",
     body: JSON.stringify(payload),
   });

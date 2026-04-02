@@ -5,6 +5,7 @@ import Script from "next/script";
 import { Instrument_Sans, Newsreader } from "next/font/google";
 import type { ReactNode } from "react";
 import { getSiteMode } from "../lib/site-mode";
+import { StorefrontPageViewTracker } from "./components/storefront-page-view-tracker";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,6 +22,7 @@ const metaPixelId = process.env.META_PIXEL_ID?.trim() || "";
 
 const navItems = [
   ["Dashboard", "/"],
+  ["Growth", "/growth"],
   ["Products", "/products"],
   ["Stock", "/stock"],
   ["Purchases", "/purchases"],
@@ -109,7 +111,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             {children}
           </main>
         ) : (
-          <main className="storefront-main">{children}</main>
+          <main className="storefront-main">
+            <StorefrontPageViewTracker />
+            {children}
+          </main>
         )}
       </body>
     </html>

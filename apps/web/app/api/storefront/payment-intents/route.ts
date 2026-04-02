@@ -25,6 +25,15 @@ export async function POST(request: NextRequest) {
       source_host: forwardedHost || refererUrl?.host || null,
       source_path: refererUrl?.pathname || (typeof body.source_path === "string" ? body.source_path : null),
       channel: "storefront",
+      visitor_id: typeof body.visitor_id === "string" ? body.visitor_id : null,
+      session_id: typeof body.session_id === "string" ? body.session_id : null,
+      page_url: typeof body.page_url === "string" ? body.page_url : referer,
+      referrer: typeof body.referrer === "string" ? body.referrer : null,
+      utm_source: typeof body.utm_source === "string" ? body.utm_source : null,
+      utm_medium: typeof body.utm_medium === "string" ? body.utm_medium : null,
+      utm_campaign: typeof body.utm_campaign === "string" ? body.utm_campaign : null,
+      utm_term: typeof body.utm_term === "string" ? body.utm_term : null,
+      utm_content: typeof body.utm_content === "string" ? body.utm_content : null,
     });
 
     return NextResponse.json(result, { status: 201 });

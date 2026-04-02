@@ -2,8 +2,10 @@
 
 import { useEffect } from "react";
 import { trackMetaViewContent } from "../../lib/meta-pixel";
+import { trackStorefrontEvent } from "../../lib/storefront-analytics";
 
 type MetaProductViewTrackerProps = {
+  productId?: number | null;
   sku: string;
   title: string;
   brand: string;
@@ -11,7 +13,7 @@ type MetaProductViewTrackerProps = {
   currency?: string;
 };
 
-export function MetaProductViewTracker({ sku, title, brand, value, currency = "ARS" }: MetaProductViewTrackerProps) {
+export function MetaProductViewTracker({ productId, sku, title, brand, value, currency = "ARS" }: MetaProductViewTrackerProps) {
   useEffect(() => {
     trackMetaViewContent({
       sku,
@@ -20,7 +22,17 @@ export function MetaProductViewTracker({ sku, title, brand, value, currency = "A
       value,
       currency,
     });
-  }, [brand, currency, sku, title, value]);
+    trackStorefrontEvent("view_content", {
+      product_id: productId ?? null,
+      sku,
+      value_amount: value,
+      currency_code: currency,
+      payload: {
+        title,
+        brand,
+      },
+    });
+  }, [brand, currency, productId, sku, title, value]);
 
   return null;
 }

@@ -4,10 +4,24 @@ import { config } from "./config.js";
 import { pool } from "./db.js";
 import { createGalioPaymentLink, getGalioPayment, hasGalioPayConfig } from "./galiopay.js";
 import { sendMetaPurchaseEventForOrder } from "./meta-conversions.js";
+import { recordStorefrontPurchaseEvent } from "./storefront-analytics.js";
 import { createTaloPayment, getTaloPayment, hasTaloConfig } from "./talo.js";
 
 type CheckoutChannel = "storefront" | "whatsapp" | "telegram" | "api";
 export type CheckoutPaymentProvider = "galiopay" | "talo";
+
+type CheckoutAnalyticsContext = {
+  visitorId?: string | null;
+  sessionId?: string | null;
+  pageUrl?: string | null;
+  pagePath?: string | null;
+  referrer?: string | null;
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  utmTerm?: string | null;
+  utmContent?: string | null;
+};
 
 type CreateStorefrontPaymentIntentInput = {
   productId: number;
@@ -17,6 +31,7 @@ type CreateStorefrontPaymentIntentInput = {
   customerId?: number | null;
   customerPhone?: string | null;
   customerName?: string | null;
+  analytics?: CheckoutAnalyticsContext | null;
 };
 
 type StorefrontPaymentIntentResult = {
@@ -113,6 +128,9 @@ function normalizePhoneDigits(value: string | null | undefined) {
 }
 
 function dispatchMetaPurchaseEvent(orderId: number) {
+  void recordStorefrontPurchaseEvent(orderId).catch((error) => {
+    console.error(`Failed to record storefront purchase event for order ${orderId}:`, error);
+  });
   void sendMetaPurchaseEventForOrder(orderId).catch((error) => {
     console.error(`Failed to send Meta purchase event for order ${orderId}:`, error);
   });
@@ -390,6 +408,7 @@ export async function createStorefrontPaymentIntent({
   customerId,
   customerPhone,
   customerName,
+  analytics,
 }: CreateStorefrontPaymentIntentInput): Promise<StorefrontPaymentIntentResult> {
   const client = await pool.connect();
   const paymentProvider = getDefaultCheckoutPaymentProvider();
@@ -514,6 +533,20 @@ export async function createStorefrontPaymentIntent({
           payment_provider: paymentProvider,
           source_path: sourcePath ?? null,
           product_slug: product.slug,
+          analytics: analytics
+            ? {
+                visitor_id: analytics.visitorId ?? null,
+                session_id: analytics.sessionId ?? null,
+                page_url: analytics.pageUrl ?? null,
+                page_path: analytics.pagePath ?? sourcePath ?? null,
+                referrer: analytics.referrer ?? null,
+                utm_source: analytics.utmSource ?? null,
+                utm_medium: analytics.utmMedium ?? null,
+                utm_campaign: analytics.utmCampaign ?? null,
+                utm_term: analytics.utmTerm ?? null,
+                utm_content: analytics.utmContent ?? null,
+              }
+            : null,
         },
       ]
     );
