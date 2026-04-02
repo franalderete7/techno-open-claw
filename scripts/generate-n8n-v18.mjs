@@ -704,6 +704,7 @@ const normalized = message
 
 const recentMessages = Array.isArray(context.recent_messages) ? context.recent_messages : [];
 const candidateProducts = Array.isArray(context.candidate_products) ? context.candidate_products : [];
+const usedIphoneCandidates = Array.isArray(context.used_iphone_candidates) ? context.used_iphone_candidates : [];
 const storefrontHandoff = context.storefront_handoff;
 const interestedProductKey = String(customer.interested_product || '').trim();
 
@@ -728,27 +729,95 @@ const extractTier = (text) => {
   return null;
 };
 
+const looksLikeAppleKey = (value) => /(iphone|apple|ipad|macbook)/.test(String(value || '').toLowerCase());
+
 const brandKeys = extractBrands(normalized);
 const tierKey = extractTier(normalized);
-const familyMatch = normalized.match(/(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\\s+([0-9]{1,3})/i);
-const familyNumber = familyMatch ? Number(familyMatch[1]) : null;
+const explicitFamilyMatch = normalized.match(/(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\\s+([0-9]{1,3})/i);
 const storageMatch = normalized.match(/\\b(64|128|256|512|1024)\\b(?:\\s*gb)?\\b/);
 const storageValue = storageMatch ? Number(storageMatch[1]) : null;
 const modelVariantMatch = normalized.match(/\\b(?:a\\d{1,3}|s\\d{1,3}|g\\d{1,3}|x\\d{1,3}|z\\s?flip\\s?\\d|z\\s?fold\\s?\\d|edge\\s?\\d{1,3}|note\\s?\\d{1,3}|reno\\s?\\d{1,3}|find\\s?x\\d{1,2})\\b/i);
 const hasModelVariantToken = Boolean(modelVariantMatch);
 const asksPriceDirectly = /(precio|cuanto sale|cu[aá]nto sale|valor|costo|cotizacion|cotizaci[oó]n)/.test(normalized);
-const wantsStoreInfo = /(ubicacion|direccion|sucursal|horario|abren|cierran|medios de pago|medio de pago|envio|envios|warranty|garantia|como llego|donde estan|donde quedan|retiro|mapa)/.test(normalized);
+const asksCatalogLink = /(catalogo|cat[aá]logo|pagina|p[aá]gina|sitio|web|pasame el link|mandame el link|pasame la pagina|pasame la web|ver modelos|ver equipos|verlo aca|verlo ac[aá]|mostrame el link)/.test(normalized);
+const asksComparison = /(cual de los dos|cu[aá]l de los dos|compar|versus|\\bvs\\b|mejor)/.test(normalized);
+const wantsHoursInfo = /(horario|horarios|abren|cierran|hora|abierto|abierta|abiertos|abiertas|atienden|atencion|atención|abren hoy|hoy esta abierto|hoy esta abierta|hoy estan abiertos|hoy estan abiertas)/.test(normalized);
+const wantsStoreInfo = wantsHoursInfo || /(ubicacion|direccion|sucursal|medios de pago|medio de pago|envio|envios|warranty|garantia|como llego|donde estan|donde quedan|retiro|mapa)/.test(normalized);
+const asksBudget = /(barato|barata|economico|economica|presupuesto|hasta|accesible|mas barato|algo mas barato|usado|usados|segunda mano|seminuevo|semi nuevo)/.test(normalized);
+const asksUsedIphones = /(usado|usados|segunda mano|seminuevo|semi nuevo)/.test(normalized);
 const hasConversationProductContext = Boolean(interestedProductKey || candidateProducts[0]?.product_key);
 const asksProductFollowUp = /(cuotas|cuota|tarjeta|transferencia|efectivo|link de pago|pagar|pagarlo|entrega|envio|retiro|garantia|stock|disponible|color|colores|memoria|almacenamiento|ram|usd|dolar|promo|precio)/.test(normalized);
 const usesRelativeReference = /(\\b(ese|esa|este|esta|mismo|misma|anterior|quiero ese|quiero esa|dame ese|dame esa)\\b|^y\\b)/.test(normalized);
 
-const isFirstContact = recentMessages.length <= 1;
+const customerBrandHints = Array.isArray(customer.brands_mentioned)
+  ? customer.brands_mentioned.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+  : [];
+const candidateBrandHints = candidateProducts
+  .slice(0, 3)
+  .map((product) => String(product.brand_key || '').trim().toLowerCase())
+  .filter(Boolean);
+const hasModelSpecificSignal = Boolean(explicitFamilyMatch || storageValue !== null || tierKey !== null || hasModelVariantToken || asksPriceDirectly);
+const threadBrandHints = unique([
+  ...customerBrandHints,
+  looksLikeAppleKey(interestedProductKey) ? 'apple' : null,
+  hasModelSpecificSignal && candidateBrandHints.length === 1 ? candidateBrandHints[0] : null,
+]);
+const threadBrandKey = brandKeys.length === 0 ? threadBrandHints[0] || null : null;
+const standaloneAppleFamilyMatch = normalized.match(/\\b(14|15|16|17)\\b/);
+const familyNumber = explicitFamilyMatch
+  ? Number(explicitFamilyMatch[1])
+  : (!brandKeys.length && (threadBrandKey === 'apple' || tierKey === 'pro' || tierKey === 'pro_max' || tierKey === 'plus') && standaloneAppleFamilyMatch
+      ? Number(standaloneAppleFamilyMatch[1])
+      : null);
+const effectiveBrandKeys = brandKeys.length > 0 ? brandKeys : threadBrandKey ? [threadBrandKey] : [];
+
 const topCandidateKeys = candidateProducts.slice(0, 3).map((product) => product.product_key).filter(Boolean);
+const matchesCandidateRequest = (product) => {
+  const haystack = String([
+    product.product_name || '',
+    product.product_key || '',
+    product.color || '',
+    product.storage_gb != null ? String(product.storage_gb) + ' gb' : '',
+  ].join(' '))
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\\u0300-\\u036f]/g, '')
+    .replace(/[^a-z0-9\\s]/g, ' ')
+    .replace(/\\s+/g, ' ')
+    .trim();
+
+  if (effectiveBrandKeys.includes('apple') && !/(iphone|apple|ipad|macbook)/.test(haystack)) {
+    return false;
+  }
+  if (familyNumber !== null && !new RegExp('(?:^|\\\\s)' + familyNumber + '(?:\\\\s|$)').test(haystack)) {
+    return false;
+  }
+  if (tierKey === 'pro_max' && !/\\bpro max\\b|\\bpromax\\b/.test(haystack)) {
+    return false;
+  }
+  if (tierKey === 'ultra' && !/\\bultra\\b/.test(haystack)) {
+    return false;
+  }
+  if (tierKey === 'pro' && !/\\bpro\\b/.test(haystack)) {
+    return false;
+  }
+  if (tierKey === 'plus' && !/\\bplus\\b/.test(haystack)) {
+    return false;
+  }
+  if (storageValue !== null && !new RegExp('\\\\b' + storageValue + '\\\\s*gb\\\\b').test(haystack)) {
+    return false;
+  }
+  return true;
+};
+const hasExactNewCandidateMatch = candidateProducts.some(matchesCandidateRequest);
+const hasExplicitExactIntent = effectiveBrandKeys.length > 0 && (familyNumber !== null || storageValue !== null || hasModelVariantToken || asksPriceDirectly || (brandKeys.length > 0 && tierKey !== null));
+const hasContextualExactIntent = brandKeys.length === 0 && Boolean(threadBrandKey) && (familyNumber !== null || storageValue !== null || hasModelVariantToken || tierKey !== null);
 
 let route_key = 'generic_sales';
 let retrieval_scope = 'catalog_broad';
 let search_mode = 'brand_browse';
-let should_offer_store_url = isFirstContact;
+let should_offer_store_url = false;
+let should_offer_used_iphones = false;
 let confidence = 0.72;
 let rationale = 'Consulta amplia de ventas.';
 let use_info_responder = false;
@@ -761,6 +830,21 @@ if (storefrontHandoff && storefrontHandoff.ok === true) {
   rationale = 'Se detectó un handoff de pedido web válido.';
   use_info_responder = true;
   should_offer_store_url = false;
+} else if (
+  wantsStoreInfo &&
+  brandKeys.length === 0 &&
+  familyNumber === null &&
+  storageValue === null &&
+  tierKey === null &&
+  !hasModelVariantToken
+) {
+  route_key = 'store_info';
+  retrieval_scope = 'store_info';
+  search_mode = 'info';
+  confidence = 0.94;
+  rationale = 'La consulta es sobre horarios, ubicación, pagos, envíos o garantía de la tienda.';
+  use_info_responder = true;
+  should_offer_store_url = asksCatalogLink;
 } else if (
   hasConversationProductContext &&
   (usesRelativeReference || asksProductFollowUp) &&
@@ -776,12 +860,16 @@ if (storefrontHandoff && storefrontHandoff.ok === true) {
   confidence = interestedProductKey ? 0.93 : 0.86;
   rationale = 'Seguimiento sobre el producto ya conversado en el hilo.';
   should_offer_store_url = false;
-} else if (brandKeys.length > 0 && (familyNumber !== null || storageValue !== null || tierKey !== null || hasModelVariantToken || asksPriceDirectly && candidateProducts.length > 0)) {
+} else if (hasExplicitExactIntent || hasContextualExactIntent) {
   route_key = 'exact_product_quote';
   retrieval_scope = 'catalog_narrow';
-  search_mode = 'exact';
+  search_mode = asksComparison ? 'comparison' : (threadBrandKey && brandKeys.length === 0 ? 'thread_context' : 'exact');
   confidence = candidateProducts.length > 0 ? 0.9 : 0.78;
-  rationale = 'Consulta con marca y detalles de modelo suficientes para cotización puntual.';
+  rationale = asksComparison
+    ? 'Consulta de comparación o cotización entre modelos concretos.'
+    : threadBrandKey && brandKeys.length === 0
+      ? 'Consulta sobre un modelo concreto usando el contexto de la conversación.'
+      : 'Consulta con marca y detalles de modelo suficientes para cotización puntual.';
   should_offer_store_url = false;
 } else if (wantsStoreInfo) {
   route_key = 'store_info';
@@ -790,21 +878,33 @@ if (storefrontHandoff && storefrontHandoff.ok === true) {
   confidence = 0.9;
   rationale = 'La consulta es sobre ubicación, horarios, pagos, envíos o garantía.';
   use_info_responder = true;
-  should_offer_store_url = isFirstContact;
+  should_offer_store_url = asksCatalogLink;
 } else if (brandKeys.length > 0 || tierKey !== null) {
   route_key = 'brand_catalog';
   retrieval_scope = 'catalog_broad';
-  search_mode = tierKey ? 'tier_browse' : 'brand_browse';
+  search_mode = asksComparison ? 'comparison' : tierKey ? 'tier_browse' : 'brand_browse';
   confidence = 0.82;
-  rationale = 'Consulta de catálogo por marca o línea premium.';
-  should_offer_store_url = true;
+  rationale = asksComparison ? 'Consulta de comparación dentro del catálogo.' : 'Consulta de catálogo por marca o línea.';
+  should_offer_store_url = asksCatalogLink;
 } else {
   route_key = 'generic_sales';
   retrieval_scope = 'catalog_broad';
   search_mode = 'brand_browse';
   confidence = 0.7;
   rationale = 'Consulta comercial amplia sin producto exacto.';
-  should_offer_store_url = isFirstContact;
+  should_offer_store_url = asksCatalogLink;
+}
+
+if (usedIphoneCandidates.length > 0) {
+  if (asksBudget || asksUsedIphones) {
+    should_offer_used_iphones = true;
+  } else if (route_key === 'brand_catalog' && effectiveBrandKeys.includes('apple')) {
+    should_offer_used_iphones = true;
+  } else if (route_key === 'generic_sales' && effectiveBrandKeys.includes('apple')) {
+    should_offer_used_iphones = true;
+  } else if (route_key === 'exact_product_quote' && (effectiveBrandKeys.includes('apple') || interestedProductKey) && !hasExactNewCandidateMatch) {
+    should_offer_used_iphones = true;
+  }
 }
 
 return [{
@@ -817,7 +917,9 @@ return [{
       retrieval_scope,
       search_mode,
       should_offer_store_url,
+      should_offer_used_iphones,
       selected_candidate_product_keys: topCandidateKeys,
+      used_iphone_candidate_ids: usedIphoneCandidates.slice(0, 4).map((item) => item.id).filter(Boolean),
       rationale,
     },
   }
@@ -1041,10 +1143,11 @@ const message = String(data.user_message || '')
   .trim();
 
 const wantsLocation = /(ubicacion|direccion|sucursal|como llego|donde estan|donde quedan|mapa)/.test(message);
-const wantsHours = /(horario|abren|cierran|hora)/.test(message);
+const wantsHours = /(horario|horarios|abren|cierran|hora|abierto|abierta|abiertos|abiertas|atienden|atencion|atención|abren hoy|hoy esta abierto|hoy esta abierta|hoy estan abiertos|hoy estan abiertas)/.test(message);
 const wantsPayments = /(pago|pagos|cuotas|tarjeta|transferencia|efectivo|crypto|mercado pago|link de pago)/.test(message);
 const wantsShipping = /(envio|envios|despacho|retiro)/.test(message);
 const wantsWarranty = /(garantia|warranty)/.test(message);
+const asksCatalogLink = /(catalogo|cat[aá]logo|pagina|p[aá]gina|sitio|web|ver modelos|ver equipos)/.test(message);
 
 const formatArs = (value) => {
   const amount = Number(value);
@@ -1053,7 +1156,13 @@ const formatArs = (value) => {
 };
 
 const paymentProcess =
-  'En technostoresalta.com avanzás en pocos clics: elegís el equipo, te mandamos el link de pago por WhatsApp y pagás transfiriendo al alias que aparece ahí. Después coordinamos la entrega o el retiro por este mismo chat.';
+  'Si decidís avanzar, te armamos el link de pago por WhatsApp y pagás transfiriendo al alias que aparece ahí. Después coordinamos la entrega o el retiro por este mismo chat.';
+
+const order = storefrontHandoff.order || {};
+const payment = storefrontHandoff.payment || {};
+const selectedProductKeys = order?.product_key ? [String(order.product_key)] : [];
+const isStorefrontOrigin = order?.checkout_channel === 'storefront' && Number(order?.id || 0) > 0;
+const orderLabel = isStorefrontOrigin ? 'pedido web #' + order.id : 'pedido';
 
 let replyText = '';
 let actions = [];
@@ -1071,22 +1180,23 @@ let stateDelta = {
 
 switch (router.route_key) {
   case 'storefront_order': {
-    const order = storefrontHandoff.order;
-    const payment = storefrontHandoff.payment;
     const totalText = formatArs(order?.total || order?.subtotal);
     if (payment?.status === 'paid') {
       replyText = 'Tu pago ya figura aprobado para ' + (order?.title || 'tu pedido') + '. Si querés, seguimos por este chat con la coordinación de entrega o retiro.';
     } else if (payment?.url) {
       replyText = 'Perfecto, ya te preparé el link de pago para ' + (order?.title || 'tu pedido') + (totalText ? ' por ARS ' + totalText : '') + '. Pagalo acá: ' + payment.url + ' Transferís al alias que aparece en el link y después seguimos por este mismo chat para coordinar la entrega o el retiro.';
     } else if (payment?.message) {
-      replyText = 'Tomé tu pedido web #' + (order?.id || '') + '. ' + payment.message + ' Si querés, también puedo seguir la coordinación por acá.';
+      replyText = (Number(order?.id || 0) > 0 ? 'Tomé tu ' + orderLabel + '. ' : '') + payment.message + ' Si querés, también puedo seguir la coordinación por acá.';
     } else {
-      replyText = 'Perfecto, ya tomé tu pedido web #' + (order?.id || '') + '. Seguimos por acá con la compra y la coordinación.';
+      replyText = Number(order?.id || 0) > 0
+        ? 'Perfecto, ya tomé tu ' + orderLabel + '. Seguimos por acá con la compra y la coordinación.'
+        : 'Perfecto, seguimos por acá con la compra y la coordinación.';
     }
     stateDelta.intent_key = 'storefront_order';
     stateDelta.funnel_stage = 'closing';
     stateDelta.lead_score_delta = 10;
-    stateDelta.summary = 'Seguimiento de pedido web por WhatsApp.';
+    stateDelta.selected_product_keys = selectedProductKeys;
+    stateDelta.summary = 'Seguimiento de pedido con link de pago por WhatsApp.';
     break;
   }
   case 'store_info':
@@ -1096,21 +1206,23 @@ switch (router.route_key) {
       if (store.store_address) parts.push('Estamos en ' + store.store_address + '.');
       stateDelta.share_store_location = wantsLocation;
     }
-    if (wantsHours && store.store_hours) parts.push('Horario: ' + store.store_hours);
+    if (wantsHours && store.store_hours) parts.push('Hoy estamos atendiendo. Horario: ' + store.store_hours);
     if (wantsPayments) {
+      if (store.store_payment_methods) parts.push('Medios de pago: ' + store.store_payment_methods + '.');
       parts.push(paymentProcess);
-      if (store.store_payment_methods) parts.push('Referencia de pago: ' + store.store_payment_methods);
     }
     if (wantsShipping && store.store_shipping_policy) parts.push('Envíos: ' + store.store_shipping_policy);
     if (wantsWarranty) {
       if (store.store_warranty_new) parts.push('Nuevos: ' + store.store_warranty_new);
       if (store.store_warranty_used) parts.push('Usados: ' + store.store_warranty_used);
     }
-    if (router.should_offer_store_url) {
-      parts.push('Si querés ver los modelos, también los tenés en ' + website + '.');
+    if (router.should_offer_store_url && asksCatalogLink) {
+      parts.push('El catálogo está en ' + website + '.');
       actions = ['attach_store_url'];
     }
-    parts.push('Si querés, decime qué modelo buscás y te ayudo por acá.');
+    if (parts.length === 0) {
+      parts.push('Sí, te ayudo por acá. Decime qué modelo buscás y te paso precio y disponibilidad.');
+    }
     replyText = parts.join(' ');
     stateDelta.intent_key = 'store_info';
     stateDelta.funnel_stage = 'browsing';
@@ -1126,7 +1238,7 @@ return [{
     responder_output: {
       route_key: router.route_key || 'store_info',
       reply_text: replyText,
-      selected_product_keys: [],
+      selected_product_keys: selectedProductKeys,
       actions,
       state_delta: stateDelta,
     },
@@ -1151,11 +1263,30 @@ const router = data.router_output || {};
 const responder = data.responder_output || {};
 
 const candidateProducts = Array.isArray(context.candidate_products) ? context.candidate_products : [];
+const usedIphoneCandidates = Array.isArray(context.used_iphone_candidates) ? context.used_iphone_candidates : [];
 const candidateMap = new Map(candidateProducts.map((product) => [product.product_key, product]));
+const recentMessages = Array.isArray(context.recent_messages) ? context.recent_messages : [];
 const website = String(context.store?.store_website_url || 'https://technostoresalta.com').trim();
+const websiteHost = website.replace(/^https?:\\/\\//, '').replace(/\\/$/, '').toLowerCase();
 const storefrontPaymentUrl = String(context.storefront_handoff?.payment?.url || '').trim();
+const normalizedUserMessage = String(data.user_message || '')
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\\u0300-\\u036f]/g, '')
+  .replace(/[^a-z0-9\\s]/g, ' ')
+  .replace(/\\s+/g, ' ')
+  .trim();
+
+const asksCatalogLink = /(catalogo|cat[aá]logo|pagina|p[aá]gina|sitio|web|pasame el link|mandame el link|pasame la pagina|pasame la web|ver modelos|ver equipos|verlo aca|verlo ac[aá]|mostrame el link)/.test(normalizedUserMessage);
+const asksBuyingStep = /(pago|pagar|comprar|compra|link de pago|transferencia|cuotas|envio|retiro|como compro|como comprar|senia|seña)/.test(normalizedUserMessage);
+
+const recentAssistantTexts = recentMessages
+  .filter((message) => message.role === 'bot')
+  .map((message) => String(message.message || '').trim())
+  .filter(Boolean);
 
 const unique = (values) => [...new Set(values.filter(Boolean))];
+const escapeRegExp = (value) => String(value || '').replace(/[-/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');
 const allowedActions = new Set([
   'attach_store_url',
   'attach_product_images',
@@ -1172,10 +1303,73 @@ const stripUnexpectedUrls = (text, allowedUrls = []) =>
     .replace(/\\s+/g, ' ')
     .trim();
 
+const stripDanglingUrlPrompts = (text) => {
+  const current = String(text || '').trim();
+  if (/https?:\\/\\//i.test(current)) {
+    return current;
+  }
+
+  return current
+    .replace(/(?:^|[\\s.])(?:lo\\s+pod[eé]s\\s+ver|pod[eé]s\\s+verlo|pod[eé]s\\s+mirarlo|miralo|ver\\s+m[aá]s\\s+detalles)\\s+ac[aá]\\s*:?(?=\\s|$)/gi, ' ')
+    .replace(/(?:^|[\\s.])ac[aá]\\s*:?(?=\\s|$)/gi, ' ')
+    .replace(/\\s*,\\s*([.!?]|$)/g, '$1')
+    .replace(/\\s+([.,!?])/g, '$1')
+    .replace(/\\s+/g, ' ')
+    .trim();
+};
+
+const appendExactProductUrl = (text, productUrl) => {
+  if (!productUrl) return text.trim();
+  const trimmed = String(text || '')
+    .replace(/\\s+/g, ' ')
+    .trim()
+    .replace(/[,:;]+$/, '')
+    .replace(/\\b(?:si te interesa|si te sirve|si quer[eé]s(?: ver m[aá]s detalles)?)(?:[,:;.]*)$/i, '')
+    .trim();
+  if (trimmed.includes(productUrl)) return trimmed;
+  if (!trimmed) return 'Lo podés ver acá: ' + productUrl;
+  const separator = /[.!?]$/.test(trimmed) ? ' ' : '. ';
+  return (trimmed + separator + 'Lo podés ver acá: ' + productUrl).trim();
+};
+
+const formatUsedIphoneOption = (item) => {
+  const parts = [item.model_name];
+  if (item.storage_gb != null) parts.push(String(item.storage_gb) + ' GB');
+  if (item.color) parts.push(String(item.color));
+  const batteryLabel = item.battery_note
+    ? String(item.battery_note)
+    : Number.isFinite(Number(item.battery_health_pct))
+      ? String(item.battery_health_pct) + '% batería'
+      : null;
+  return parts.join(' ') + ' en USD ' + String(item.sale_price_usd) + (batteryLabel ? ' (' + batteryLabel + ')' : '');
+};
+
+const usedIphoneSnippet = usedIphoneCandidates.slice(0, 3).map(formatUsedIphoneOption).join(', ');
+const [topCandidate, secondCandidate] = candidateProducts;
+const topCandidateScore = Number(topCandidate?.score || 0);
+const secondCandidateScore = Number(secondCandidate?.score || 0);
+const hasConfidentExactCandidate = Boolean(topCandidate?.product_key) && topCandidateScore >= 18 && (!secondCandidate || topCandidateScore - secondCandidateScore >= 6 || secondCandidateScore < 12);
+
 let selectedProductKeys = unique(Array.isArray(responder.selected_product_keys) ? responder.selected_product_keys : []).filter((key) => candidateMap.has(key));
-if (router.route_key === 'exact_product_quote' && selectedProductKeys.length === 0 && candidateProducts[0]?.product_key) {
-  selectedProductKeys = [candidateProducts[0].product_key];
+if (router.route_key === 'exact_product_quote' && selectedProductKeys.length === 0 && hasConfidentExactCandidate) {
+  selectedProductKeys = [String(topCandidate.product_key)];
 }
+
+const exactProductUrls = router.route_key === 'exact_product_quote' && (selectedProductKeys.length > 0 || hasConfidentExactCandidate)
+  ? unique([
+      ...selectedProductKeys.map((key) => String(candidateMap.get(key)?.product_url || '').trim()),
+      hasConfidentExactCandidate ? String(topCandidate?.product_url || '').trim() : '',
+    ])
+  : [];
+const primaryExactProductUrl = exactProductUrls[0] || '';
+const priorStoreUrlMentions = websiteHost
+  ? recentAssistantTexts.filter((text) => text.toLowerCase().includes(websiteHost)).length
+  : 0;
+const priorExactProductUrlMentions = exactProductUrls.length === 0
+  ? 0
+  : recentAssistantTexts.filter((text) => exactProductUrls.some((url) => url && text.includes(url))).length;
+const canAppendStoreUrl = router.should_offer_store_url === true && (priorStoreUrlMentions === 0 || (priorStoreUrlMentions === 1 && asksBuyingStep));
+const shouldAppendExactProductUrl = router.route_key === 'exact_product_quote' && primaryExactProductUrl && (selectedProductKeys.length > 0 || hasConfidentExactCandidate) && (asksCatalogLink || priorExactProductUrlMentions === 0);
 
 const actionList = unique(Array.isArray(responder.actions) ? responder.actions : []).filter((action) => allowedActions.has(action));
 const defaultIntentByRoute = {
@@ -1212,14 +1406,17 @@ if (selectedProductKeys.length > 0 && finalStateDelta.selected_product_keys.leng
 }
 
 const allowedUrls = [];
-if (['brand_catalog', 'generic_sales', 'store_info'].includes(router.route_key)) {
+if (['brand_catalog', 'generic_sales', 'store_info'].includes(router.route_key) && canAppendStoreUrl) {
   allowedUrls.push(website);
 }
 if (router.route_key === 'storefront_order' && storefrontPaymentUrl) {
   allowedUrls.push(storefrontPaymentUrl);
 }
+if (router.route_key === 'exact_product_quote' && shouldAppendExactProductUrl) {
+  allowedUrls.push(...exactProductUrls);
+}
 
-let replyText = stripUnexpectedUrls(responder.reply_text || '', allowedUrls);
+let replyText = stripDanglingUrlPrompts(stripUnexpectedUrls(responder.reply_text || '', allowedUrls));
 const validationErrors = [];
 const validationWarnings = [];
 
@@ -1230,40 +1427,78 @@ if (!replyText) {
     field: 'reply_text',
   });
 
-  if (router.route_key === 'exact_product_quote' && candidateProducts[0]) {
-    const product = candidateProducts[0];
+  if (router.route_key === 'exact_product_quote' && topCandidate && (selectedProductKeys.length > 0 || hasConfidentExactCandidate)) {
+    const product = topCandidate;
     const priceArs = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(product.promo_price_ars || product.price_ars);
-    replyText = 'Sí, tengo ' + product.product_name + '. Queda en ARS ' + priceArs + '. Si querés, te cuento cómo avanzar con la compra o vemos si es el modelo que más te conviene.';
+    replyText = 'Sí, tengo ' + product.product_name + '. Queda en ARS ' + priceArs + '.';
+    if (asksBuyingStep) {
+      replyText += ' Si querés, te explico cómo seguir.';
+    }
+    if (shouldAppendExactProductUrl) {
+      replyText = appendExactProductUrl(replyText, String(product.product_url || '').trim());
+    }
+    if (router.should_offer_used_iphones === true && usedIphoneSnippet) {
+      replyText += ' Si querés una alternativa más accesible, también tengo usados como ' + usedIphoneSnippet + '.';
+    }
+  } else if (router.should_offer_used_iphones === true && usedIphoneSnippet) {
+    replyText = 'Si querés un iPhone más accesible, también tengo usados como ' + usedIphoneSnippet + '. Si te sirve, te digo cuál conviene más según tu presupuesto.';
   } else if (router.route_key === 'storefront_order' && storefrontPaymentUrl) {
     const order = context.storefront_handoff?.order || {};
     const totalText = Number(order.total || order.subtotal);
     const formattedTotal = Number.isFinite(totalText) ? new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(totalText) : null;
     replyText = 'Perfecto, ya te preparé el link de pago para ' + (order.title || 'tu pedido') + (formattedTotal ? ' por ARS ' + formattedTotal : '') + '. Pagalo acá: ' + storefrontPaymentUrl + ' Transferís al alias que aparece en el link y después seguimos por este mismo chat para coordinar la entrega o el retiro.';
   } else if (router.route_key === 'store_info') {
-    replyText = 'Sí, te ayudo por acá. Si querés mirar todo el catálogo, lo tenés en ' + website + '. ¿Qué modelo buscás?';
+    replyText = 'Sí, te ayudo por acá. Decime qué necesitás y lo vemos.';
   } else {
-    replyText = 'Sí, te ayudo por acá. Contame qué modelo o presupuesto tenés en mente y lo vemos juntos.';
+    replyText = 'Sí, te ayudo por acá. Decime qué modelo buscás y te paso precio y disponibilidad.';
   }
 }
 
-const shouldOfferStoreUrl = router.should_offer_store_url === true && ['brand_catalog', 'generic_sales', 'store_info'].includes(router.route_key);
-if (shouldOfferStoreUrl && !/technostoresalta\\.com/i.test(replyText)) {
-  const appendText = router.route_key === 'generic_sales'
-    ? ' Si querés mirar todo el catálogo, también lo tenés en ' + website + '.'
-    : ' También podés ver todo el catálogo en ' + website + '.';
+const replyMentionsUsedAlternatives = /(usd\\s*\\d+|usado|usados|segunda mano|sellado|sealed)/i.test(replyText);
+if (router.should_offer_used_iphones === true && usedIphoneSnippet && !replyMentionsUsedAlternatives) {
+  if (['brand_catalog', 'generic_sales'].includes(router.route_key)) {
+    replyText = (replyText + ' Si querés algo más accesible, también tengo usados como ' + usedIphoneSnippet + '.').replace(/\\s+/g, ' ').trim();
+  } else if (router.route_key === 'exact_product_quote') {
+    replyText = (replyText + ' Si querés una alternativa más accesible, también tengo usados como ' + usedIphoneSnippet + '.').replace(/\\s+/g, ' ').trim();
+  }
+}
+
+if (canAppendStoreUrl && !/technostoresalta\\.com/i.test(replyText)) {
+  const appendText = ' Si querés mirar el catálogo completo, está en ' + website + '.';
   replyText = (replyText + appendText).replace(/\\s+/g, ' ').trim();
 }
 
 if (router.route_key === 'exact_product_quote') {
+  if (websiteHost) {
+    const bareWebsitePattern = new RegExp(escapeRegExp(websiteHost) + '(?!\\\\/[A-Za-z0-9%_-]+)', 'gi');
+    replyText = replyText.replace(bareWebsitePattern, '');
+  }
+
   replyText = replyText
-    .replace(/(?:si queres|si querés)?\\s*tambien pod[eé]s ver todo el cat[aá]logo en\\s*https?:\\/\\/[^\\s]+\\.?/gi, '')
-    .replace(/(?:si queres|si querés)?\\s*pod[eé]s mirar todo el cat[aá]logo en\\s*https?:\\/\\/[^\\s]+\\.?/gi, '')
-    .replace(/https?:\\/\\/[^\\s]+/gi, '')
+    .replace(/(?:si queres|si querés)?\\s*(?:tamb[ié]en\\s*)?(?:pod[eé]s|ten[eé]s)\\s+(?:ver|mirar)\\s+todo\\s+el\\s+cat[aá]logo(?:\\s+en)?\\s*\\.?/gi, '')
+    .replace(/Si quer[eé]s,\\s*te cuento c[oó]mo avanzar con la compra\\.?/gi, 'Si querés, te paso más detalles.')
+    .replace(/¿Te gustar[ií]a conocer las opciones de pago\\??/gi, '')
+    .replace(/¿Te gustar[ií]a saber las opciones de pago\\??/gi, '')
+    .replace(/¿Te gustar[ií]a que te ayude a (?:coordinar|avanzar|iniciar)[^?]*\\??/gi, '')
+    .replace(/¿Hay alg[uú]n otro modelo o marca que te interese\\??/gi, '')
     .replace(/\\s+/g, ' ')
     .trim();
+
+  if (!asksBuyingStep) {
+    replyText = replyText
+      .replace(/Para avanzar con la compra[^.]*\\.?/gi, '')
+      .replace(/Pod[eé]s iniciar la compra[^.]*\\.?/gi, '')
+      .replace(/Si prefer[ií]s avanzar online[^.]*\\.?/gi, '')
+      .replace(/\\s+/g, ' ')
+      .trim();
+  }
+
+  if (shouldAppendExactProductUrl) {
+    replyText = appendExactProductUrl(replyText, primaryExactProductUrl);
+  }
 }
 
-replyText = replyText.slice(0, 1100).trim();
+replyText = stripDanglingUrlPrompts(replyText).slice(0, 1100).trim();
 
 const replyMessages = [{ type: 'text', text: replyText }];
 const shouldSend = !actionList.includes('no_reply');
