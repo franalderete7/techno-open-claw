@@ -2,8 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { trackStorefrontEvent } from "../../lib/storefront-analytics";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { trackStorefrontEvent, trackStorefrontSearch } from "../../lib/storefront-analytics";
 import { buildStorefrontProductPath, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
 import { StorefrontProductActions } from "./storefront-product-actions";
 
@@ -171,6 +171,7 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
   const [page, setPage] = useState(1);
   const deferredQuery = useDeferredValue(query);
   const needle = deferredQuery.trim().toLowerCase();
+  const lastTrackedSearchKeyRef = useRef("");
 
   const ramOptions = useMemo(
     () =>
@@ -239,6 +240,32 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
       setPage(1);
     });
   }, [needle, products.length, ramFilter, sort, storageFilter]);
+
+  useEffect(() => {
+    if (needle.length < 2) {
+      lastTrackedSearchKeyRef.current = "";
+      return;
+    }
+
+    const key = JSON.stringify({
+      needle,
+      ramFilter,
+      storageFilter,
+      sort,
+    });
+
+    if (lastTrackedSearchKeyRef.current === key) {
+      return;
+    }
+
+    lastTrackedSearchKeyRef.current = key;
+    trackStorefrontSearch(deferredQuery, {
+      results_count: filteredProducts.length,
+      ram_filter: ramFilter,
+      storage_filter: storageFilter,
+      sort,
+    });
+  }, [deferredQuery, filteredProducts.length, needle, ramFilter, sort, storageFilter]);
 
   const availableCount = products.filter((product) => product.in_stock).length;
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));

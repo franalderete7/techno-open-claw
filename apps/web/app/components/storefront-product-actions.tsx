@@ -80,6 +80,16 @@ export function StorefrontProductActions({
           utm_campaign: analytics?.utm_campaign ?? null,
           utm_term: analytics?.utm_term ?? null,
           utm_content: analytics?.utm_content ?? null,
+          device_type: analytics?.device_type ?? null,
+          device_family: analytics?.device_family ?? null,
+          os_name: analytics?.os_name ?? null,
+          browser_name: analytics?.browser_name ?? null,
+          user_agent: analytics?.user_agent ?? null,
+          screen_width: analytics?.screen_width ?? null,
+          screen_height: analytics?.screen_height ?? null,
+          viewport_width: analytics?.viewport_width ?? null,
+          viewport_height: analytics?.viewport_height ?? null,
+          language: analytics?.language ?? null,
         }),
       });
 

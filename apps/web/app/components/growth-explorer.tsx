@@ -26,6 +26,15 @@ function formatPct(value: number | null | undefined) {
   return `${value.toFixed(1)}%`;
 }
 
+function formatDuration(seconds: number | null | undefined) {
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  const remaining = Math.round(seconds % 60);
+  return remaining > 0 ? `${minutes}m ${remaining}s` : `${minutes}m`;
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "—";
   return new Date(value).toLocaleString("es-AR", {
@@ -45,6 +54,8 @@ function eventLabel(value: string) {
   switch (value) {
     case "page_view":
       return "PageView";
+    case "search":
+      return "Search";
     case "view_content":
       return "ViewContent";
     case "contact":
@@ -66,6 +77,8 @@ function eventTone(value: string) {
       return "accent";
     case "contact":
       return "warn";
+    case "search":
+      return "accent";
     case "view_content":
       return "";
     case "page_view":
@@ -99,6 +112,7 @@ function ActivityChart({
   const height = 260;
   const series = [
     { key: "page_views", label: "Page views", color: "#b68f7a" },
+    { key: "searches", label: "Searches", color: "#9366cc" },
     { key: "view_contents", label: "Product views", color: "#bf6f4d" },
     { key: "contacts", label: "Contacts", color: "#8a6c2c" },
     { key: "checkout_starts", label: "Checkout", color: "#4d698d" },
@@ -241,11 +255,93 @@ function SourcePanel({ sources }: { sources: StorefrontAnalyticsOverviewResponse
               <div className="growth-source-fill" style={{ width: `${(source.sessions / max) * 100}%` }} />
             </div>
             <div className="growth-source-meta">
+              <span>{formatNumber(source.searches)} searches</span>
               <span>{formatNumber(source.view_contents)} views</span>
               <span>{formatNumber(source.contacts)} contacts</span>
               <span>{formatNumber(source.checkout_starts)} checkouts</span>
               <span>{formatNumber(source.purchases)} purchases</span>
               {source.landing_page ? <span className="mono">{source.landing_page}</span> : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DevicePanel({ devices }: { devices: StorefrontAnalyticsOverviewResponse["devices"] }) {
+  const max = Math.max(1, ...devices.map((item) => item.sessions));
+
+  return (
+    <article className="panel growth-panel">
+      <div className="panel-header">
+        <div>
+          <h3 className="panel-title">Devices</h3>
+          <p className="panel-copy">Qué familias de equipo navegan y cuáles terminan convirtiendo mejor.</p>
+        </div>
+      </div>
+
+      <div className="growth-source-list">
+        {devices.length === 0 ? <p className="empty">Todavía no hay device data.</p> : null}
+        {devices.map((device) => (
+          <div key={`${device.device_family}-${device.browser_name ?? "browser"}`} className="growth-source-row">
+            <div className="growth-source-head">
+              <div>
+                <strong>{device.device_family}</strong>
+                <div className="chip-row">
+                  <span className="chip accent">{device.sessions} sesiones</span>
+                  <span className="chip">{device.device_type}</span>
+                  {device.os_name ? <span className="chip">{device.os_name}</span> : null}
+                  {device.browser_name ? <span className="chip">{device.browser_name}</span> : null}
+                </div>
+              </div>
+              <strong>{formatMoney(device.revenue_ars)}</strong>
+            </div>
+            <div className="growth-source-bar">
+              <div className="growth-source-fill" style={{ width: `${(device.sessions / max) * 100}%` }} />
+            </div>
+            <div className="growth-source-meta">
+              <span>{formatNumber(device.searches)} searches</span>
+              <span>{formatNumber(device.view_contents)} views</span>
+              <span>{formatNumber(device.contacts)} contacts</span>
+              <span>{formatNumber(device.checkout_starts)} checkouts</span>
+              <span>{formatNumber(device.purchases)} purchases</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function SearchPanel({ searches }: { searches: StorefrontAnalyticsOverviewResponse["searches"] }) {
+  return (
+    <article className="panel growth-panel">
+      <div className="panel-header">
+        <div>
+          <h3 className="panel-title">What People Search</h3>
+          <p className="panel-copy">Real search terms from the storefront search box.</p>
+        </div>
+      </div>
+
+      <div className="growth-source-list">
+        {searches.length === 0 ? <p className="empty">Todavía no hay búsquedas registradas.</p> : null}
+        {searches.map((search) => (
+          <div key={search.query} className="growth-source-row">
+            <div className="growth-source-head">
+              <div>
+                <strong className="mono">{search.query}</strong>
+                <div className="chip-row">
+                  <span className="chip accent">{search.searches} searches</span>
+                  <span className="chip">{search.sessions} sesiones</span>
+                  <span className="chip">{search.visitors} visitors</span>
+                </div>
+              </div>
+              <strong>{search.avg_results_count != null ? `${search.avg_results_count} results` : "—"}</strong>
+            </div>
+            <div className="growth-source-meta">
+              {search.top_source ? <span>{search.top_source}</span> : null}
+              {search.top_device ? <span>{search.top_device}</span> : null}
             </div>
           </div>
         ))}
@@ -286,6 +382,11 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
           <span className="stat-label">Product Views</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.view_contents)}</strong>
           <span className="stat-note">{formatNumber(snapshot.totals.page_views)} pageviews</span>
+        </article>
+        <article className="stat-card">
+          <span className="stat-label">Searches</span>
+          <strong className="stat-value">{formatNumber(snapshot.totals.searches)}</strong>
+          <span className="stat-note">{formatDuration(snapshot.totals.avg_session_duration_seconds)} avg session</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">WhatsApp Contacts</span>
@@ -349,6 +450,11 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
             ))}
           </div>
         </article>
+      </section>
+
+      <section className="split-grid growth-top-grid">
+        <DevicePanel devices={snapshot.devices} />
+        <SearchPanel searches={snapshot.searches} />
       </section>
 
       <section className="table-card">
@@ -439,6 +545,10 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
                   <dt>Last product</dt>
                   <dd>{person.last_product ?? "—"}</dd>
                 </div>
+                <div>
+                  <dt>Device</dt>
+                  <dd>{person.device_family ?? "—"}</dd>
+                </div>
               </div>
 
               <div className="chip-row">
@@ -466,6 +576,14 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
                 <div>
                   <dt>Email</dt>
                   <dd>{person.email ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>Session avg</dt>
+                  <dd>{formatDuration(person.avg_session_duration_seconds)}</dd>
+                </div>
+                <div>
+                  <dt>Browser</dt>
+                  <dd>{person.browser_name ?? person.os_name ?? "—"}</dd>
                 </div>
               </div>
             </article>
@@ -514,11 +632,11 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
                     </div>
                   </td>
                   <td className="mono">{event.page_path ?? "—"}</td>
-                  <td>{event.product ?? "—"}</td>
+                  <td>{event.search_query ? `search: ${event.search_query}` : event.product ?? "—"}</td>
                   <td>
                     <div className="value-stack">
                       <strong>{event.person ?? "Anonymous"}</strong>
-                      <span className="muted mono">{event.visitor ?? "—"}</span>
+                      <span className="muted mono">{event.visitor ?? "—"}{event.device_family ? ` · ${event.device_family}` : ""}</span>
                     </div>
                   </td>
                   <td>{event.order_number ?? "—"}</td>

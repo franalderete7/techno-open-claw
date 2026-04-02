@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await createStorefrontEvent({
-      event_name: eventName as "page_view" | "view_content" | "contact" | "initiate_checkout" | "purchase",
+      event_name: eventName as "page_view" | "search" | "view_content" | "contact" | "initiate_checkout" | "purchase",
       event_key: typeof body.event_key === "string" ? body.event_key : null,
       received_from: typeof body.received_from === "string" ? (body.received_from as "browser" | "server") : "browser",
       visitor_id: typeof body.visitor_id === "string" ? body.visitor_id : null,

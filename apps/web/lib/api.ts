@@ -361,17 +361,6 @@ export type SettingRecord = {
   updated_at: string;
 };
 
-export type AuditRecord = {
-  id: number;
-  actor_type: string;
-  actor_id: string | null;
-  action: string;
-  entity_type: string;
-  entity_id: string;
-  metadata: unknown;
-  created_at: string;
-};
-
 export type SchemaRelationshipRecord = {
   constraint_name: string;
   source_table: string;
@@ -525,218 +514,6 @@ export type MetaAdsOverviewResponse = {
   };
 };
 
-export type ContentOverviewResponse = {
-  configured: {
-    orshot: {
-      api_base_url: string;
-      api_key: boolean;
-      webhook_url: string | null;
-    };
-    runway: {
-      api_base_url: string;
-      api_secret: boolean;
-      api_version: string;
-    };
-  };
-  counts: {
-    brands: number;
-    templates: number;
-    enabled_profiles: number;
-    assets: number;
-    jobs: number;
-    outputs: number;
-    publications: number;
-    suggestions: number;
-  };
-  jobs_by_status: Record<string, number>;
-  publications_by_status: Record<string, number>;
-  outputs_by_review: Record<string, number>;
-  brands: ContentBrandProfileRecord[];
-  templates: ContentTemplateRecord[];
-  profiles: ContentProductProfileRecord[];
-  assets: ContentAssetRecord[];
-  jobs: ContentJobRecord[];
-  outputs: ContentOutputRecord[];
-  publications: ContentPublicationRecord[];
-  suggestions: ContentPlannerSuggestionRecord[];
-  providers: {
-    orshot_templates: {
-      items: Array<{
-        id: string;
-        name?: string | null;
-        category?: string | null;
-        width?: number | null;
-        height?: number | null;
-        updatedAt?: string | null;
-      }>;
-      page: number;
-      limit: number;
-      total: number;
-    } | null;
-    orshot_error: string | null;
-  };
-};
-
-export type ContentBrandProfileRecord = {
-  brand_key: string;
-  label: string;
-  visual_direction: string | null;
-  theme_json: Record<string, unknown>;
-  active: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-export type ContentTemplateRecord = {
-  id: number;
-  template_code: string;
-  label: string;
-  engine: string;
-  channel: string;
-  format: string;
-  description: string | null;
-  prompt_text: string | null;
-  definition_json: Record<string, unknown>;
-  active: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-export type ContentProductProfileRecord = {
-  product_id: number;
-  brand_key: string;
-  tier: string;
-  priority_level: string;
-  compare_group_key: string | null;
-  hero_candidate: boolean;
-  content_enabled: boolean;
-  visual_mode: string | null;
-  metadata: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-  sku: string;
-  slug: string;
-  brand: string;
-  model: string;
-  title: string;
-  image_url: string | null;
-  price_amount: number | null;
-  promo_price_ars: number | null;
-  ram_gb: number | null;
-  storage_gb: number | null;
-  active: boolean;
-  in_stock: boolean;
-  stock_units_available: number;
-};
-
-export type ContentAssetRecord = {
-  id: number;
-  product_id: number | null;
-  brand_key: string | null;
-  asset_type: string;
-  source_kind: string;
-  status: string;
-  title: string | null;
-  storage_url: string;
-  mime_type: string | null;
-  width: number | null;
-  height: number | null;
-  duration_ms: number | null;
-  external_asset_id: string | null;
-  metadata: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-  sku: string | null;
-  model: string | null;
-  product_title: string | null;
-};
-
-export type ContentJobRecord = {
-  id: number;
-  product_id: number | null;
-  brand_key: string | null;
-  template_id: number | null;
-  engine: string;
-  channel: string;
-  format: string;
-  title: string;
-  status: string;
-  priority: string;
-  requested_by: string | null;
-  input_json: Record<string, unknown>;
-  external_job_id: string | null;
-  external_status: string | null;
-  error_message: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  created_at: string;
-  updated_at: string;
-  template_code: string | null;
-  template_label: string | null;
-  sku: string | null;
-  model: string | null;
-  product_title: string | null;
-};
-
-export type ContentOutputRecord = {
-  id: number;
-  job_id: number;
-  asset_id: number | null;
-  variant_key: string | null;
-  review_status: string;
-  review_notes: string | null;
-  output_url: string | null;
-  generation_payload: Record<string, unknown>;
-  metadata: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-  title: string | null;
-  template_code: string | null;
-  product_id: number | null;
-  sku: string | null;
-  model: string | null;
-  product_title: string | null;
-  asset_url: string | null;
-};
-
-export type ContentPublicationRecord = {
-  id: number;
-  output_id: number;
-  channel: string;
-  target_account: string | null;
-  platform_post_id: string | null;
-  published_url: string | null;
-  status: string;
-  boost_candidate: boolean;
-  boosted: boolean;
-  metadata: Record<string, unknown>;
-  published_at: string | null;
-  created_at: string;
-  updated_at: string;
-  template_code: string | null;
-  product_id: number | null;
-  sku: string | null;
-  model: string | null;
-  product_title: string | null;
-};
-
-export type ContentPlannerSuggestionRecord = {
-  product_id: number;
-  sku: string;
-  model: string;
-  title: string;
-  brand_key: string;
-  tier: string;
-  priority_level: string;
-  template_code: string;
-  template_label: string;
-  channel: string;
-  engine: string;
-  format: string;
-  reason: string;
-  hero_candidate: boolean;
-};
-
 export type StorefrontPaymentIntentCreateResponse = {
   order_id: number;
   token: string;
@@ -756,6 +533,7 @@ export type StorefrontAnalyticsOverviewResponse = {
     visitors: number;
     sessions: number;
     page_views: number;
+    searches: number;
     view_contents: number;
     contacts: number;
     checkout_starts: number;
@@ -764,9 +542,10 @@ export type StorefrontAnalyticsOverviewResponse = {
     contact_rate_pct: number | null;
     checkout_rate_pct: number | null;
     purchase_rate_pct: number | null;
+    avg_session_duration_seconds: number | null;
   };
   funnel: Array<{
-    key: "page_view" | "view_content" | "contact" | "initiate_checkout" | "purchase";
+    key: "page_view" | "search" | "view_content" | "contact" | "initiate_checkout" | "purchase";
     label: string;
     count: number;
     conversion_from_previous_pct: number | null;
@@ -775,6 +554,7 @@ export type StorefrontAnalyticsOverviewResponse = {
   daily: Array<{
     date: string;
     page_views: number;
+    searches: number;
     view_contents: number;
     contacts: number;
     checkout_starts: number;
@@ -786,6 +566,7 @@ export type StorefrontAnalyticsOverviewResponse = {
     sessions: number;
     visitors: number;
     page_views: number;
+    searches: number;
     view_contents: number;
     contacts: number;
     checkout_starts: number;
@@ -803,6 +584,29 @@ export type StorefrontAnalyticsOverviewResponse = {
     checkout_starts: number;
     purchases: number;
     revenue_ars: number;
+  }>;
+  devices: Array<{
+    device_family: string;
+    device_type: string;
+    os_name: string | null;
+    browser_name: string | null;
+    sessions: number;
+    visitors: number;
+    searches: number;
+    view_contents: number;
+    contacts: number;
+    checkout_starts: number;
+    purchases: number;
+    revenue_ars: number;
+  }>;
+  searches: Array<{
+    query: string;
+    searches: number;
+    visitors: number;
+    sessions: number;
+    avg_results_count: number | null;
+    top_source: string | null;
+    top_device: string | null;
   }>;
   products: Array<{
     product_id: number | null;
@@ -834,16 +638,23 @@ export type StorefrontAnalyticsOverviewResponse = {
     identified_customer: string | null;
     phone: string | null;
     email: string | null;
+    device_family: string | null;
+    device_type: string | null;
+    os_name: string | null;
+    browser_name: string | null;
+    avg_session_duration_seconds: number | null;
   }>;
   recent_events: Array<{
     id: number;
-    event_name: "page_view" | "view_content" | "contact" | "initiate_checkout" | "purchase";
+    event_name: "page_view" | "search" | "view_content" | "contact" | "initiate_checkout" | "purchase";
     received_from: "browser" | "server";
     at: string;
     source: string;
     campaign: string | null;
     page_path: string | null;
     product: string | null;
+    search_query: string | null;
+    device_family: string | null;
     visitor: string | null;
     person: string | null;
     order_number: string | null;
@@ -909,10 +720,6 @@ export async function getSettings() {
   return apiFetch<ListResponse<SettingRecord>>("/v1/settings");
 }
 
-export async function getAudit(limit = 100) {
-  return apiFetch<ListResponse<AuditRecord>>(`/v1/audit?limit=${limit}`);
-}
-
 export async function getSchema() {
   return apiFetch<SchemaResponse>("/v1/schema");
 }
@@ -940,10 +747,6 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
   return apiFetch<StorefrontAnalyticsOverviewResponse>(`/v1/growth/overview${query ? `?${query}` : ""}`);
 }
 
-export async function getContentOverview() {
-  return apiFetch<ContentOverviewResponse>("/v1/content/overview");
-}
-
 export async function createStorefrontPaymentIntent(payload: {
   product_id: number;
   source_host?: string | null;
@@ -958,6 +761,16 @@ export async function createStorefrontPaymentIntent(payload: {
   utm_campaign?: string | null;
   utm_term?: string | null;
   utm_content?: string | null;
+  device_type?: string | null;
+  device_family?: string | null;
+  os_name?: string | null;
+  browser_name?: string | null;
+  user_agent?: string | null;
+  screen_width?: number | null;
+  screen_height?: number | null;
+  viewport_width?: number | null;
+  viewport_height?: number | null;
+  language?: string | null;
 }) {
   return apiRequest<StorefrontPaymentIntentCreateResponse>("/v1/storefront/payment-intents", {
     method: "POST",
@@ -966,7 +779,7 @@ export async function createStorefrontPaymentIntent(payload: {
 }
 
 export async function createStorefrontEvent(payload: {
-  event_name: "page_view" | "view_content" | "contact" | "initiate_checkout" | "purchase";
+  event_name: "page_view" | "search" | "view_content" | "contact" | "initiate_checkout" | "purchase";
   event_key?: string | null;
   received_from?: "browser" | "server";
   visitor_id?: string | null;

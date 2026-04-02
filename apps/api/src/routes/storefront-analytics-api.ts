@@ -11,7 +11,7 @@ const overviewQuerySchema = z.object({
 });
 
 const createEventBodySchema = z.object({
-  event_name: z.enum(["page_view", "view_content", "contact", "initiate_checkout", "purchase"]),
+  event_name: z.enum(["page_view", "search", "view_content", "contact", "initiate_checkout", "purchase"]),
   event_key: z.string().trim().max(160).optional().nullable(),
   received_from: z.enum(["browser", "server"]).default("browser"),
   visitor_id: z.string().trim().max(160).optional().nullable(),

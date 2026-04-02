@@ -13,13 +13,11 @@ import {
   handleTaloWebhook,
   resolveStorefrontCheckoutHandoff,
 } from "./storefront-checkouts.js";
-import { handleOrshotWebhook } from "./content-system.js";
 import { calculateDerivedPricing, shouldRecalculatePricing } from "./pricing.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { n8nCompatRoutes } from "./routes/n8n-compat.js";
 import { metaAdsApiRoutes } from "./routes/meta-ads-api.js";
 import { metaCatalogApiRoutes } from "./routes/meta-catalog-api.js";
-import { contentApiRoutes } from "./routes/content-api.js";
 import { storefrontAnalyticsApiRoutes } from "./routes/storefront-analytics-api.js";
 import { telegramOperatorApiRoutes } from "./routes/telegram-operator-api.js";
 import { sendMetaPurchaseEventForOrder } from "./meta-conversions.js";
@@ -242,10 +240,6 @@ app.post("/webhooks/talo", async (request, reply) => {
   const result = await handleTaloWebhook(request.body);
   return reply.code(200).send(result);
 });
-app.post("/webhooks/orshot", async (request, reply) => {
-  const result = await handleOrshotWebhook(pool, request.body);
-  return reply.code(200).send(result);
-});
 
 app.register(metaCatalogApiRoutes);
 
@@ -254,7 +248,6 @@ app.register(async (protectedApp) => {
   protectedApp.register(n8nCompatRoutes, { prefix: "/rest/v1" });
   protectedApp.register(metaAdsApiRoutes);
   protectedApp.register(storefrontAnalyticsApiRoutes);
-  protectedApp.register(contentApiRoutes);
   protectedApp.register(telegramOperatorApiRoutes);
 
   protectedApp.get("/v1/telegram/status", async () => {
@@ -370,6 +363,16 @@ app.register(async (protectedApp) => {
       utm_campaign: z.string().trim().optional().nullable(),
       utm_term: z.string().trim().optional().nullable(),
       utm_content: z.string().trim().optional().nullable(),
+      device_type: z.string().trim().optional().nullable(),
+      device_family: z.string().trim().optional().nullable(),
+      os_name: z.string().trim().optional().nullable(),
+      browser_name: z.string().trim().optional().nullable(),
+      user_agent: z.string().trim().optional().nullable(),
+      screen_width: z.coerce.number().int().positive().optional().nullable(),
+      screen_height: z.coerce.number().int().positive().optional().nullable(),
+      viewport_width: z.coerce.number().int().positive().optional().nullable(),
+      viewport_height: z.coerce.number().int().positive().optional().nullable(),
+      language: z.string().trim().optional().nullable(),
     });
 
     const body = schema.parse(request.body);
@@ -389,6 +392,16 @@ app.register(async (protectedApp) => {
         utmCampaign: body.utm_campaign ?? null,
         utmTerm: body.utm_term ?? null,
         utmContent: body.utm_content ?? null,
+        deviceType: body.device_type ?? null,
+        deviceFamily: body.device_family ?? null,
+        osName: body.os_name ?? null,
+        browserName: body.browser_name ?? null,
+        userAgent: body.user_agent ?? null,
+        screenWidth: body.screen_width ?? null,
+        screenHeight: body.screen_height ?? null,
+        viewportWidth: body.viewport_width ?? null,
+        viewportHeight: body.viewport_height ?? null,
+        language: body.language ?? null,
       },
     });
 
@@ -1438,51 +1451,6 @@ app.register(async (protectedApp) => {
         limit $1
       `,
       [params.limit]
-    );
-
-    return { items: rows };
-  });
-
-  protectedApp.get("/v1/audit", async (request) => {
-    const schema = z.object({
-      limit: listLimitSchema(100, 200),
-      actor_type: z.string().trim().optional(),
-      entity_type: z.string().trim().optional(),
-    });
-    const params = schema.parse(request.query);
-
-    const values: unknown[] = [];
-    const where: string[] = [];
-
-    if (params.actor_type) {
-      values.push(params.actor_type);
-      where.push(`actor_type = $${values.length}`);
-    }
-
-    if (params.entity_type) {
-      values.push(params.entity_type);
-      where.push(`entity_type = $${values.length}`);
-    }
-
-    values.push(params.limit);
-
-    const rows = await query(
-      `
-        select
-          id,
-          actor_type,
-          actor_id,
-          action,
-          entity_type,
-          entity_id,
-          metadata,
-          created_at
-        from public.audit_logs
-        ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-        order by created_at desc, id desc
-        limit $${values.length}
-      `,
-      values
     );
 
     return { items: rows };

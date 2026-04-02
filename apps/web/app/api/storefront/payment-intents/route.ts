@@ -34,6 +34,16 @@ export async function POST(request: NextRequest) {
       utm_campaign: typeof body.utm_campaign === "string" ? body.utm_campaign : null,
       utm_term: typeof body.utm_term === "string" ? body.utm_term : null,
       utm_content: typeof body.utm_content === "string" ? body.utm_content : null,
+      device_type: typeof body.device_type === "string" ? body.device_type : null,
+      device_family: typeof body.device_family === "string" ? body.device_family : null,
+      os_name: typeof body.os_name === "string" ? body.os_name : null,
+      browser_name: typeof body.browser_name === "string" ? body.browser_name : null,
+      user_agent: typeof body.user_agent === "string" ? body.user_agent : request.headers.get("user-agent"),
+      screen_width: Number.isFinite(Number(body.screen_width)) ? Number(body.screen_width) : null,
+      screen_height: Number.isFinite(Number(body.screen_height)) ? Number(body.screen_height) : null,
+      viewport_width: Number.isFinite(Number(body.viewport_width)) ? Number(body.viewport_width) : null,
+      viewport_height: Number.isFinite(Number(body.viewport_height)) ? Number(body.viewport_height) : null,
+      language: typeof body.language === "string" ? body.language : null,
     });
 
     return NextResponse.json(result, { status: 201 });

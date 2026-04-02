@@ -21,6 +21,16 @@ type CheckoutAnalyticsContext = {
   utmCampaign?: string | null;
   utmTerm?: string | null;
   utmContent?: string | null;
+  deviceType?: string | null;
+  deviceFamily?: string | null;
+  osName?: string | null;
+  browserName?: string | null;
+  userAgent?: string | null;
+  screenWidth?: number | null;
+  screenHeight?: number | null;
+  viewportWidth?: number | null;
+  viewportHeight?: number | null;
+  language?: string | null;
 };
 
 type CreateStorefrontPaymentIntentInput = {
@@ -545,6 +555,16 @@ export async function createStorefrontPaymentIntent({
                 utm_campaign: analytics.utmCampaign ?? null,
                 utm_term: analytics.utmTerm ?? null,
                 utm_content: analytics.utmContent ?? null,
+                device_type: analytics.deviceType ?? null,
+                device_family: analytics.deviceFamily ?? null,
+                os_name: analytics.osName ?? null,
+                browser_name: analytics.browserName ?? null,
+                user_agent: analytics.userAgent ?? null,
+                screen_width: analytics.screenWidth ?? null,
+                screen_height: analytics.screenHeight ?? null,
+                viewport_width: analytics.viewportWidth ?? null,
+                viewport_height: analytics.viewportHeight ?? null,
+                language: analytics.language ?? null,
               }
             : null,
         },

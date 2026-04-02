@@ -4,7 +4,7 @@ import { pool, query } from "./db.js";
 type JsonRecord = Record<string, unknown>;
 type SqlExecutor = Pick<PoolClient, "query"> | typeof pool;
 
-export type StorefrontEventName = "page_view" | "view_content" | "contact" | "initiate_checkout" | "purchase";
+export type StorefrontEventName = "page_view" | "search" | "view_content" | "contact" | "initiate_checkout" | "purchase";
 export type StorefrontEventSource = "browser" | "server";
 
 export type RecordStorefrontEventInput = {
@@ -101,6 +101,7 @@ export type StorefrontAnalyticsOverview = {
     visitors: number;
     sessions: number;
     page_views: number;
+    searches: number;
     view_contents: number;
     contacts: number;
     checkout_starts: number;
@@ -109,6 +110,7 @@ export type StorefrontAnalyticsOverview = {
     contact_rate_pct: number | null;
     checkout_rate_pct: number | null;
     purchase_rate_pct: number | null;
+    avg_session_duration_seconds: number | null;
   };
   funnel: Array<{
     key: StorefrontEventName;
@@ -120,6 +122,7 @@ export type StorefrontAnalyticsOverview = {
   daily: Array<{
     date: string;
     page_views: number;
+    searches: number;
     view_contents: number;
     contacts: number;
     checkout_starts: number;
@@ -131,6 +134,7 @@ export type StorefrontAnalyticsOverview = {
     sessions: number;
     visitors: number;
     page_views: number;
+    searches: number;
     view_contents: number;
     contacts: number;
     checkout_starts: number;
@@ -148,6 +152,29 @@ export type StorefrontAnalyticsOverview = {
     checkout_starts: number;
     purchases: number;
     revenue_ars: number;
+  }>;
+  devices: Array<{
+    device_family: string;
+    device_type: string;
+    os_name: string | null;
+    browser_name: string | null;
+    sessions: number;
+    visitors: number;
+    searches: number;
+    view_contents: number;
+    contacts: number;
+    checkout_starts: number;
+    purchases: number;
+    revenue_ars: number;
+  }>;
+  searches: Array<{
+    query: string;
+    searches: number;
+    visitors: number;
+    sessions: number;
+    avg_results_count: number | null;
+    top_source: string | null;
+    top_device: string | null;
   }>;
   products: Array<{
     product_id: number | null;
@@ -179,6 +206,11 @@ export type StorefrontAnalyticsOverview = {
     identified_customer: string | null;
     phone: string | null;
     email: string | null;
+    device_family: string | null;
+    device_type: string | null;
+    os_name: string | null;
+    browser_name: string | null;
+    avg_session_duration_seconds: number | null;
   }>;
   recent_events: Array<{
     id: number;
@@ -189,6 +221,8 @@ export type StorefrontAnalyticsOverview = {
     campaign: string | null;
     page_path: string | null;
     product: string | null;
+    search_query: string | null;
+    device_family: string | null;
     visitor: string | null;
     person: string | null;
     order_number: string | null;
@@ -213,6 +247,25 @@ function trimText(value: string | null | undefined) {
 function toNumber(value: string | number | null | undefined) {
   const numeric = Number(value ?? NaN);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function payloadString(payload: JsonRecord | null | undefined, key: string) {
+  return trimText(typeof payload?.[key] === "string" ? (payload[key] as string) : null);
+}
+
+function payloadNumber(payload: JsonRecord | null | undefined, key: string) {
+  return toNumber(typeof payload?.[key] === "number" || typeof payload?.[key] === "string" ? (payload[key] as string | number) : null);
+}
+
+function sessionDurationSeconds(firstSeen: string, lastSeen: string) {
+  const start = new Date(firstSeen).getTime();
+  const end = new Date(lastSeen).getTime();
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((end - start) / 1000));
 }
 
 function normalizeUrl(value: string | null | undefined) {
@@ -565,6 +618,16 @@ export async function recordStorefrontPurchaseEvent(orderId: number): Promise<St
       order_status: row.order_status,
       customer_phone_present: Boolean(row.customer_phone),
       customer_email_present: Boolean(row.customer_email),
+      device_type: trimText(typeof analytics.device_type === "string" ? analytics.device_type : null),
+      device_family: trimText(typeof analytics.device_family === "string" ? analytics.device_family : null),
+      os_name: trimText(typeof analytics.os_name === "string" ? analytics.os_name : null),
+      browser_name: trimText(typeof analytics.browser_name === "string" ? analytics.browser_name : null),
+      user_agent: trimText(typeof analytics.user_agent === "string" ? analytics.user_agent : null),
+      screen_width: toNumber(typeof analytics.screen_width === "number" || typeof analytics.screen_width === "string" ? analytics.screen_width : null),
+      screen_height: toNumber(typeof analytics.screen_height === "number" || typeof analytics.screen_height === "string" ? analytics.screen_height : null),
+      viewport_width: toNumber(typeof analytics.viewport_width === "number" || typeof analytics.viewport_width === "string" ? analytics.viewport_width : null),
+      viewport_height: toNumber(typeof analytics.viewport_height === "number" || typeof analytics.viewport_height === "string" ? analytics.viewport_height : null),
+      language: trimText(typeof analytics.language === "string" ? analytics.language : null),
     },
   });
 
@@ -631,6 +694,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     visitors: 0,
     sessions: 0,
     page_views: 0,
+    searches: 0,
     view_contents: 0,
     contacts: 0,
     checkout_starts: 0,
@@ -639,6 +703,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     contact_rate_pct: null as number | null,
     checkout_rate_pct: null as number | null,
     purchase_rate_pct: null as number | null,
+    avg_session_duration_seconds: null as number | null,
   };
 
   const dailyMap = new Map<string, StorefrontAnalyticsOverview["daily"][number]>();
@@ -667,9 +732,33 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
       identifiedCustomer: string | null;
       phone: string | null;
       email: string | null;
+      deviceFamily: string | null;
+      deviceType: string | null;
+      osName: string | null;
+      browserName: string | null;
     }
   >();
-  const peopleMap = new Map<string, StorefrontAnalyticsOverview["people"][number] & { _sessionIds: Set<string> }>();
+  const deviceMap = new Map<
+    string,
+    StorefrontAnalyticsOverview["devices"][number] & {
+      _visitors: Set<string>;
+    }
+  >();
+  const searchMap = new Map<
+    string,
+    StorefrontAnalyticsOverview["searches"][number] & {
+      _visitors: Set<string>;
+      _sessions: Set<string>;
+      _sources: Map<string, number>;
+      _devices: Map<string, number>;
+      _resultsTotal: number;
+      _resultsSeen: number;
+    }
+  >();
+  const peopleMap = new Map<
+    string,
+    StorefrontAnalyticsOverview["people"][number] & { _sessionIds: Set<string>; _durationTotal: number; _durationCount: number }
+  >();
 
   const end = new Date();
   const start = new Date(end);
@@ -679,6 +768,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     dailyMap.set(key, {
       date: key,
       page_views: 0,
+      searches: 0,
       view_contents: 0,
       contacts: 0,
       checkout_starts: 0,
@@ -697,10 +787,17 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     const dateKey = eventDateKey(row.event_time);
     const valueAmount = toNumber(row.value_amount) ?? 0;
     const person = customerLabel(row);
+    const deviceFamily = payloadString(row.payload, "device_family") || payloadString(row.payload, "os_name") || "unknown";
+    const deviceType = payloadString(row.payload, "device_type") || "unknown";
+    const osName = payloadString(row.payload, "os_name");
+    const browserName = payloadString(row.payload, "browser_name");
+    const searchQuery = payloadString(row.payload, "search_query");
+    const resultsCount = payloadNumber(row.payload, "results_count");
     const productLabel =
       trimText(row.product_title) || trimText(row.product_sku) || trimText(typeof row.payload?.["product_title"] === "string" ? row.payload.product_title : null);
 
     if (row.event_name === "page_view") totals.page_views += 1;
+    if (row.event_name === "search") totals.searches += 1;
     if (row.event_name === "view_content") totals.view_contents += 1;
     if (row.event_name === "contact") totals.contacts += 1;
     if (row.event_name === "initiate_checkout") totals.checkout_starts += 1;
@@ -712,6 +809,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     const daily = dailyMap.get(dateKey);
     if (daily) {
       if (row.event_name === "page_view") daily.page_views += 1;
+      if (row.event_name === "search") daily.searches += 1;
       if (row.event_name === "view_content") daily.view_contents += 1;
       if (row.event_name === "contact") daily.contacts += 1;
       if (row.event_name === "initiate_checkout") daily.checkout_starts += 1;
@@ -732,6 +830,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         landingPage: trimText(row.page_path),
         counts: {
           page_view: 0,
+          search: 0,
           view_content: 0,
           contact: 0,
           initiate_checkout: 0,
@@ -742,6 +841,10 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         identifiedCustomer: person,
         phone: trimText(row.customer_phone),
         email: trimText(row.customer_email),
+        deviceFamily,
+        deviceType,
+        osName,
+        browserName,
       });
     }
 
@@ -756,6 +859,18 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     }
     if (!session.landingPage && trimText(row.page_path)) {
       session.landingPage = trimText(row.page_path);
+    }
+    if (!session.deviceFamily && deviceFamily) {
+      session.deviceFamily = deviceFamily;
+    }
+    if (!session.deviceType && deviceType) {
+      session.deviceType = deviceType;
+    }
+    if (!session.osName && osName) {
+      session.osName = osName;
+    }
+    if (!session.browserName && browserName) {
+      session.browserName = browserName;
     }
     if (productLabel) {
       session.lastProduct = productLabel;
@@ -792,7 +907,14 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         identified_customer: person,
         phone: trimText(row.customer_phone),
         email: trimText(row.customer_email),
+        device_family: deviceFamily,
+        device_type: deviceType,
+        os_name: osName,
+        browser_name: browserName,
+        avg_session_duration_seconds: null,
         _sessionIds: new Set<string>(),
+        _durationTotal: 0,
+        _durationCount: 0,
       });
     }
 
@@ -815,7 +937,49 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     if (!personEntry.email && trimText(row.customer_email)) {
       personEntry.email = trimText(row.customer_email);
     }
+    if (!personEntry.device_family && deviceFamily) {
+      personEntry.device_family = deviceFamily;
+    }
+    if (!personEntry.device_type && deviceType) {
+      personEntry.device_type = deviceType;
+    }
+    if (!personEntry.os_name && osName) {
+      personEntry.os_name = osName;
+    }
+    if (!personEntry.browser_name && browserName) {
+      personEntry.browser_name = browserName;
+    }
     if (row.event_name === "page_view") personEntry.page_views += 1;
+    if (row.event_name === "search" && searchQuery) {
+      if (!searchMap.has(searchQuery)) {
+        searchMap.set(searchQuery, {
+          query: searchQuery,
+          searches: 0,
+          visitors: 0,
+          sessions: 0,
+          avg_results_count: null,
+          top_source: null,
+          top_device: null,
+          _visitors: new Set<string>(),
+          _sessions: new Set<string>(),
+          _sources: new Map<string, number>(),
+          _devices: new Map<string, number>(),
+          _resultsTotal: 0,
+          _resultsSeen: 0,
+        });
+      }
+
+      const searchEntry = searchMap.get(searchQuery)!;
+      searchEntry.searches += 1;
+      searchEntry._visitors.add(visitorKey);
+      searchEntry._sessions.add(sessionKey);
+      searchEntry._sources.set(source, (searchEntry._sources.get(source) ?? 0) + 1);
+      searchEntry._devices.set(deviceFamily, (searchEntry._devices.get(deviceFamily) ?? 0) + 1);
+      if (resultsCount != null) {
+        searchEntry._resultsTotal += resultsCount;
+        searchEntry._resultsSeen += 1;
+      }
+    }
     if (row.event_name === "view_content") personEntry.view_contents += 1;
     if (row.event_name === "contact") personEntry.contacts += 1;
     if (row.event_name === "initiate_checkout") personEntry.checkout_starts += 1;
@@ -854,6 +1018,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
   }
 
   for (const session of sessionMap.values()) {
+    const durationSeconds = sessionDurationSeconds(session.firstSeen, session.lastSeen) ?? 0;
     const sourceKey = session.source || "direct";
     if (!sourceMap.has(sourceKey)) {
       sourceMap.set(sourceKey, {
@@ -861,6 +1026,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         sessions: 0,
         visitors: 0,
         page_views: 0,
+        searches: 0,
         view_contents: 0,
         contacts: 0,
         checkout_starts: 0,
@@ -877,6 +1043,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     sourceEntry.sessions += 1;
     sourceEntry._visitors.add(session.visitorId);
     sourceEntry.page_views += session.counts.page_view;
+    sourceEntry.searches += session.counts.search;
     sourceEntry.view_contents += session.counts.view_content;
     sourceEntry.contacts += session.counts.contact;
     sourceEntry.checkout_starts += session.counts.initiate_checkout;
@@ -912,21 +1079,67 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     landing.checkout_starts += session.counts.initiate_checkout;
     landing.purchases += session.counts.purchase;
     landing.revenue_ars += session.revenue;
+
+    const deviceKey = session.deviceFamily || session.osName || "unknown";
+    if (!deviceMap.has(deviceKey)) {
+      deviceMap.set(deviceKey, {
+        device_family: deviceKey,
+        device_type: session.deviceType || "unknown",
+        os_name: session.osName,
+        browser_name: session.browserName,
+        sessions: 0,
+        visitors: 0,
+        searches: 0,
+        view_contents: 0,
+        contacts: 0,
+        checkout_starts: 0,
+        purchases: 0,
+        revenue_ars: 0,
+        _visitors: new Set<string>(),
+      });
+    }
+
+    const deviceEntry = deviceMap.get(deviceKey)!;
+    deviceEntry.sessions += 1;
+    deviceEntry._visitors.add(session.visitorId);
+    deviceEntry.searches += session.counts.search;
+    deviceEntry.view_contents += session.counts.view_content;
+    deviceEntry.contacts += session.counts.contact;
+    deviceEntry.checkout_starts += session.counts.initiate_checkout;
+    deviceEntry.purchases += session.counts.purchase;
+    deviceEntry.revenue_ars += session.revenue;
+
+    const personEntry = peopleMap.get(session.visitorId);
+    if (personEntry && durationSeconds >= 0) {
+      personEntry._durationTotal += durationSeconds;
+      personEntry._durationCount += 1;
+    }
   }
 
   const visitors = Array.from(peopleMap.values()).map((entry) => ({
     ...entry,
     sessions: entry._sessionIds.size,
+    avg_session_duration_seconds:
+      entry._durationCount > 0 ? Math.round(entry._durationTotal / entry._durationCount) : null,
   }));
 
   totals.visitors = visitors.length;
   totals.sessions = sessionMap.size;
+  const allDurations = Array.from(sessionMap.values())
+    .map((session) => sessionDurationSeconds(session.firstSeen, session.lastSeen))
+    .filter((value): value is number => value != null);
+  totals.avg_session_duration_seconds =
+    allDurations.length > 0 ? Math.round(allDurations.reduce((sum, value) => sum + value, 0) / allDurations.length) : null;
   totals.contact_rate_pct = formatPct(totals.contacts, Math.max(totals.view_contents, totals.sessions));
   totals.checkout_rate_pct = formatPct(totals.checkout_starts, Math.max(totals.view_contents, totals.sessions));
   totals.purchase_rate_pct = formatPct(totals.purchases, Math.max(totals.checkout_starts, totals.sessions));
 
   if (totals.page_views > 0 && totals.view_contents === 0) {
     warnings.push("Page views are being recorded, but no product detail views have been captured yet.");
+  }
+
+  if (totals.searches === 0) {
+    warnings.push("Search terms are not appearing yet. Once visitors use the storefront search box, top queries will show up here.");
   }
 
   if (totals.checkout_starts > 0 && totals.purchases === 0) {
@@ -939,6 +1152,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
 
   const funnelSteps: Array<{ key: StorefrontEventName; label: string; count: number }> = [
     { key: "page_view", label: "Page views", count: totals.page_views },
+    { key: "search", label: "Searches", count: totals.searches },
     { key: "view_content", label: "Product views", count: totals.view_contents },
     { key: "contact", label: "WhatsApp contacts", count: totals.contacts },
     { key: "initiate_checkout", label: "Checkout starts", count: totals.checkout_starts },
@@ -964,6 +1178,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         sessions: entry.sessions,
         visitors: entry._visitors.size,
         page_views: entry.page_views,
+        searches: entry.searches,
         view_contents: entry.view_contents,
         contacts: entry.contacts,
         checkout_starts: entry.checkout_starts,
@@ -975,6 +1190,35 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
       }))
       .sort((a, b) => b.purchases - a.purchases || b.checkout_starts - a.checkout_starts || b.sessions - a.sessions)
       .slice(0, 12),
+    devices: Array.from(deviceMap.values())
+      .map((entry) => ({
+        device_family: entry.device_family,
+        device_type: entry.device_type,
+        os_name: entry.os_name,
+        browser_name: entry.browser_name,
+        sessions: entry.sessions,
+        visitors: entry._visitors.size,
+        searches: entry.searches,
+        view_contents: entry.view_contents,
+        contacts: entry.contacts,
+        checkout_starts: entry.checkout_starts,
+        purchases: entry.purchases,
+        revenue_ars: Number(entry.revenue_ars.toFixed(2)),
+      }))
+      .sort((a, b) => b.purchases - a.purchases || b.checkout_starts - a.checkout_starts || b.sessions - a.sessions)
+      .slice(0, 12),
+    searches: Array.from(searchMap.values())
+      .map((entry) => ({
+        query: entry.query,
+        searches: entry.searches,
+        visitors: entry._visitors.size,
+        sessions: entry._sessions.size,
+        avg_results_count: entry._resultsSeen > 0 ? Number((entry._resultsTotal / entry._resultsSeen).toFixed(1)) : null,
+        top_source: Array.from(entry._sources.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+        top_device: Array.from(entry._devices.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+      }))
+      .sort((a, b) => b.searches - a.searches || b.sessions - a.sessions)
+      .slice(0, 16),
     landing_pages: Array.from(landingMap.values())
       .map((entry) => ({
         path: entry.path,
@@ -994,7 +1238,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     people: visitors
       .sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime())
       .slice(0, 20)
-      .map(({ _sessionIds, ...entry }) => entry),
+      .map(({ _sessionIds, _durationTotal, _durationCount, ...entry }) => entry),
     recent_events: rows
       .slice(-60)
       .reverse()
@@ -1007,6 +1251,8 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         campaign: trimText(row.utm_campaign),
         page_path: trimText(row.page_path),
         product: trimText(row.product_title) || trimText(row.product_sku),
+        search_query: payloadString(row.payload, "search_query"),
+        device_family: payloadString(row.payload, "device_family") || payloadString(row.payload, "os_name"),
         visitor: trimText(row.visitor_id) || trimText(row.session_id),
         person: customerLabel(row),
         order_number: trimText(row.order_number),
