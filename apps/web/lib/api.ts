@@ -527,6 +527,16 @@ export type StorefrontPaymentIntentCreateResponse = {
 export type StorefrontAnalyticsOverviewResponse = {
   generated_at: string;
   window_days: number;
+  filters: {
+    applied: {
+      source: string | null;
+      device: string | null;
+    };
+    available: {
+      sources: string[];
+      devices: string[];
+    };
+  };
   warnings: string[];
   totals: {
     events: number;
@@ -579,6 +589,7 @@ export type StorefrontAnalyticsOverviewResponse = {
     path: string;
     sessions: number;
     visitors: number;
+    page_views: number;
     view_contents: number;
     contacts: number;
     checkout_starts: number;
@@ -611,6 +622,7 @@ export type StorefrontAnalyticsOverviewResponse = {
   products: Array<{
     product_id: number | null;
     sku: string | null;
+    url_path: string | null;
     title: string;
     brand: string | null;
     view_contents: number;
@@ -737,10 +749,16 @@ export async function getMetaAdsOverview(options?: { days?: number; limit?: numb
   return apiFetch<MetaAdsOverviewResponse>(`/v1/meta/ads/overview${query ? `?${query}` : ""}`);
 }
 
-export async function getStorefrontAnalyticsOverview(options?: { days?: number }) {
+export async function getStorefrontAnalyticsOverview(options?: { days?: number; source?: string | null; device?: string | null }) {
   const params = new URLSearchParams();
   if (options?.days != null) {
     params.set("days", String(options.days));
+  }
+  if (options?.source) {
+    params.set("source", options.source);
+  }
+  if (options?.device) {
+    params.set("device", options.device);
   }
 
   const query = params.toString();

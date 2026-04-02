@@ -2378,6 +2378,16 @@ nav a:hover {
   align-items: center;
 }
 
+.growth-toolbar-row {
+  gap: 12px;
+}
+
+.growth-filter-submit {
+  cursor: pointer;
+  border: none;
+  font: inherit;
+}
+
 .growth-warning-panel {
   background:
     radial-gradient(circle at top right, rgba(191, 111, 77, 0.1), transparent 34%),

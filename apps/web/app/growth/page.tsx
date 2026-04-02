@@ -5,10 +5,40 @@ import { GrowthExplorer } from "../components/growth-explorer";
 type GrowthPageProps = {
   searchParams?: Promise<{
     days?: string;
+    source?: string;
+    device?: string;
   }>;
 };
 
 const DAY_OPTIONS = [7, 30, 90] as const;
+
+function sourceOptionLabel(value: string) {
+  switch (value) {
+    case "direct":
+      return "Directo";
+    case "instagram":
+      return "Instagram";
+    case "facebook":
+      return "Facebook";
+    case "google":
+      return "Google";
+    case "whatsapp":
+      return "WhatsApp";
+    case "telegram":
+      return "Telegram";
+    case "youtube":
+      return "YouTube";
+    case "x":
+      return "X";
+    default:
+      return value;
+  }
+}
+
+function deviceOptionLabel(value: string) {
+  if (value.toLowerCase() === "unknown") return "Sin identificar";
+  return value;
+}
 
 function normalizeDays(rawValue: string | undefined) {
   const parsed = Number(rawValue);
@@ -22,11 +52,13 @@ function normalizeDays(rawValue: string | undefined) {
 export default async function GrowthPage({ searchParams }: GrowthPageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const days = normalizeDays(resolvedSearchParams.days);
+  const source = resolvedSearchParams.source?.trim() || null;
+  const device = resolvedSearchParams.device?.trim() || null;
   let snapshot = null as Awaited<ReturnType<typeof getStorefrontAnalyticsOverview>> | null;
   let error: string | null = null;
 
   try {
-    snapshot = await getStorefrontAnalyticsOverview({ days });
+    snapshot = await getStorefrontAnalyticsOverview({ days, source, device });
   } catch (caught) {
     error = caught instanceof Error ? caught.message : "Failed to load storefront analytics";
   }
@@ -43,14 +75,51 @@ export default async function GrowthPage({ searchParams }: GrowthPageProps) {
           {DAY_OPTIONS.map((option) => (
             <Link
               key={option}
-              href={`/growth?days=${option}`}
+              href={`/growth?days=${option}${source ? `&source=${encodeURIComponent(source)}` : ""}${device ? `&device=${encodeURIComponent(device)}` : ""}`}
               className={`chip action-link ${option === days ? "accent" : ""}`}
             >
-              Last {option}d
+              Últimos {option}d
             </Link>
           ))}
           <span className="chip mono">Generated {snapshot ? new Date(snapshot.generated_at).toLocaleString("es-AR") : "—"}</span>
         </div>
+        {snapshot ? (
+          <form className="purchase-toolbar-row growth-toolbar-row" method="get">
+            <input type="hidden" name="days" value={String(days)} />
+            <div className="purchase-toolbar-inputs">
+              <label className="toolbar-control">
+                <span>Fuente</span>
+                <select name="source" defaultValue={snapshot.filters.applied.source ?? ""}>
+                  <option value="">Todas</option>
+                  {snapshot.filters.available.sources.map((option) => (
+                    <option key={option} value={option}>
+                      {sourceOptionLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="toolbar-control">
+                <span>Dispositivo</span>
+                <select name="device" defaultValue={snapshot.filters.applied.device ?? ""}>
+                  <option value="">Todos</option>
+                  {snapshot.filters.available.devices.map((option) => (
+                    <option key={option} value={option}>
+                      {deviceOptionLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="chip-row">
+              <button type="submit" className="chip action-link accent">
+                Aplicar filtros
+              </button>
+              <Link href={`/growth?days=${days}`} className="chip action-link">
+                Limpiar
+              </Link>
+            </div>
+          </form>
+        ) : null}
         {error ? <p className="empty">{error}</p> : null}
       </section>
 

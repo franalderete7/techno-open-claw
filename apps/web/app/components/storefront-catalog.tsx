@@ -242,7 +242,7 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
   }, [needle, products.length, ramFilter, sort, storageFilter]);
 
   useEffect(() => {
-    if (needle.length < 2) {
+    if (needle.length < 3) {
       lastTrackedSearchKeyRef.current = "";
       return;
     }
@@ -258,13 +258,19 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
       return;
     }
 
-    lastTrackedSearchKeyRef.current = key;
-    trackStorefrontSearch(deferredQuery, {
-      results_count: filteredProducts.length,
-      ram_filter: ramFilter,
-      storage_filter: storageFilter,
-      sort,
-    });
+    const timeout = window.setTimeout(() => {
+      lastTrackedSearchKeyRef.current = key;
+      trackStorefrontSearch(deferredQuery, {
+        results_count: filteredProducts.length,
+        ram_filter: ramFilter,
+        storage_filter: storageFilter,
+        sort,
+      });
+    }, 550);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
   }, [deferredQuery, filteredProducts.length, needle, ramFilter, sort, storageFilter]);
 
   const availableCount = products.filter((product) => product.in_stock).length;

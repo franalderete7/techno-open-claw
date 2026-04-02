@@ -39,6 +39,12 @@ export type StorefrontPurchaseEventResult = {
   reason?: string;
 };
 
+export type StorefrontAnalyticsOverviewOptions = {
+  days?: number;
+  source?: string | null;
+  device?: string | null;
+};
+
 type PurchaseContextRow = QueryResultRow & {
   order_id: number;
   order_number: string;
@@ -95,6 +101,16 @@ type AnalyticsEventRow = QueryResultRow & {
 export type StorefrontAnalyticsOverview = {
   generated_at: string;
   window_days: number;
+  filters: {
+    applied: {
+      source: string | null;
+      device: string | null;
+    };
+    available: {
+      sources: string[];
+      devices: string[];
+    };
+  };
   warnings: string[];
   totals: {
     events: number;
@@ -147,6 +163,7 @@ export type StorefrontAnalyticsOverview = {
     path: string;
     sessions: number;
     visitors: number;
+    page_views: number;
     view_contents: number;
     contacts: number;
     checkout_starts: number;
@@ -179,6 +196,7 @@ export type StorefrontAnalyticsOverview = {
   products: Array<{
     product_id: number | null;
     sku: string | null;
+    url_path: string | null;
     title: string;
     brand: string | null;
     view_contents: number;
@@ -329,6 +347,152 @@ function parseUtms(pageUrl: string | null) {
   };
 }
 
+function normalizeFilterKey(value: string | null | undefined) {
+  return trimText(value)?.toLowerCase() ?? null;
+}
+
+function normalizeHost(value: string | null | undefined) {
+  const normalized = trimText(value)?.toLowerCase().replace(/^www\./, "");
+  return normalized || null;
+}
+
+function isUnknownish(value: string | null | undefined) {
+  const normalized = normalizeFilterKey(value);
+  return !normalized || normalized === "unknown" || normalized === "other" || normalized === "desktop web";
+}
+
+function canonicalBrowserName(value: string | null | undefined, userAgent: string | null | undefined) {
+  const normalized = normalizeFilterKey(value);
+  if (normalized === "chrome") return "Chrome";
+  if (normalized === "safari") return "Safari";
+  if (normalized === "firefox") return "Firefox";
+  if (normalized === "edge") return "Edge";
+  if (normalized === "opera") return "Opera";
+
+  const ua = normalizeFilterKey(userAgent);
+  if (!ua) return null;
+  if (ua.includes("edg/")) return "Edge";
+  if (ua.includes("opr/")) return "Opera";
+  if (ua.includes("firefox/")) return "Firefox";
+  if (ua.includes("chrome/") && !ua.includes("edg/") && !ua.includes("opr/")) return "Chrome";
+  if (ua.includes("safari/") && !ua.includes("chrome/")) return "Safari";
+  return null;
+}
+
+function canonicalOsName(value: string | null | undefined, userAgent: string | null | undefined) {
+  const normalized = normalizeFilterKey(value);
+  if (normalized === "ios") return "iOS";
+  if (normalized === "android") return "Android";
+  if (normalized === "macos" || normalized === "mac os") return "macOS";
+  if (normalized === "windows") return "Windows";
+  if (normalized === "linux") return "Linux";
+
+  const ua = normalizeFilterKey(userAgent);
+  if (!ua) return null;
+  if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("cpu iphone os") || ua.includes("cpu os")) return "iOS";
+  if (ua.includes("android")) return "Android";
+  if (ua.includes("mac os x") || ua.includes("macintosh")) return "macOS";
+  if (ua.includes("windows")) return "Windows";
+  if (ua.includes("linux")) return "Linux";
+  return null;
+}
+
+function canonicalDeviceType(value: string | null | undefined, userAgent: string | null | undefined, osName: string | null | undefined) {
+  const normalized = normalizeFilterKey(value);
+  if (normalized === "mobile" || normalized === "tablet" || normalized === "desktop") {
+    return normalized;
+  }
+
+  const ua = normalizeFilterKey(userAgent);
+  if (ua?.includes("ipad") || ua?.includes("tablet")) return "tablet";
+  if (ua?.includes("iphone") || ua?.includes("ipod") || ua?.includes("android") || ua?.includes("mobile")) return "mobile";
+
+  const os = normalizeFilterKey(osName);
+  if (os === "ios" || os === "android") return "mobile";
+  if (os === "macos" || os === "windows" || os === "linux") return "desktop";
+  return "unknown";
+}
+
+function canonicalDeviceFamily({
+  deviceFamily,
+  deviceType,
+  osName,
+  userAgent,
+}: {
+  deviceFamily: string | null | undefined;
+  deviceType: string | null | undefined;
+  osName: string | null | undefined;
+  userAgent: string | null | undefined;
+}) {
+  const normalized = normalizeFilterKey(deviceFamily);
+  if (normalized === "iphone") return "iPhone";
+  if (normalized === "ipad") return "iPad";
+  if (normalized === "android" || normalized === "android phone") return "Android";
+  if (normalized === "mac") return "Mac";
+  if (normalized === "windows") return "Windows";
+  if (normalized === "linux") return "Linux";
+
+  const ua = normalizeFilterKey(userAgent);
+  if (ua?.includes("iphone") || ua?.includes("ipod")) return "iPhone";
+  if (ua?.includes("ipad")) return "iPad";
+  if (ua?.includes("android")) return "Android";
+  if (ua?.includes("macintosh") || ua?.includes("mac os x")) return "Mac";
+  if (ua?.includes("windows")) return "Windows";
+  if (ua?.includes("linux")) return "Linux";
+
+  const os = canonicalOsName(osName, userAgent);
+  if (os === "iOS") return normalizeFilterKey(deviceType) === "tablet" ? "iPad" : "iPhone";
+  if (os === "Android") return "Android";
+  if (os === "macOS") return "Mac";
+  if (os === "Windows") return "Windows";
+  if (os === "Linux") return "Linux";
+
+  return canonicalDeviceType(deviceType, userAgent, osName) === "desktop" ? "Desktop web" : "Unknown";
+}
+
+function preferValue(current: string | null | undefined, next: string | null | undefined) {
+  const normalizedNext = trimText(next);
+  if (!normalizedNext) return trimText(current);
+  if (isUnknownish(current) && !isUnknownish(normalizedNext)) return normalizedNext;
+  return trimText(current) || normalizedNext;
+}
+
+function deriveDeviceContext(payload: JsonRecord | null | undefined) {
+  const userAgent = payloadString(payload, "user_agent");
+  const osName = canonicalOsName(payloadString(payload, "os_name"), userAgent);
+  const browserName = canonicalBrowserName(payloadString(payload, "browser_name"), userAgent);
+  const deviceType = canonicalDeviceType(payloadString(payload, "device_type"), userAgent, osName);
+  const deviceFamily = canonicalDeviceFamily({
+    deviceFamily: payloadString(payload, "device_family"),
+    deviceType,
+    osName,
+    userAgent,
+  });
+
+  return {
+    deviceFamily,
+    deviceType,
+    osName: osName ?? null,
+    browserName: browserName ?? null,
+  };
+}
+
+function isInternalHost(referrerHost: string | null | undefined, sourceHost: string | null | undefined) {
+  const referrer = normalizeHost(referrerHost);
+  const source = normalizeHost(sourceHost);
+  if (!referrer || !source) return false;
+  return referrer === source || referrer.endsWith(`.${source}`) || source.endsWith(`.${referrer}`);
+}
+
+function normalizeSearchText(value: string | null | undefined) {
+  return trimText(value)?.replace(/\s+/g, " ").toLowerCase() ?? null;
+}
+
+function isLowSignalLandingPath(value: string | null | undefined) {
+  const normalized = trimText(value);
+  return !normalized || normalized === "/" || normalized === "(unknown)";
+}
+
 async function resolveProductId(executor: SqlExecutor, productId: number | null | undefined, sku: string | null | undefined) {
   if (productId != null && Number.isFinite(productId)) {
     return productId;
@@ -354,11 +518,15 @@ async function resolveProductId(executor: SqlExecutor, productId: number | null 
 
 function deriveSourceLabel(row: Pick<
   AnalyticsEventRow,
-  "utm_source" | "utm_medium" | "referrer_host" | "referrer"
+  "utm_source" | "utm_medium" | "referrer_host" | "referrer" | "source_host"
 >) {
   const utmSource = trimText(row.utm_source)?.toLowerCase();
   if (utmSource) {
     return utmSource;
+  }
+
+  if (isInternalHost(row.referrer_host, row.source_host)) {
+    return "direct";
   }
 
   const referrerHost = trimText(row.referrer_host)?.toLowerCase()?.replace(/^www\./, "");
@@ -634,8 +802,10 @@ export async function recordStorefrontPurchaseEvent(orderId: number): Promise<St
   return { ok: true };
 }
 
-export async function getStorefrontAnalyticsOverview(options?: { days?: number }): Promise<StorefrontAnalyticsOverview> {
+export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyticsOverviewOptions): Promise<StorefrontAnalyticsOverview> {
   const days = Math.max(1, Math.min(180, Number(options?.days ?? 30) || 30));
+  const sourceFilter = normalizeFilterKey(options?.source);
+  const deviceFilter = normalizeFilterKey(options?.device);
   const rows = await query<AnalyticsEventRow>(
     `
       select
@@ -684,6 +854,8 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
   );
 
   const warnings: string[] = [];
+  const availableSources = new Set<string>();
+  const availableDevices = new Set<string>();
 
   if (rows.length === 0) {
     warnings.push("No storefront events have been recorded yet for the selected window.");
@@ -755,6 +927,17 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
       _resultsSeen: number;
     }
   >();
+  const sessionSearchTrail = new Map<
+    string,
+    Array<{
+      query: string;
+      normalizedQuery: string;
+      visitorKey: string;
+      source: string;
+      deviceFamily: string;
+      resultsCount: number | null;
+    }>
+  >();
   const peopleMap = new Map<
     string,
     StorefrontAnalyticsOverview["people"][number] & { _sessionIds: Set<string>; _durationTotal: number; _durationCount: number }
@@ -787,14 +970,26 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     const dateKey = eventDateKey(row.event_time);
     const valueAmount = toNumber(row.value_amount) ?? 0;
     const person = customerLabel(row);
-    const deviceFamily = payloadString(row.payload, "device_family") || payloadString(row.payload, "os_name") || "unknown";
-    const deviceType = payloadString(row.payload, "device_type") || "unknown";
-    const osName = payloadString(row.payload, "os_name");
-    const browserName = payloadString(row.payload, "browser_name");
+    const deviceContext = deriveDeviceContext(row.payload);
+    const deviceFamily = deviceContext.deviceFamily;
+    const deviceType = deviceContext.deviceType;
+    const osName = deviceContext.osName;
+    const browserName = deviceContext.browserName;
     const searchQuery = payloadString(row.payload, "search_query");
     const resultsCount = payloadNumber(row.payload, "results_count");
     const productLabel =
       trimText(row.product_title) || trimText(row.product_sku) || trimText(typeof row.payload?.["product_title"] === "string" ? row.payload.product_title : null);
+
+    availableSources.add(source);
+    availableDevices.add(deviceFamily);
+
+    if (sourceFilter && source !== sourceFilter) {
+      continue;
+    }
+
+    if (deviceFilter && normalizeFilterKey(deviceFamily) !== deviceFilter) {
+      continue;
+    }
 
     if (row.event_name === "page_view") totals.page_views += 1;
     if (row.event_name === "search") totals.searches += 1;
@@ -860,18 +1055,10 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     if (!session.landingPage && trimText(row.page_path)) {
       session.landingPage = trimText(row.page_path);
     }
-    if (!session.deviceFamily && deviceFamily) {
-      session.deviceFamily = deviceFamily;
-    }
-    if (!session.deviceType && deviceType) {
-      session.deviceType = deviceType;
-    }
-    if (!session.osName && osName) {
-      session.osName = osName;
-    }
-    if (!session.browserName && browserName) {
-      session.browserName = browserName;
-    }
+    session.deviceFamily = preferValue(session.deviceFamily, deviceFamily);
+    session.deviceType = preferValue(session.deviceType, deviceType);
+    session.osName = preferValue(session.osName, osName);
+    session.browserName = preferValue(session.browserName, browserName);
     if (productLabel) {
       session.lastProduct = productLabel;
     }
@@ -937,47 +1124,24 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     if (!personEntry.email && trimText(row.customer_email)) {
       personEntry.email = trimText(row.customer_email);
     }
-    if (!personEntry.device_family && deviceFamily) {
-      personEntry.device_family = deviceFamily;
-    }
-    if (!personEntry.device_type && deviceType) {
-      personEntry.device_type = deviceType;
-    }
-    if (!personEntry.os_name && osName) {
-      personEntry.os_name = osName;
-    }
-    if (!personEntry.browser_name && browserName) {
-      personEntry.browser_name = browserName;
-    }
+    personEntry.device_family = preferValue(personEntry.device_family, deviceFamily);
+    personEntry.device_type = preferValue(personEntry.device_type, deviceType);
+    personEntry.os_name = preferValue(personEntry.os_name, osName);
+    personEntry.browser_name = preferValue(personEntry.browser_name, browserName);
     if (row.event_name === "page_view") personEntry.page_views += 1;
     if (row.event_name === "search" && searchQuery) {
-      if (!searchMap.has(searchQuery)) {
-        searchMap.set(searchQuery, {
+      const normalizedQuery = normalizeSearchText(searchQuery);
+      if (normalizedQuery) {
+        const trail = sessionSearchTrail.get(sessionKey) ?? [];
+        trail.push({
           query: searchQuery,
-          searches: 0,
-          visitors: 0,
-          sessions: 0,
-          avg_results_count: null,
-          top_source: null,
-          top_device: null,
-          _visitors: new Set<string>(),
-          _sessions: new Set<string>(),
-          _sources: new Map<string, number>(),
-          _devices: new Map<string, number>(),
-          _resultsTotal: 0,
-          _resultsSeen: 0,
+          normalizedQuery,
+          visitorKey,
+          source,
+          deviceFamily,
+          resultsCount,
         });
-      }
-
-      const searchEntry = searchMap.get(searchQuery)!;
-      searchEntry.searches += 1;
-      searchEntry._visitors.add(visitorKey);
-      searchEntry._sessions.add(sessionKey);
-      searchEntry._sources.set(source, (searchEntry._sources.get(source) ?? 0) + 1);
-      searchEntry._devices.set(deviceFamily, (searchEntry._devices.get(deviceFamily) ?? 0) + 1);
-      if (resultsCount != null) {
-        searchEntry._resultsTotal += resultsCount;
-        searchEntry._resultsSeen += 1;
+        sessionSearchTrail.set(sessionKey, trail);
       }
     }
     if (row.event_name === "view_content") personEntry.view_contents += 1;
@@ -994,6 +1158,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         productMap.set(productKey, {
           product_id: row.product_id,
           sku: trimText(row.product_sku),
+          url_path: trimText(row.product_sku) ? `/${trimText(row.product_sku)}` : null,
           title: productLabel || "Unknown product",
           brand: trimText(row.product_brand),
           view_contents: 0,
@@ -1062,6 +1227,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         path: landingKey,
         sessions: 0,
         visitors: 0,
+        page_views: 0,
         view_contents: 0,
         contacts: 0,
         checkout_starts: 0,
@@ -1074,6 +1240,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     const landing = landingMap.get(landingKey)!;
     landing.sessions += 1;
     landing._visitors.add(session.visitorId);
+    landing.page_views += session.counts.page_view;
     landing.view_contents += session.counts.view_content;
     landing.contacts += session.counts.contact;
     landing.checkout_starts += session.counts.initiate_checkout;
@@ -1116,6 +1283,55 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     }
   }
 
+  for (const [searchSessionKey, trail] of sessionSearchTrail.entries()) {
+    const collapsed: typeof trail = [];
+
+    for (const entry of trail) {
+      if (entry.normalizedQuery.length < 3) {
+        continue;
+      }
+
+      const previous = collapsed[collapsed.length - 1];
+      if (previous && entry.normalizedQuery.startsWith(previous.normalizedQuery)) {
+        collapsed[collapsed.length - 1] = entry;
+      } else if (!previous || previous.normalizedQuery !== entry.normalizedQuery) {
+        collapsed.push(entry);
+      }
+    }
+
+    for (const entry of collapsed) {
+      if (!searchMap.has(entry.normalizedQuery)) {
+        searchMap.set(entry.normalizedQuery, {
+          query: entry.query,
+          searches: 0,
+          visitors: 0,
+          sessions: 0,
+          avg_results_count: null,
+          top_source: null,
+          top_device: null,
+          _visitors: new Set<string>(),
+          _sessions: new Set<string>(),
+          _sources: new Map<string, number>(),
+          _devices: new Map<string, number>(),
+          _resultsTotal: 0,
+          _resultsSeen: 0,
+        });
+      }
+
+      const searchEntry = searchMap.get(entry.normalizedQuery)!;
+      searchEntry.query = entry.query;
+      searchEntry.searches += 1;
+      searchEntry._visitors.add(entry.visitorKey);
+      searchEntry._sessions.add(searchSessionKey);
+      searchEntry._sources.set(entry.source, (searchEntry._sources.get(entry.source) ?? 0) + 1);
+      searchEntry._devices.set(entry.deviceFamily, (searchEntry._devices.get(entry.deviceFamily) ?? 0) + 1);
+      if (entry.resultsCount != null) {
+        searchEntry._resultsTotal += entry.resultsCount;
+        searchEntry._resultsSeen += 1;
+      }
+    }
+  }
+
   const visitors = Array.from(peopleMap.values()).map((entry) => ({
     ...entry,
     sessions: entry._sessionIds.size,
@@ -1130,9 +1346,28 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
     .filter((value): value is number => value != null);
   totals.avg_session_duration_seconds =
     allDurations.length > 0 ? Math.round(allDurations.reduce((sum, value) => sum + value, 0) / allDurations.length) : null;
-  totals.contact_rate_pct = formatPct(totals.contacts, Math.max(totals.view_contents, totals.sessions));
-  totals.checkout_rate_pct = formatPct(totals.checkout_starts, Math.max(totals.view_contents, totals.sessions));
-  totals.purchase_rate_pct = formatPct(totals.purchases, Math.max(totals.checkout_starts, totals.sessions));
+
+  const sessionStepCounts = {
+    page_view: 0,
+    search: 0,
+    view_content: 0,
+    contact: 0,
+    initiate_checkout: 0,
+    purchase: 0,
+  } as Record<StorefrontEventName, number>;
+
+  for (const session of sessionMap.values()) {
+    if (session.counts.page_view > 0) sessionStepCounts.page_view += 1;
+    if (session.counts.search > 0) sessionStepCounts.search += 1;
+    if (session.counts.view_content > 0) sessionStepCounts.view_content += 1;
+    if (session.counts.contact > 0) sessionStepCounts.contact += 1;
+    if (session.counts.initiate_checkout > 0) sessionStepCounts.initiate_checkout += 1;
+    if (session.counts.purchase > 0) sessionStepCounts.purchase += 1;
+  }
+
+  totals.contact_rate_pct = formatPct(sessionStepCounts.contact, totals.sessions);
+  totals.checkout_rate_pct = formatPct(sessionStepCounts.initiate_checkout, totals.sessions);
+  totals.purchase_rate_pct = formatPct(sessionStepCounts.purchase, totals.sessions);
 
   if (totals.page_views > 0 && totals.view_contents === 0) {
     warnings.push("Page views are being recorded, but no product detail views have been captured yet.");
@@ -1151,17 +1386,31 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
   }
 
   const funnelSteps: Array<{ key: StorefrontEventName; label: string; count: number }> = [
-    { key: "page_view", label: "Page views", count: totals.page_views },
-    { key: "search", label: "Searches", count: totals.searches },
-    { key: "view_content", label: "Product views", count: totals.view_contents },
-    { key: "contact", label: "WhatsApp contacts", count: totals.contacts },
-    { key: "initiate_checkout", label: "Checkout starts", count: totals.checkout_starts },
-    { key: "purchase", label: "Purchases", count: totals.purchases },
+    { key: "page_view", label: "Sesiones con visita", count: sessionStepCounts.page_view },
+    { key: "search", label: "Sesiones con búsqueda", count: sessionStepCounts.search },
+    { key: "view_content", label: "Sesiones con vista de producto", count: sessionStepCounts.view_content },
+    { key: "contact", label: "Sesiones con contacto", count: sessionStepCounts.contact },
+    { key: "initiate_checkout", label: "Sesiones con checkout", count: sessionStepCounts.initiate_checkout },
+    { key: "purchase", label: "Sesiones con compra", count: sessionStepCounts.purchase },
   ];
 
   return {
     generated_at: new Date().toISOString(),
     window_days: days,
+    filters: {
+      applied: {
+        source: sourceFilter,
+        device: deviceFilter,
+      },
+      available: {
+        sources: Array.from(availableSources).sort((a, b) => a.localeCompare(b)),
+        devices: Array.from(availableDevices).sort((a, b) => {
+          if (isUnknownish(a) && !isUnknownish(b)) return 1;
+          if (!isUnknownish(a) && isUnknownish(b)) return -1;
+          return a.localeCompare(b);
+        }),
+      },
+    },
     warnings,
     totals,
     funnel: funnelSteps.map((step, index) => ({
@@ -1188,7 +1437,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
           Array.from(entry._campaigns.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
         landing_page: entry.landing_page,
       }))
-      .sort((a, b) => b.purchases - a.purchases || b.checkout_starts - a.checkout_starts || b.sessions - a.sessions)
+      .sort((a, b) => b.sessions - a.sessions || b.view_contents - a.view_contents || b.contacts - a.contacts)
       .slice(0, 12),
     devices: Array.from(deviceMap.values())
       .map((entry) => ({
@@ -1205,7 +1454,11 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         purchases: entry.purchases,
         revenue_ars: Number(entry.revenue_ars.toFixed(2)),
       }))
-      .sort((a, b) => b.purchases - a.purchases || b.checkout_starts - a.checkout_starts || b.sessions - a.sessions)
+      .sort((a, b) => {
+        if (isUnknownish(a.device_family) && !isUnknownish(b.device_family)) return 1;
+        if (!isUnknownish(a.device_family) && isUnknownish(b.device_family)) return -1;
+        return b.sessions - a.sessions || b.view_contents - a.view_contents || b.searches - a.searches;
+      })
       .slice(0, 12),
     searches: Array.from(searchMap.values())
       .map((entry) => ({
@@ -1224,16 +1477,21 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         path: entry.path,
         sessions: entry.sessions,
         visitors: entry._visitors.size,
+        page_views: entry.page_views,
         view_contents: entry.view_contents,
         contacts: entry.contacts,
         checkout_starts: entry.checkout_starts,
         purchases: entry.purchases,
         revenue_ars: Number(entry.revenue_ars.toFixed(2)),
       }))
-      .sort((a, b) => b.purchases - a.purchases || b.checkout_starts - a.checkout_starts || b.sessions - a.sessions)
+      .sort((a, b) => {
+        if (isLowSignalLandingPath(a.path) && !isLowSignalLandingPath(b.path)) return 1;
+        if (!isLowSignalLandingPath(a.path) && isLowSignalLandingPath(b.path)) return -1;
+        return b.view_contents - a.view_contents || b.page_views - a.page_views || b.sessions - a.sessions;
+      })
       .slice(0, 12),
     products: Array.from(productMap.values())
-      .sort((a, b) => b.purchases - a.purchases || b.checkout_starts - a.checkout_starts || b.view_contents - a.view_contents)
+      .sort((a, b) => b.view_contents - a.view_contents || b.contacts - a.contacts || b.checkout_starts - a.checkout_starts || b.purchases - a.purchases)
       .slice(0, 16),
     people: visitors
       .sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime())
@@ -1252,7 +1510,7 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number }
         page_path: trimText(row.page_path),
         product: trimText(row.product_title) || trimText(row.product_sku),
         search_query: payloadString(row.payload, "search_query"),
-        device_family: payloadString(row.payload, "device_family") || payloadString(row.payload, "os_name"),
+        device_family: deriveDeviceContext(row.payload).deviceFamily,
         visitor: trimText(row.visitor_id) || trimText(row.session_id),
         person: customerLabel(row),
         order_number: trimText(row.order_number),
