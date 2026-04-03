@@ -932,6 +932,30 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
     return;
   }
 
+  const groqNode =
+    (workflow.nodes ?? []).find((entry) => entry?.name === "Groq Chat Model") ||
+    (workflow.nodes ?? []).find((entry) => entry?.name === "Google Gemini Chat Model");
+
+  if (groqNode) {
+    groqNode.name = "Groq Chat Model";
+    groqNode.type = "@n8n/n8n-nodes-langchain.lmChatGroq";
+    groqNode.typeVersion = 1;
+    groqNode.parameters = {
+      model: '={{ $json.responder_model_name || "llama3-8b-8192" }}',
+      options: {},
+    };
+    groqNode.credentials = {
+      groqApi: {
+        name: "Groq account",
+      },
+    };
+  }
+
+  if (workflow.connections?.["Google Gemini Chat Model"]) {
+    workflow.connections["Groq Chat Model"] = workflow.connections["Google Gemini Chat Model"];
+    delete workflow.connections["Google Gemini Chat Model"];
+  }
+
   updateNodeJsCode(
     workflow,
     "Build Sales Prompt",
@@ -1033,7 +1057,7 @@ const prompt = [
 return [{
   json: {
     ...data,
-    responder_model_name: String($env.GEMINI_MODEL_SALES || 'models/gemini-2.5-flash'),
+    responder_model_name: String($env.GROQ_MODEL_SALES || 'llama3-8b-8192'),
     chatInput: prompt,
   }
 }];`
@@ -1112,8 +1136,8 @@ return [{
       actions,
       state_delta: stateDelta,
     },
-    responder_provider_name: 'google',
-    responder_model_name: base.responder_model_name || 'gemini-2.5-flash',
+    responder_provider_name: 'groq',
+    responder_model_name: base.responder_model_name || 'llama3-8b-8192',
     responder_raw_text: rawText,
   }
 }];`

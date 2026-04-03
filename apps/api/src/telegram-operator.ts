@@ -41,6 +41,29 @@ const productConditionValues = ["new", "used", "like_new", "refurbished"] as con
 const stockStatusValues = ["in_stock", "reserved", "sold", "damaged"] as const;
 const metaFilterStatusValues = ["active", "paused", "archived", "deleted"] as const;
 const metaWritableStatusValues = ["ACTIVE", "PAUSED"] as const;
+const catalogSyncSectionKeys = ["xiaomi_redmi_poco", "samsung", "phone", "tablet", "motorola", "jbl"] as const;
+const catalogSyncColorTokens = new Set([
+  "blanco",
+  "blanca",
+  "white",
+  "naranja",
+  "orange",
+  "azul",
+  "blue",
+  "negro",
+  "negra",
+  "black",
+  "gris",
+  "gray",
+  "silver",
+  "plata",
+  "titanio",
+  "natural",
+  "gold",
+  "oro",
+]);
+const catalogSyncTierTokens = new Set(["pro", "max", "plus", "ultra", "fe"]);
+const catalogSyncEconomyTokens = new Set(["eco", "economico", "economica", "used", "usado", "usada"]);
 
 function normalizeStockStatusValue(value: unknown) {
   if (typeof value !== "string") {
@@ -497,6 +520,14 @@ const bulkRepriceProductsSchema = z.object({
     .max(50),
 });
 
+const bulkSyncProductsSchema = z.object({
+  raw_list: z.string().trim().min(1).optional(),
+  create_missing: z.boolean().optional(),
+  active: z.boolean().optional(),
+  in_stock: z.boolean().optional(),
+  condition: z.enum(productConditionValues).optional(),
+});
+
 const createStockFromImagesSchema = z.object({
   product_ref: z.string().trim().min(1),
   inventory_purchase_ref: z.string().trim().optional(),
@@ -547,6 +578,7 @@ export const draftSchema = z.object({
       "update_product",
       "bulk_update_products",
       "bulk_reprice_products",
+      "bulk_sync_products",
       "delete_product",
       "create_inventory_purchase",
       "update_inventory_purchase",
@@ -700,6 +732,7 @@ type WriteCommandName =
   | "update_product"
   | "bulk_update_products"
   | "bulk_reprice_products"
+  | "bulk_sync_products"
   | "delete_product"
   | "create_inventory_purchase"
   | "update_inventory_purchase"
@@ -759,6 +792,39 @@ type ProductRow = QueryResultRow & {
   ram_gb?: number | null;
   storage_gb?: number | null;
   stock_units_available?: number;
+};
+
+type CatalogSyncSectionKey = (typeof catalogSyncSectionKeys)[number];
+
+type CatalogSyncDraftItem = {
+  sectionKey: CatalogSyncSectionKey;
+  sectionLabel: string;
+  rawName: string;
+  costUsd: number;
+  lineNumber: number;
+  title: string;
+  brand: string;
+  model: string;
+  sku: string;
+  slug: string;
+  category: string | null;
+  condition: (typeof productConditionValues)[number];
+  active: boolean;
+  inStock: boolean;
+  ramGb: number | null;
+  storageGb: number | null;
+  network: string | null;
+  color: string | null;
+  description: string | null;
+  normalizedTitle: string;
+  colorlessTitle: string;
+  requiredTokens: string[];
+  tierTokens: string[];
+};
+
+type CatalogSyncProductRow = ProductRow & {
+  cost_usd: string | number | null;
+  model: string;
 };
 
 type StockRow = QueryResultRow & {
@@ -1617,6 +1683,483 @@ function slugify(value: string) {
     .replace(/^-|-$/g, "");
 }
 
+function titleCaseWords(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => {
+      if (/^\d+[a-z]$/i.test(token)) {
+        return token.toUpperCase();
+      }
+      if (/^(5g|4g|wifi|jbl|poco)$/i.test(token)) {
+        return token.toUpperCase() === "WIFI" ? "WiFi" : token.toUpperCase();
+      }
+      if (/^(iphone)$/i.test(token)) {
+        return "iPhone";
+      }
+      if (/^(redmi|xiaomi|motorola|lenovo|samsung|apple|charge|flip|boombox|edge|pad|note)$/i.test(token)) {
+        return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+      }
+      if (/^fe$/i.test(token)) {
+        return "FE";
+      }
+      if (/^(max|plus|ultra|pro)$/i.test(token)) {
+        return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+      }
+      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+    })
+    .join(" ");
+}
+
+function normalizeCatalogSyncName(value: string) {
+  return value
+    .replace(/\bxaomi\b/gi, "Xiaomi")
+    .replace(/\bsamsug\b/gi, "Samsung")
+    .replace(/\bedgue\b/gi, "Edge")
+    .replace(/\bchargue\b/gi, "Charge")
+    .replace(/\bflips\b/gi, "Flip")
+    .replace(/\bbombox\b/gi, "Boombox")
+    .replace(/\bpad8\b/gi, "Pad 8")
+    .replace(/\b15\s+c\b/gi, "15C")
+    .replace(/\b([asg])\s+(\d{2,3})\b/gi, (_, prefix: string, digits: string) => `${prefix.toUpperCase()}${digits}`)
+    .replace(/\bg\s+(\d{2,3})\b/gi, (_, digits: string) => `G${digits}`)
+    .replace(/\bpro\s*\+\s*/gi, "Pro+ ")
+    .replace(/\bwi[\s-]*fi\b/gi, "WiFi")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractCatalogSpecs(value: string) {
+  const normalized = normalizeCatalogSyncName(value);
+  const pairMatch = normalized.match(/(\d{1,2})\s*(?:gb)?\s*(?:\/|\+)\s*(\d{2,4})\s*(?:gb)?/i);
+  const ramGb = pairMatch ? Number(pairMatch[1]) : null;
+  const storageFromPair = pairMatch ? Number(pairMatch[2]) : null;
+  const standaloneStorageMatch = normalized.match(/(?:^|\s)(64|128|256|512|1024)(?:\s*gb)?(?:\s|$)/i);
+  const storageGb = storageFromPair ?? (standaloneStorageMatch ? Number(standaloneStorageMatch[1]) : null);
+  const networkMatch = normalized.match(/\b(4g|5g)\b/i);
+  const colorMatch = normalized.match(/\b(blanco|blanca|white|naranja|orange|azul|blue|negro|negra|black|gris|gray|silver|plata)\b/i);
+  return {
+    ramGb,
+    storageGb,
+    network: networkMatch ? networkMatch[1].toUpperCase() : null,
+    color: colorMatch ? titleCaseWords(colorMatch[1]) : null,
+  };
+}
+
+function buildCatalogDescription(specs: {
+  ramGb: number | null;
+  storageGb: number | null;
+  network: string | null;
+  color: string | null;
+}) {
+  const bits: string[] = [];
+  if (specs.ramGb != null) bits.push(`${specs.ramGb}GB RAM`);
+  if (specs.storageGb != null) bits.push(`${specs.storageGb}GB`);
+  if (specs.network) bits.push(specs.network);
+  if (specs.color) bits.push(specs.color);
+  return bits.length > 0 ? bits.join(", ") : null;
+}
+
+function canonicalizeCatalogSyncSection(line: string): { key: CatalogSyncSectionKey; label: string } | null {
+  const normalized = normalizeMatch(line).replace(/\//g, " ");
+  if (/(xiaomi|redmi|poco)/.test(normalized)) return { key: "xiaomi_redmi_poco", label: "XIAOMI/REDMI/POCO" };
+  if (/\bsamsung\b/.test(normalized)) return { key: "samsung", label: "SAMSUNG" };
+  if (/\b(phone|iphone)\b/.test(normalized)) return { key: "phone", label: "PHONE" };
+  if (/\btablet\b/.test(normalized)) return { key: "tablet", label: "TABLET" };
+  if (/\b(motorola|moto)\b/.test(normalized)) return { key: "motorola", label: "MOTOROLA" };
+  if (/\b(jbl|parlantes)\b/.test(normalized)) return { key: "jbl", label: "PARLANTES JBL" };
+  return null;
+}
+
+function buildCatalogSyncTokens(value: string) {
+  return normalizeMatch(value)
+    .replace(/\bpro\+\b/g, "pro plus")
+    .replace(/\bwi[\s-]*fi\b/g, "wifi")
+    .replace(/\bgb\b/g, " ")
+    .replace(/[/+]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+}
+
+function buildColorlessCatalogKey(value: string) {
+  return buildCatalogSyncTokens(value)
+    .filter((token) => !catalogSyncColorTokens.has(token))
+    .join(" ");
+}
+
+function detectCatalogTierTokens(value: string) {
+  const normalized = normalizeMatch(value).replace(/\bpro\+\b/g, "pro plus");
+  const tiers: string[] = [];
+  if (/\bpro max\b/.test(normalized)) tiers.push("pro", "max");
+  else {
+    if (/\bpro\b/.test(normalized)) tiers.push("pro");
+    if (/\bmax\b/.test(normalized)) tiers.push("max");
+  }
+  if (/\bplus\b/.test(normalized)) tiers.push("plus");
+  if (/\bultra\b/.test(normalized)) tiers.push("ultra");
+  if (/\bfe\b/.test(normalized)) tiers.push("fe");
+  return Array.from(new Set(tiers));
+}
+
+function buildCatalogCategory(sectionKey: CatalogSyncSectionKey, brand: string) {
+  switch (sectionKey) {
+    case "phone":
+      return "IPHONE";
+    case "samsung":
+      return "SAMSUNG";
+    case "xiaomi_redmi_poco":
+      return "REDMI/POCO";
+    case "tablet":
+      return "TABLET";
+    case "motorola":
+      return "MOTOROLA";
+    case "jbl":
+      return "AUDIO";
+    default:
+      return brand.toUpperCase();
+  }
+}
+
+function buildAppleCatalogDraft(rawName: string) {
+  const normalized = normalizeCatalogSyncName(rawName);
+  const specs = extractCatalogSpecs(normalized);
+  const familyMatch = normalized.match(/\b(13|14|15|16|17)\b/);
+  if (!familyMatch) {
+    throw new Error(`No pude leer la familia del iPhone en "${rawName}".`);
+  }
+  const family = familyMatch[1];
+  const lower = normalizeMatch(normalized);
+  const tier = /\bpro max\b/.test(lower) ? "Pro Max" : /\bpro\b/.test(lower) ? "Pro" : /\bplus\b/.test(lower) ? "Plus" : "";
+  const model = `iPhone ${family}${tier ? ` ${tier}` : ""}`;
+  const title = `${model}${specs.storageGb != null ? ` ${specs.storageGb}GB` : ""}${specs.color ? ` ${specs.color}` : ""}`;
+  const skuParts = ["iphone", family];
+  if (tier) skuParts.push(...slugify(tier).split("-"));
+  if (specs.storageGb != null) skuParts.push(String(specs.storageGb));
+  if (specs.color) skuParts.push(slugify(specs.color));
+  return {
+    brand: "Apple",
+    model,
+    title,
+    sku: skuParts.join("-"),
+    specs: { ...specs, ramGb: null },
+  };
+}
+
+function buildSamsungCatalogDraft(rawName: string) {
+  const normalized = normalizeCatalogSyncName(rawName).replace(/^Samsung\s+/i, "");
+  const specs = extractCatalogSpecs(normalized);
+  const modelSource = normalized
+    .replace(/(\d{1,2})\s*(?:gb)?\s*(?:\/|\+)\s*(\d{2,4})\s*(?:gb)?/i, " ")
+    .replace(/\b(64|128|256|512|1024)\s*gb?\b/i, " ")
+    .replace(/\b(4g|5g)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const modelDisplay = titleCaseWords(modelSource);
+  const title = `Samsung ${modelDisplay}${specs.network ? ` ${specs.network}` : ""}${
+    specs.ramGb != null && specs.storageGb != null ? ` ${specs.ramGb}GB/${specs.storageGb}GB` : specs.storageGb != null ? ` ${specs.storageGb}GB` : ""
+  }`;
+  const skuParts = ["samsung", ...slugify(modelDisplay).split("-")];
+  if (specs.network) skuParts.push(specs.network.toLowerCase());
+  if (specs.ramGb != null) skuParts.push(String(specs.ramGb));
+  if (specs.storageGb != null) skuParts.push(String(specs.storageGb));
+  return {
+    brand: "Samsung",
+    model: `Galaxy ${modelDisplay}`,
+    title,
+    sku: skuParts.join("-"),
+    specs,
+  };
+}
+
+function buildXiaomiCatalogDraft(rawName: string) {
+  const normalized = normalizeCatalogSyncName(rawName);
+  const specs = extractCatalogSpecs(normalized);
+  const lower = normalizeMatch(normalized);
+  const brand = /^xiaomi\b/i.test(normalized)
+    ? "Xiaomi"
+    : /^redmi\b/i.test(normalized)
+      ? "Redmi"
+      : /^poco\b/i.test(normalized) || /^[xf]\d{1,2}\b/i.test(normalized)
+        ? "POCO"
+        : /^note\b/i.test(normalized) || /^a\d{1,2}\b/i.test(normalized) || /^\d{2}c\b/i.test(lower)
+          ? "Redmi"
+          : "Xiaomi";
+  const withoutBrand = normalized.replace(/^(xiaomi|redmi|poco)\s+/i, "").trim();
+  const modelSource = withoutBrand
+    .replace(/(\d{1,2})\s*(?:gb)?\s*(?:\/|\+)\s*(\d{2,4})\s*(?:gb)?/i, " ")
+    .replace(/\b(64|128|256|512|1024)\s*gb?\b/i, " ")
+    .replace(/\b(4g|5g)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\bpro plus\b/i, "Pro+");
+  const modelDisplay = titleCaseWords(modelSource.replace(/\b15c\b/i, "15C"));
+  const title = `${brand === "POCO" ? "Poco" : brand} ${modelDisplay}${specs.network ? ` ${specs.network}` : ""}${
+    specs.ramGb != null && specs.storageGb != null ? ` ${specs.ramGb}GB/${specs.storageGb}GB` : specs.storageGb != null ? ` ${specs.storageGb}GB` : ""
+  }`;
+  const skuParts = [slugify(brand), ...slugify(modelDisplay).split("-")];
+  if (specs.network) skuParts.push(specs.network.toLowerCase());
+  if (specs.ramGb != null) skuParts.push(String(specs.ramGb));
+  if (specs.storageGb != null) skuParts.push(String(specs.storageGb));
+  return {
+    brand,
+    model: modelDisplay,
+    title,
+    sku: skuParts.join("-"),
+    specs,
+  };
+}
+
+function buildTabletCatalogDraft(rawName: string) {
+  const normalized = normalizeCatalogSyncName(rawName);
+  const specs = extractCatalogSpecs(normalized);
+  const brand = /^xiaomi\b/i.test(normalized)
+    ? "Xiaomi"
+    : /^lenovo\b/i.test(normalized)
+      ? "Lenovo"
+      : /^samsung\b/i.test(normalized)
+        ? "Samsung"
+        : inferBrand(normalized);
+  const withoutBrand = normalized.replace(new RegExp(`^${brand}\\s+`, "i"), "").trim();
+  const modelSource = withoutBrand
+    .replace(/(\d{1,2})\s*(?:gb)?\s*(?:\/|\+)\s*(\d{2,4})\s*(?:gb)?/i, " ")
+    .replace(/\b(64|128|256|512|1024)\s*gb?\b/i, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const modelDisplay = titleCaseWords(modelSource);
+  const title = `${brand} ${modelDisplay}${
+    specs.ramGb != null && specs.storageGb != null ? ` ${specs.ramGb}GB/${specs.storageGb}GB` : specs.storageGb != null ? ` ${specs.storageGb}GB` : ""
+  }`;
+  const skuParts = [slugify(brand), ...slugify(modelDisplay).split("-")];
+  if (specs.ramGb != null) skuParts.push(String(specs.ramGb));
+  if (specs.storageGb != null) skuParts.push(String(specs.storageGb));
+  return {
+    brand,
+    model: modelDisplay,
+    title,
+    sku: skuParts.join("-"),
+    specs,
+  };
+}
+
+function buildMotorolaCatalogDraft(rawName: string) {
+  const normalized = normalizeCatalogSyncName(rawName).replace(/^Motorola\s+/i, "");
+  const specs = extractCatalogSpecs(normalized);
+  const modelSource = normalized
+    .replace(/(\d{1,2})\s*(?:gb)?\s*(?:\/|\+)\s*(\d{2,4})\s*(?:gb)?/i, " ")
+    .replace(/\b(64|128|256|512|1024)\s*gb?\b/i, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const modelDisplay = titleCaseWords(modelSource);
+  const title = `Motorola ${modelDisplay}${
+    specs.ramGb != null && specs.storageGb != null ? ` ${specs.ramGb}GB/${specs.storageGb}GB` : specs.storageGb != null ? ` ${specs.storageGb}GB` : ""
+  }`;
+  const skuParts = ["motorola", ...slugify(modelDisplay).split("-")];
+  if (specs.ramGb != null) skuParts.push(String(specs.ramGb));
+  if (specs.storageGb != null) skuParts.push(String(specs.storageGb));
+  return {
+    brand: "Motorola",
+    model: modelDisplay,
+    title,
+    sku: skuParts.join("-"),
+    specs,
+  };
+}
+
+function buildJblCatalogDraft(rawName: string) {
+  const normalized = normalizeCatalogSyncName(rawName).replace(/^JBL\s+/i, "");
+  const modelDisplay = titleCaseWords(normalized.replace(/\bWi Fi\b/g, "WiFi"));
+  const title = `JBL ${modelDisplay}`;
+  return {
+    brand: "JBL",
+    model: modelDisplay,
+    title,
+    sku: ["jbl", ...slugify(modelDisplay).split("-")].join("-"),
+    specs: { ramGb: null, storageGb: null, network: null, color: null },
+  };
+}
+
+function buildCatalogSyncDraftItem(
+  sectionKey: CatalogSyncSectionKey,
+  sectionLabel: string,
+  rawName: string,
+  costUsd: number,
+  lineNumber: number,
+  defaults: { active: boolean; inStock: boolean; condition: (typeof productConditionValues)[number] }
+): CatalogSyncDraftItem {
+  const bySection =
+    sectionKey === "phone"
+      ? buildAppleCatalogDraft(rawName)
+      : sectionKey === "samsung"
+        ? buildSamsungCatalogDraft(rawName)
+        : sectionKey === "xiaomi_redmi_poco"
+          ? buildXiaomiCatalogDraft(rawName)
+          : sectionKey === "tablet"
+            ? buildTabletCatalogDraft(rawName)
+            : sectionKey === "motorola"
+              ? buildMotorolaCatalogDraft(rawName)
+              : buildJblCatalogDraft(rawName);
+  const slug = slugify(bySection.sku);
+  return {
+    sectionKey,
+    sectionLabel,
+    rawName,
+    costUsd,
+    lineNumber,
+    title: bySection.title,
+    brand: bySection.brand,
+    model: bySection.model,
+    sku: slug,
+    slug,
+    category: buildCatalogCategory(sectionKey, bySection.brand),
+    condition: defaults.condition,
+    active: defaults.active,
+    inStock: defaults.inStock,
+    ramGb: bySection.specs.ramGb,
+    storageGb: bySection.specs.storageGb,
+    network: bySection.specs.network,
+    color: bySection.specs.color,
+    description: buildCatalogDescription(bySection.specs),
+    normalizedTitle: normalizeMatch(bySection.title),
+    colorlessTitle: buildColorlessCatalogKey(bySection.title),
+    requiredTokens: buildCatalogSyncTokens(bySection.title),
+    tierTokens: detectCatalogTierTokens(bySection.title),
+  };
+}
+
+function parseCatalogSyncPriceList(
+  rawList: string,
+  defaults: { active: boolean; inStock: boolean; condition: (typeof productConditionValues)[number] }
+) {
+  const lines = rawList
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const items: CatalogSyncDraftItem[] = [];
+  let currentSection: { key: CatalogSyncSectionKey; label: string } | null = null;
+
+  for (const [index, line] of lines.entries()) {
+    const section = canonicalizeCatalogSyncSection(line);
+    if (section) {
+      currentSection = section;
+      continue;
+    }
+
+    const match = line.match(/^(.*?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)\s*usd\b/i);
+    if (!match) {
+      continue;
+    }
+
+    if (!currentSection) {
+      throw new Error(`La línea ${index + 1} tiene precio USD pero no tiene sección arriba: "${line}".`);
+    }
+
+    const rawName = match[1].trim();
+    const costUsd = Number(match[2].replace(",", "."));
+    if (!Number.isFinite(costUsd)) {
+      throw new Error(`No pude leer el cost_usd de la línea ${index + 1}: "${line}".`);
+    }
+
+    items.push(buildCatalogSyncDraftItem(currentSection.key, currentSection.label, rawName, costUsd, index + 1, defaults));
+  }
+
+  if (items.length === 0) {
+    throw new Error("No encontré líneas del tipo “Producto - 123 USD” en el mensaje.");
+  }
+
+  return items;
+}
+
+function buildCatalogRowTokens(product: CatalogSyncProductRow) {
+  return new Set(buildCatalogSyncTokens([product.brand, product.model, product.title, product.sku, product.slug].join(" ")));
+}
+
+function scoreCatalogSyncMatch(item: CatalogSyncDraftItem, product: CatalogSyncProductRow) {
+  const rowTokens = buildCatalogRowTokens(product);
+  if (!rowTokens.has(normalizeMatch(item.brand).split(" ")[0])) {
+    if (!(item.brand === "Apple" && rowTokens.has("iphone"))) return Number.NEGATIVE_INFINITY;
+  }
+
+  for (const token of item.requiredTokens) {
+    if (!rowTokens.has(token)) {
+      return Number.NEGATIVE_INFINITY;
+    }
+  }
+
+  const normalizedTitle = normalizeMatch(product.title);
+  const colorlessTitle = buildColorlessCatalogKey(product.title);
+  const candidateTiers = detectCatalogTierTokens(product.title);
+  const itemHasColor = item.color != null;
+  const productHasEconomyToken = buildCatalogSyncTokens(product.title).some((token) => catalogSyncEconomyTokens.has(token));
+  const itemHasEconomyToken = item.requiredTokens.some((token) => catalogSyncEconomyTokens.has(token));
+  let score = item.requiredTokens.length * 12;
+
+  if (normalizedTitle === item.normalizedTitle) score += 40;
+  if (colorlessTitle === item.colorlessTitle) score += 24;
+  if (normalizeMatch(product.sku) === normalizeMatch(item.sku)) score += 60;
+  if (item.brand === "Apple" && item.tierTokens.length === 0 && candidateTiers.length > 0) score -= 30;
+  if (!itemHasEconomyToken && productHasEconomyToken) score -= 30;
+  if (!itemHasColor && buildCatalogSyncTokens(product.title).some((token) => catalogSyncColorTokens.has(token))) score -= 4;
+  if (item.network == null && /\b(4g|5g)\b/i.test(product.title)) score -= 2;
+  if (item.ramGb == null && /\b\d{1,2}gb\/\d{2,4}gb\b/i.test(product.title)) score -= 2;
+
+  return score;
+}
+
+async function loadCatalogSyncProducts() {
+  return query<CatalogSyncProductRow>(
+    `
+      select
+        id,
+        sku,
+        slug,
+        brand,
+        model,
+        title,
+        active,
+        price_amount,
+        promo_price_ars,
+        currency_code,
+        image_url,
+        ram_gb,
+        storage_gb,
+        cost_usd
+      from public.products
+      order by active desc, updated_at desc, id desc
+    `
+  );
+}
+
+function resolveCatalogSyncMatches(item: CatalogSyncDraftItem, products: CatalogSyncProductRow[]) {
+  const scored = products
+    .map((product) => ({ product, score: scoreCatalogSyncMatch(item, product) }))
+    .filter((entry) => Number.isFinite(entry.score))
+    .sort((left, right) => right.score - left.score);
+
+  if (scored.length === 0 || scored[0].score < 28) {
+    return { kind: "missing" as const };
+  }
+
+  const topScore = scored[0].score;
+  const nearTop = scored.filter((entry) => topScore - entry.score <= 8);
+  if (nearTop.length === 1) {
+    return { kind: "matched" as const, products: [nearTop[0].product] };
+  }
+
+  const colorlessKeys = new Set(nearTop.map((entry) => buildColorlessCatalogKey(entry.product.title)));
+  if (item.color == null && colorlessKeys.size === 1) {
+    return { kind: "matched" as const, products: nearTop.map((entry) => entry.product) };
+  }
+
+  return { kind: "ambiguous" as const, products: nearTop.map((entry) => entry.product) };
+}
+
+function limitCatalogSyncSummary(lines: string[], maxLines = 18) {
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+  return [...lines.slice(0, maxLines), `• ... y ${lines.length - maxLines} líneas más`];
+}
+
 function buildToken() {
   return randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase();
 }
@@ -2114,7 +2657,7 @@ function buildDraftPrompts(params: {
     "Think in natural operator intents like listing, filtering, creating, editing, archiving, deleting, moving stock, or changing settings. Do not mention internal tool names in user-facing reply text.",
     "Return JSON only. No prose. No markdown.",
     "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, get_product_details, list_stock, get_stock_details, list_settings, get_setting_details, list_customers, get_customer_details, list_orders, list_conversations, list_inventory_purchases, get_inventory_purchase_details, list_meta_campaigns, list_meta_ad_sets, list_meta_ads.",
-    "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, delete_product, create_inventory_purchase, update_inventory_purchase, update_meta_campaign, update_meta_ad_set, update_meta_ad, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
+    "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, bulk_sync_products, delete_product, create_inventory_purchase, update_inventory_purchase, update_meta_campaign, update_meta_ad_set, update_meta_ad, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
     "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
     "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
     "If the operator asks for a concrete mutation that can be prepared safely, prefer mode=write over mode=chat. Do not answer with an execution plan when the command layer can already prepare the action.",
@@ -2125,7 +2668,8 @@ function buildDraftPrompts(params: {
     "Never invent IDs. Keep product_ref, stock_ref, customer_ref and setting keys as plain text from the user's request.",
     "User-facing reply text must sound like an ops assistant, not like schema docs. Never mention internal tool names, table names, or confirmation tokens unless the operator explicitly asks.",
     "For update commands, only include the fields the user explicitly wants to change.",
-    "If the user pastes multiple product names each with different cost_usd values, prefer bulk_reprice_products with one item per row.",
+    "If the user pastes a supplier-style list grouped by headings with lines like “Producto - 123 USD”, prefer bulk_sync_products and pass raw_list with the pasted text so the server can update existing rows, create missing products, and recalculate pricing.",
+    "If the user pastes multiple product names each with different cost_usd values and they are all definitely existing products, bulk_reprice_products is still valid.",
     "For delete commands, only use them if the user explicitly asked to delete, remove, or permanently erase.",
     "For product archive/deactivate intent, use update_product with active=false.",
     "If the operator changes cost_usd, logistics_usd, usd_rate, or cuotas_qty on a product, the server will recalculate derived pricing fields from settings. You should frame the action as a repricing preview, not as a manual field edit list only.",
@@ -3759,6 +4303,167 @@ async function prepareWriteCommand(
         payload: { items },
       };
     }
+    case "bulk_sync_products": {
+      const parsed = bulkSyncProductsSchema.parse(rawParams);
+      const defaults = {
+        active: parsed.active ?? true,
+        inStock: parsed.in_stock ?? false,
+        condition: parsed.condition ?? "new",
+      } as const;
+      const rawList = parsed.raw_list?.trim() || actor.userMessage;
+      const draftItems = parseCatalogSyncPriceList(rawList, defaults);
+      const catalogProducts = await loadCatalogSyncProducts();
+      const seenProductIds = new Map<number, string>();
+      const seenCreateSkus = new Set<string>();
+      const updateItems: Array<{
+        source_line: string;
+        source_section: string;
+        product_id: number;
+        sku: string;
+        title: string;
+        previous_cost_usd: string | number | null;
+        previous_price_amount: string | number | null;
+        changes: Record<string, unknown>;
+      }> = [];
+      const createItems: Array<Record<string, unknown>> = [];
+      const summaryLines: string[] = [];
+
+      for (const item of draftItems) {
+        const match = resolveCatalogSyncMatches(item, catalogProducts);
+
+        if (match.kind === "ambiguous") {
+          throw new Error(
+            `La línea ${item.lineNumber} "${item.rawName}" es ambigua. Coincidencias posibles: ${match.products
+              .slice(0, 5)
+              .map((product) => `${product.sku} (${product.title})`)
+              .join(" | ")}`
+          );
+        }
+
+        if (match.kind === "missing") {
+          if (parsed.create_missing === false) {
+            throw new Error(`No encontré un producto existente para "${item.rawName}" (línea ${item.lineNumber}).`);
+          }
+
+          if (seenCreateSkus.has(item.sku)) {
+            throw new Error(`La línea ${item.lineNumber} repite el SKU ${item.sku}. Dejame una sola línea por producto.`);
+          }
+
+          seenCreateSkus.add(item.sku);
+          const derived = await calculateDerivedPricing({ cost_usd: item.costUsd }, pool);
+          const payload = {
+            sku: item.sku,
+            slug: item.slug,
+            brand: item.brand,
+            model: item.model,
+            title: item.title,
+            description: item.description,
+            condition: item.condition,
+            price_amount: derived.price_amount,
+            currency_code: "ARS",
+            active: item.active,
+            category: item.category,
+            cost_usd: item.costUsd,
+            logistics_usd: derived.logistics_usd,
+            total_cost_usd: derived.total_cost_usd,
+            margin_pct: derived.margin_pct,
+            price_usd: derived.price_usd,
+            promo_price_ars: derived.promo_price_ars,
+            bancarizada_total: derived.bancarizada_total,
+            bancarizada_cuota: derived.bancarizada_cuota,
+            bancarizada_interest: derived.bancarizada_interest,
+            macro_total: derived.macro_total,
+            macro_cuota: derived.macro_cuota,
+            macro_interest: derived.macro_interest,
+            cuotas_qty: derived.cuotas_qty,
+            in_stock: item.inStock,
+            delivery_type: null,
+            delivery_days: null,
+            usd_rate: derived.usd_rate,
+            image_url: null,
+            ram_gb: item.ramGb,
+            storage_gb: item.storageGb,
+            network: item.network,
+            color: item.color,
+            battery_health: null,
+            source_line: item.rawName,
+            source_section: item.sectionLabel,
+          };
+          createItems.push(payload);
+          summaryLines.push(
+            `• Crear ${item.sku} · ${item.title} · cost_usd ${item.costUsd} · ${formatMoney(
+              derived.price_amount,
+              "ARS"
+            )}`
+          );
+          continue;
+        }
+
+        for (const product of match.products) {
+          const duplicateSource = seenProductIds.get(product.id);
+          if (duplicateSource) {
+            throw new Error(
+              `El producto ${product.sku} entró dos veces en la lista: "${duplicateSource}" y "${item.rawName}".`
+            );
+          }
+
+          seenProductIds.set(product.id, item.rawName);
+          const current = await loadProductPricingState(product.id);
+          if (!current) {
+            throw new Error(`No pude cargar pricing actual para ${product.sku}.`);
+          }
+
+          const derived = await calculateDerivedPricing(
+            {
+              cost_usd: item.costUsd,
+              logistics_usd: toPricingCarrierValue(current.logistics_usd ?? null),
+              usd_rate: toPricingCarrierValue(current.usd_rate ?? null),
+              cuotas_qty: toPricingCarrierValue(current.cuotas_qty ?? null),
+            },
+            pool
+          );
+
+          updateItems.push({
+            source_line: item.rawName,
+            source_section: item.sectionLabel,
+            product_id: product.id,
+            sku: product.sku,
+            title: product.title,
+            previous_cost_usd: current.cost_usd as string | number | null,
+            previous_price_amount: current.price_amount as string | number | null,
+            changes: {
+              cost_usd: item.costUsd,
+              ...derived,
+            },
+          });
+        }
+
+        summaryLines.push(
+          match.products.length === 1
+            ? `• ${match.products[0].sku} · cost_usd ${item.costUsd} · ${formatMoney(
+                updateItems[updateItems.length - 1]?.changes.price_amount as string | number | null,
+                "ARS"
+              )}`
+            : `• ${item.rawName} · ${match.products.length} variantes (${match.products.map((product) => product.sku).join(", ")}) · cost_usd ${item.costUsd}`
+        );
+      }
+
+      const updateCount = updateItems.length;
+      const createCount = createItems.length;
+      return {
+        command,
+        summary: [
+          `Sync masivo de lista de costos (${draftItems.length} líneas)`,
+          `• ${updateCount} actualizaciones`,
+          `• ${createCount} productos nuevos`,
+          ...limitCatalogSyncSummary(summaryLines),
+        ].join("\n"),
+        payload: {
+          update_items: updateItems,
+          create_items: createItems,
+        },
+      };
+    }
     case "delete_product": {
       const parsed = deleteProductSchema.parse(rawParams);
       const product = await resolveProduct(parsed.product_ref);
@@ -4557,6 +5262,126 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
         ...updatedRows.map(
           (row) => `• ${row.sku} · cost_usd ${row.cost_usd ?? "-"} · precio ${formatMoney(row.price_amount, "ARS")}`
         ),
+      ].join("\n");
+    }
+    case "bulk_sync_products": {
+      const parsed = z
+        .object({
+          update_items: z
+            .array(
+              z.object({
+                source_line: z.string(),
+                source_section: z.string(),
+                product_id: z.coerce.number().int().positive(),
+                sku: z.string(),
+                title: z.string(),
+                previous_cost_usd: z.union([z.string(), z.number()]).nullable().optional(),
+                previous_price_amount: z.union([z.string(), z.number()]).nullable().optional(),
+                changes: z.record(z.string(), z.unknown()),
+              })
+            )
+            .default([]),
+          create_items: z.array(createProductSchema.extend({ source_line: z.string(), source_section: z.string() })).default([]),
+        })
+        .parse(payload);
+
+      const resultLines: string[] = [];
+      let updatedCount = 0;
+      let createdCount = 0;
+
+      for (const item of parsed.update_items) {
+        const entries = Object.entries(item.changes);
+        const sql = entries.map(([key], index) => `${key} = $${index + 1}`).join(", ");
+        const values = entries.map(([, value]) => value);
+        const result = await client.query<{
+          id: number;
+          sku: string;
+          cost_usd: string | number | null;
+          price_amount: string | number | null;
+        }>(
+          `update public.products set ${sql} where id = $${values.length + 1} returning id, sku, cost_usd, price_amount`,
+          [...values, item.product_id]
+        );
+
+        const row = result.rows[0];
+        await writeAudit(client, actor, "telegram.product.synced_repriced", "product", String(row.id), {
+          source_line: item.source_line,
+          source_section: item.source_section,
+          changes: item.changes,
+        });
+        updatedCount += 1;
+        resultLines.push(`• ${row.sku} actualizado · cost_usd ${row.cost_usd ?? "-"} · ${formatMoney(row.price_amount, "ARS")}`);
+      }
+
+      for (const createItem of parsed.create_items) {
+        const result = await client.query(
+          `
+            insert into public.products (
+              sku, slug, brand, model, title, description, condition, price_amount, currency_code, active,
+              category, cost_usd, logistics_usd, total_cost_usd, margin_pct, price_usd, promo_price_ars,
+              bancarizada_total, bancarizada_cuota, bancarizada_interest, macro_total, macro_cuota, macro_interest,
+              cuotas_qty, in_stock, delivery_type, delivery_days, usd_rate, image_url, ram_gb, storage_gb, network, color, battery_health
+            ) values (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+              $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+              $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+              $31, $32, $33, $34
+            )
+            returning id, sku, title, cost_usd, price_amount
+          `,
+          [
+            createItem.sku,
+            createItem.slug || slugify(createItem.sku),
+            createItem.brand || inferBrand(createItem.title),
+            createItem.model || inferModel(createItem.title, createItem.brand || inferBrand(createItem.title)),
+            createItem.title,
+            createItem.description ?? null,
+            createItem.condition || "new",
+            createItem.price_amount ?? null,
+            createItem.currency_code || "ARS",
+            createItem.active ?? true,
+            createItem.category ?? null,
+            createItem.cost_usd ?? null,
+            createItem.logistics_usd ?? null,
+            createItem.total_cost_usd ?? null,
+            createItem.margin_pct ?? null,
+            createItem.price_usd ?? null,
+            createItem.promo_price_ars ?? null,
+            createItem.bancarizada_total ?? null,
+            createItem.bancarizada_cuota ?? null,
+            createItem.bancarizada_interest ?? null,
+            createItem.macro_total ?? null,
+            createItem.macro_cuota ?? null,
+            createItem.macro_interest ?? null,
+            createItem.cuotas_qty ?? null,
+            createItem.in_stock ?? false,
+            createItem.delivery_type ?? null,
+            createItem.delivery_days ?? null,
+            createItem.usd_rate ?? null,
+            createItem.image_url || null,
+            createItem.ram_gb ?? null,
+            createItem.storage_gb ?? null,
+            createItem.network ?? null,
+            createItem.color ?? null,
+            createItem.battery_health ?? null,
+          ]
+        );
+
+        const row = result.rows[0];
+        await writeAudit(client, actor, "telegram.product.synced_created", "product", String(row.id), {
+          sku: row.sku,
+          source_line: createItem.source_line,
+          source_section: createItem.source_section,
+        });
+        createdCount += 1;
+        resultLines.push(`• ${row.sku} creado · cost_usd ${row.cost_usd ?? "-"} · ${formatMoney(row.price_amount, "ARS")}`);
+      }
+
+      return [
+        `Lista sincronizada.`,
+        `• ${updatedCount} actualizados`,
+        `• ${createdCount} creados`,
+        ...limitCatalogSyncSummary(resultLines),
       ].join("\n");
     }
     case "delete_product": {

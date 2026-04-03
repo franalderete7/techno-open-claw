@@ -30,14 +30,14 @@ This is the safest migration path because the existing workflow logic stays inta
   Example: `http://api:4000`
 - `OPENCLAW_API_TOKEN`
   Example: your API bearer token
-- `GEMINI_MODEL_SALES`
-  Example: `models/gemini-2.5-flash`
+- `GROQ_MODEL_SALES`
+  Example: `llama3-8b-8192`
 
 ## Required n8n credentials
 
 - `ManyChat API`
 - `Groq Whisper`
-- `Google Gemini` chat model credential used by the sales responder
+- `Groq account` chat model credential used by the sales responder
 
 ## Import order
 

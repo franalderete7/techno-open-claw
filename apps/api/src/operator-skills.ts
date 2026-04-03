@@ -182,6 +182,27 @@ const SKILLS: OperatorSkillDefinition[] = [
     ],
   },
   {
+    id: "bulk_sync_products",
+    label: "Sync masivo desde lista de proveedor",
+    mode: "write",
+    entity: "products",
+    summary:
+      "Recibe una lista pegada por el operador con secciones y líneas tipo “Producto - 123 USD”, actualiza cost_usd de los productos existentes, recalcula pricing derivado y crea automáticamente los faltantes.",
+    requiredInputs: ["raw_list"],
+    optionalInputs: ["create_missing", "active", "in_stock", "condition"],
+    guardrails: [
+      "Las líneas deben venir con precio USD explícito.",
+      "Si una línea matchea varios productos distintos de forma ambigua, detener y pedir aclaración.",
+      "Si una línea genérica matchea varias variantes de color del mismo modelo, actualizar todas esas variantes.",
+      "Siempre mostrar preview antes de ejecutar.",
+    ],
+    bulkSupport: "per-row-multi-row",
+    examples: [
+      "te paso lista de proveedor, actualizá costos y creá los faltantes",
+      "sincronizá esta lista completa de productos con USD nuevo",
+    ],
+  },
+  {
     id: "delete_product",
     label: "Borrar producto",
     mode: "write",
