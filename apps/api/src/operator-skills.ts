@@ -235,6 +235,26 @@ const SKILLS: OperatorSkillDefinition[] = [
     examples: ["borra el producto sku redmi-a5-4-128"],
   },
   {
+    id: "bulk_delete_products",
+    label: "Borrar varios productos (un OK)",
+    mode: "write",
+    entity: "products",
+    summary:
+      "Borra hasta 200 productos en una sola confirmación de Telegram: por filtro (query/marca/modelo como list_products) o por lista explícita de SKU en product_refs. Misma regla que delete_product: sin filas de stock.",
+    requiredInputs: [],
+    optionalInputs: ["query", "brand", "model", "active", "product_refs"],
+    guardrails: [
+      "Bloquear el lote si algún producto matcheado tiene stock.",
+      "Siempre confirmación inline con lista preview.",
+      "No ejecutar sin intención explícita de borrar muchos ítems.",
+    ],
+    bulkSupport: "same-change-multi-row",
+    examples: [
+      "borrá todos los iPhone 13 que encuentres",
+      "eliminá estos sku: iphone-a, iphone-b",
+    ],
+  },
+  {
     id: "list_stock",
     label: "Listar stock",
     mode: "read",

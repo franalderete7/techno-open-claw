@@ -292,6 +292,142 @@ function normalizeListProductsFilters(parsed: ListProductsParsed): ListProductsP
   };
 }
 
+function buildListProductsWhereClauses(parsed: ListProductsParsed): { where: string[]; values: unknown[] } {
+  const values: unknown[] = [];
+  const where: string[] = [];
+
+  if (parsed.query) {
+    values.push(`%${parsed.query}%`);
+    where.push(
+      `(p.title ilike $${values.length} or p.sku ilike $${values.length} or p.brand ilike $${values.length} or p.model ilike $${values.length} or coalesce(p.description, '') ilike $${values.length})`
+    );
+  }
+
+  if (parsed.brand) {
+    values.push(`%${parsed.brand}%`);
+    where.push(`p.brand ilike $${values.length}`);
+  }
+
+  if (parsed.model) {
+    values.push(`%${parsed.model}%`);
+    where.push(`coalesce(p.model, '') ilike $${values.length}`);
+  }
+
+  if (parsed.active != null) {
+    values.push(parsed.active);
+    where.push(`p.active = $${values.length}`);
+  }
+
+  if (parsed.in_stock != null) {
+    values.push(parsed.in_stock);
+    where.push(`p.in_stock = $${values.length}`);
+  }
+
+  if (parsed.category) {
+    values.push(`%${parsed.category}%`);
+    where.push(`coalesce(p.category, '') ilike $${values.length}`);
+  }
+
+  if (parsed.min_price_ars != null) {
+    values.push(parsed.min_price_ars);
+    where.push(`coalesce(p.promo_price_ars, p.price_amount) >= $${values.length}`);
+  }
+
+  if (parsed.max_price_ars != null) {
+    values.push(parsed.max_price_ars);
+    where.push(`coalesce(p.promo_price_ars, p.price_amount) <= $${values.length}`);
+  }
+
+  if (parsed.min_ram_gb != null) {
+    values.push(parsed.min_ram_gb);
+    where.push(`coalesce(p.ram_gb, 0) >= $${values.length}`);
+  }
+
+  if (parsed.max_ram_gb != null) {
+    values.push(parsed.max_ram_gb);
+    where.push(`coalesce(p.ram_gb, 0) <= $${values.length}`);
+  }
+
+  if (parsed.min_storage_gb != null) {
+    values.push(parsed.min_storage_gb);
+    where.push(`coalesce(p.storage_gb, 0) >= $${values.length}`);
+  }
+
+  if (parsed.max_storage_gb != null) {
+    values.push(parsed.max_storage_gb);
+    where.push(`coalesce(p.storage_gb, 0) <= $${values.length}`);
+  }
+
+  if (parsed.has_image != null) {
+    where.push(
+      parsed.has_image
+        ? `nullif(trim(coalesce(p.image_url, '')), '') is not null`
+        : `nullif(trim(coalesce(p.image_url, '')), '') is null`
+    );
+  }
+
+  return { where, values };
+}
+
+async function fetchProductsForListFilters(parsed: ListProductsParsed, limit: number): Promise<ProductRow[]> {
+  const { where, values } = buildListProductsWhereClauses(parsed);
+  const sortColumn =
+    parsed.sort_by === "price"
+      ? "coalesce(p.promo_price_ars, p.price_amount)"
+      : parsed.sort_by === "title"
+        ? "p.title"
+        : "p.updated_at";
+  const sortDir = parsed.sort_dir || (parsed.sort_by === "title" ? "asc" : "desc");
+
+  return query<ProductRow>(
+    `
+      select
+        p.id,
+        p.sku,
+        p.slug,
+        p.brand,
+        p.model,
+        p.title,
+        p.active,
+        p.in_stock,
+        p.price_amount,
+        p.promo_price_ars,
+        p.currency_code,
+        p.image_url,
+        p.ram_gb,
+        p.storage_gb,
+        coalesce(inv.stock_units_available, 0) as stock_units_available
+      from public.products p
+      left join lateral (
+        select count(*) filter (where status = 'in_stock')::int as stock_units_available
+        from public.stock_units su
+        where su.product_id = p.id
+      ) inv on true
+      ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
+      order by ${sortColumn} ${sortDir}, p.id desc
+      limit ${limit}
+    `,
+    values
+  );
+}
+
+const bulkDeleteProductsSchema = z
+  .object({
+    query: z.string().trim().optional(),
+    brand: z.string().trim().optional(),
+    model: z.string().trim().optional(),
+    active: filterBooleanSchema.optional(),
+    product_refs: z.array(z.string().trim().min(1)).max(200).optional(),
+  })
+  .refine(
+    (v) =>
+      (v.product_refs != null && v.product_refs.length > 0) ||
+      Boolean(v.query?.trim()) ||
+      Boolean(v.brand?.trim()) ||
+      Boolean(v.model?.trim()),
+    { message: "Indicá product_refs (lista de SKU) o al menos query, marca o modelo para filtrar." }
+  );
+
 const getProductDetailsSchema = z.object({
   product_ref: z.string().trim().min(1),
 });
@@ -606,6 +742,7 @@ export const draftSchema = z.object({
       "bulk_reprice_products",
       "bulk_sync_products",
       "delete_product",
+      "bulk_delete_products",
       "create_inventory_purchase",
       "update_inventory_purchase",
       "update_meta_campaign",
@@ -760,6 +897,7 @@ type WriteCommandName =
   | "bulk_reprice_products"
   | "bulk_sync_products"
   | "delete_product"
+  | "bulk_delete_products"
   | "create_inventory_purchase"
   | "update_inventory_purchase"
   | "update_meta_campaign"
@@ -2717,6 +2855,7 @@ const OPERATOR_SCHEMA_GUIDE = [
   "- Never claim a row was created, updated, or deleted unless the deterministic command layer executed it.",
   "- If the operator asks to archive a product, prefer update_product with active=false. Use delete_product only for explicit permanent deletion intent.",
   "- delete_product must remove associated storefront checkout intents automatically before deleting the product row. Do not block deletion because of storefront intents.",
+  "- bulk_delete_products deletes many products in one confirmation (Telegram inline OK); same stock rule as delete_product for every row.",
 ].join("\n");
 
 const OPERATOR_SKILL_GUIDE = buildOperatorSkillGuide();
@@ -2737,7 +2876,7 @@ function buildDraftPrompts(params: {
     "Think in natural operator intents like listing, filtering, creating, editing, archiving, deleting, moving stock, or changing settings. Do not mention internal tool names in user-facing reply text.",
     "Return JSON only. No prose. No markdown.",
     "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, get_product_details, list_stock, get_stock_details, list_settings, get_setting_details, list_customers, get_customer_details, list_orders, list_conversations, list_inventory_purchases, get_inventory_purchase_details, list_meta_campaigns, list_meta_ad_sets, list_meta_ads.",
-    "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, bulk_sync_products, delete_product, create_inventory_purchase, update_inventory_purchase, update_meta_campaign, update_meta_ad_set, update_meta_ad, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
+    "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, bulk_sync_products, delete_product, bulk_delete_products, create_inventory_purchase, update_inventory_purchase, update_meta_campaign, update_meta_ad_set, update_meta_ad, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
     "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
     "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
     "If the operator asks for a concrete mutation that can be prepared safely, prefer mode=write over mode=chat. Do not answer with an execution plan when the command layer can already prepare the action.",
@@ -2751,6 +2890,7 @@ function buildDraftPrompts(params: {
     "If the user pastes a supplier-style list grouped by headings with lines like “Producto - 123 USD”, prefer bulk_sync_products and pass raw_list with the pasted text so the server can update existing rows, create missing products, and recalculate pricing. Default create_missing=true unless the user explicitly asks to only update existing rows (no new products).",
     "If the user pastes multiple product names each with different cost_usd values and they are all definitely existing products, bulk_reprice_products is still valid.",
     "For delete commands, only use them if the user explicitly asked to delete, remove, or permanently erase.",
+    "For delete many products matching a filter (e.g. all iPhone 13) or an explicit list of SKUs, use bulk_delete_products with query='iPhone 13' (same filters as list_products) or product_refs=['sku-a','sku-b']. One Telegram confirmation deletes up to 200 rows. Never use bulk_delete without clear user intent.",
     "For product archive/deactivate intent, use update_product with active=false.",
     "If the operator changes cost_usd, logistics_usd, usd_rate, or cuotas_qty on a product, the server will recalculate derived pricing fields from settings. You should frame the action as a repricing preview, not as a manual field edit list only.",
     "If the operator refers to the latest Telegram images for new stock or sold devices, prefer the image-based stock commands rather than requesting manual IMEIs.",
@@ -3628,117 +3768,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       const hadIphoneMisassignedBrand = Boolean(rawParsed.brand && /\biPhone\b/i.test(rawParsed.brand));
       const parsed = normalizeListProductsFilters(rawParsed);
       const limit = parsed.all ? 200 : parsed.limit ?? 24;
-      const values: unknown[] = [];
-      const where: string[] = [];
-
-      if (parsed.query) {
-        values.push(`%${parsed.query}%`);
-        where.push(
-          `(p.title ilike $${values.length} or p.sku ilike $${values.length} or p.brand ilike $${values.length} or p.model ilike $${values.length} or coalesce(p.description, '') ilike $${values.length})`
-        );
-      }
-
-      if (parsed.brand) {
-        values.push(`%${parsed.brand}%`);
-        where.push(`p.brand ilike $${values.length}`);
-      }
-
-      if (parsed.model) {
-        values.push(`%${parsed.model}%`);
-        where.push(`coalesce(p.model, '') ilike $${values.length}`);
-      }
-
-      if (parsed.active != null) {
-        values.push(parsed.active);
-        where.push(`p.active = $${values.length}`);
-      }
-
-      if (parsed.in_stock != null) {
-        values.push(parsed.in_stock);
-        where.push(`p.in_stock = $${values.length}`);
-      }
-
-      if (parsed.category) {
-        values.push(`%${parsed.category}%`);
-        where.push(`coalesce(p.category, '') ilike $${values.length}`);
-      }
-
-      if (parsed.min_price_ars != null) {
-        values.push(parsed.min_price_ars);
-        where.push(`coalesce(p.promo_price_ars, p.price_amount) >= $${values.length}`);
-      }
-
-      if (parsed.max_price_ars != null) {
-        values.push(parsed.max_price_ars);
-        where.push(`coalesce(p.promo_price_ars, p.price_amount) <= $${values.length}`);
-      }
-
-      if (parsed.min_ram_gb != null) {
-        values.push(parsed.min_ram_gb);
-        where.push(`coalesce(p.ram_gb, 0) >= $${values.length}`);
-      }
-
-      if (parsed.max_ram_gb != null) {
-        values.push(parsed.max_ram_gb);
-        where.push(`coalesce(p.ram_gb, 0) <= $${values.length}`);
-      }
-
-      if (parsed.min_storage_gb != null) {
-        values.push(parsed.min_storage_gb);
-        where.push(`coalesce(p.storage_gb, 0) >= $${values.length}`);
-      }
-
-      if (parsed.max_storage_gb != null) {
-        values.push(parsed.max_storage_gb);
-        where.push(`coalesce(p.storage_gb, 0) <= $${values.length}`);
-      }
-
-      if (parsed.has_image != null) {
-        where.push(
-          parsed.has_image
-            ? `nullif(trim(coalesce(p.image_url, '')), '') is not null`
-            : `nullif(trim(coalesce(p.image_url, '')), '') is null`
-        );
-      }
-
-      const sortColumn =
-        parsed.sort_by === "price"
-          ? "coalesce(p.promo_price_ars, p.price_amount)"
-          : parsed.sort_by === "title"
-            ? "p.title"
-            : "p.updated_at";
-      const sortDir =
-        parsed.sort_dir || (parsed.sort_by === "title" ? "asc" : "desc");
-      const rows = await query<ProductRow>(
-        `
-          select
-            p.id,
-            p.sku,
-            p.slug,
-            p.brand,
-            p.model,
-            p.title,
-            p.active,
-            p.in_stock,
-            p.price_amount,
-            p.promo_price_ars,
-            p.currency_code,
-            p.image_url,
-            p.ram_gb,
-            p.storage_gb,
-            coalesce(inv.stock_units_available, 0) as stock_units_available
-          from public.products p
-          left join lateral (
-            select count(*) filter (where status = 'in_stock')::int as stock_units_available
-            from public.stock_units su
-            where su.product_id = p.id
-          ) inv on true
-          ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-          order by ${sortColumn} ${sortDir}, p.id desc
-          limit ${limit}
-        `,
-        values
-      );
+      const rows = await fetchProductsForListFilters(parsed, limit);
 
       if (rows.length === 0) {
         return [
@@ -4597,6 +4627,80 @@ async function prepareWriteCommand(
           title: product.title,
           checkout_intent_count: Number(checkoutIntentCount[0]?.count ?? 0),
         },
+      };
+    }
+    case "bulk_delete_products": {
+      const parsed = bulkDeleteProductsSchema.parse(rawParams);
+      let products: ProductRow[];
+
+      if (parsed.product_refs && parsed.product_refs.length > 0) {
+        const seen = new Set<number>();
+        products = [];
+        for (const ref of parsed.product_refs) {
+          const product = await resolveProduct(ref);
+          if (!seen.has(product.id)) {
+            seen.add(product.id);
+            products.push(product);
+          }
+        }
+      } else {
+        const rawParsed = listProductsSchema.parse({
+          query: parsed.query,
+          brand: parsed.brand,
+          model: parsed.model,
+          active: parsed.active,
+          all: true,
+          limit: 200,
+        });
+        const normalized = normalizeListProductsFilters(rawParsed);
+        products = await fetchProductsForListFilters(normalized, 200);
+      }
+
+      if (products.length === 0) {
+        throw new Error("No hay productos que coincidan para borrar.");
+      }
+
+      for (const p of products) {
+        const stockRows = await query<{ count: string }>(
+          "select count(*)::text as count from public.stock_units where product_id = $1",
+          [p.id]
+        );
+        if (Number(stockRows[0]?.count ?? 0) > 0) {
+          throw new Error(
+            `No puedo borrar en lote: ${p.sku} todavía tiene unidades de stock. Quitá o mové el stock primero, o archivá con update_product (active=false).`
+          );
+        }
+      }
+
+      const checkoutCounts = await Promise.all(
+        products.map((p) =>
+          query<{ count: string }>("select count(*)::text as count from public.storefront_checkout_intents where product_id = $1", [p.id])
+        )
+      );
+
+      const items = products.map((p, index) => ({
+        product_id: p.id,
+        sku: p.sku,
+        title: p.title,
+        checkout_intent_count: Number(checkoutCounts[index][0]?.count ?? 0),
+      }));
+
+      const previewLines = products.slice(0, 18).map((p) => `• ${p.sku} · ${p.title}`);
+      const more =
+        products.length > 18 ? `• … y ${products.length - 18} más (total ${products.length})` : "";
+      const totalCheckoutIntents = items.reduce((sum, item) => sum + item.checkout_intent_count, 0);
+
+      return {
+        command,
+        summary: [
+          `Borrar ${products.length} productos (un solo OK en Telegram)`,
+          ...previewLines,
+          more,
+          totalCheckoutIntents > 0 ? `• Checkout intents a borrar (total): ${totalCheckoutIntents}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        payload: { items },
       };
     }
     case "create_inventory_purchase": {
@@ -5542,6 +5646,65 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
         `• ID: ${parsed.product_id}`,
         `• SKU: ${parsed.sku}`,
         `• Checkout intents borrados: ${checkoutIntentDelete.rowCount ?? 0}`,
+      ].join("\n");
+    }
+    case "bulk_delete_products": {
+      const parsed = z
+        .object({
+          items: z
+            .array(
+              z.object({
+                product_id: z.coerce.number().int().positive(),
+                sku: z.string(),
+                title: z.string(),
+                checkout_intent_count: z.coerce.number().int().nonnegative().optional(),
+              })
+            )
+            .min(1)
+            .max(200),
+        })
+        .parse(payload);
+
+      let totalCheckoutDeleted = 0;
+      const deletedSkus: string[] = [];
+
+      for (const item of parsed.items) {
+        const stockCount = await client.query<{ count: string }>(
+          "select count(*)::text as count from public.stock_units where product_id = $1",
+          [item.product_id]
+        );
+
+        if (Number(stockCount.rows[0]?.count ?? 0) > 0) {
+          throw new Error(
+            `No puedo borrar ${item.sku}: tiene stock (cambió desde la confirmación). Quitá stock o archivá.`
+          );
+        }
+
+        const checkoutIntentDelete = await client.query<{ id: string }>(
+          "delete from public.storefront_checkout_intents where product_id = $1 returning id",
+          [item.product_id]
+        );
+        totalCheckoutDeleted += checkoutIntentDelete.rowCount ?? 0;
+
+        await client.query("delete from public.products where id = $1", [item.product_id]);
+        await writeAudit(client, actor, "telegram.product.deleted", "product", String(item.product_id), {
+          sku: item.sku,
+          title: item.title,
+          bulk: true,
+          deleted_checkout_intents: checkoutIntentDelete.rowCount ?? 0,
+        });
+        deletedSkus.push(item.sku);
+      }
+
+      const skuPreview =
+        deletedSkus.length > 45
+          ? `${deletedSkus.slice(0, 45).join(", ")} … (+${deletedSkus.length - 45})`
+          : deletedSkus.join(", ");
+
+      return [
+        `Listo: ${parsed.items.length} productos borrados.`,
+        `• Checkout intents borrados: ${totalCheckoutDeleted}`,
+        `• SKUs: ${skuPreview}`,
       ].join("\n");
     }
     case "update_meta_campaign": {
