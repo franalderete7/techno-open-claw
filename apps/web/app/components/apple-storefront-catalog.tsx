@@ -229,19 +229,13 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
           <Image src="/brand/logo-blanco-salta.png" alt="" width={108} height={28} priority />
         </Link>
 
-        <div className="apple-storefront-nav-links">
-          <a href="#modelos" className="apple-storefront-link">
-            Modelos
-          </a>
-          <a href="#filtros" className="apple-storefront-link">
-            Filtros
-          </a>
-          {store.whatsapp_url ? (
+        {store.whatsapp_url ? (
+          <div className="apple-storefront-nav-links">
             <a className="apple-storefront-cta" href={store.whatsapp_url} target="_blank" rel="noreferrer">
               WhatsApp
             </a>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </header>
 
       <section className="apple-filters" id="filtros">
