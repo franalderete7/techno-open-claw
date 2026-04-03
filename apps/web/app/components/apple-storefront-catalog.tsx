@@ -158,14 +158,6 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
     [products]
   );
 
-  const featuredProduct = useMemo(() => {
-    return (
-      products.find((product) => product.sku.toLowerCase().includes("iphone-17-pro-max")) ||
-      [...products].sort((left, right) => (right.public_price_ars ?? 0) - (left.public_price_ars ?? 0))[0] ||
-      null
-    );
-  }, [products]);
-
   const filteredProducts = useMemo(() => {
     const next = products.filter((product) => {
       const matchesQuery =
@@ -235,19 +227,9 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
     });
   }, [colorFilter, deferredQuery, filteredProducts.length, needle, sort, storageFilter]);
 
-  const showFeatured = needle.length === 0 && page === 1 && featuredProduct;
-  const gridProducts = useMemo(() => {
-    if (!showFeatured) {
-      return filteredProducts;
-    }
-    return filteredProducts.filter((product) => product.id !== showFeatured.id);
-  }, [filteredProducts, showFeatured]);
-
-  const totalPages = Math.max(1, Math.ceil(gridProducts.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const pagedProducts = gridProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const heroHeadline = showFeatured ? splitAppleHeadline(showFeatured.model || showFeatured.title) : [];
-  const heroSpec = showFeatured ? buildAppleSpecLine(showFeatured) : "";
+  const pagedProducts = filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <div className="apple-storefront">
@@ -274,37 +256,6 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
           ) : null}
         </div>
       </header>
-
-      {showFeatured ? (
-        <section className="apple-storefront-hero">
-          <article className="apple-feature-card">
-            <Link href={buildAppleProductPath(showFeatured.sku)} className="apple-feature-link-surface apple-feature-copy">
-              <AppleTierPill />
-              <div className="apple-feature-headline">
-                {heroHeadline.map((line) => (
-                  <span key={line}>{line}</span>
-                ))}
-              </div>
-              {heroSpec ? <p className="apple-feature-spec">{heroSpec}</p> : null}
-            </Link>
-
-            <Link href={buildAppleProductPath(showFeatured.sku)} className="apple-feature-link-surface apple-feature-visual" aria-label={`Ver ${showFeatured.title}`}>
-              <ProductImage product={showFeatured} eager />
-            </Link>
-
-            <div className="apple-feature-footer">
-              <div className="apple-feature-price">
-                <span>Precio</span>
-                <strong>{formatMoney(showFeatured.public_price_ars)}</strong>
-              </div>
-              <div className="apple-feature-actions">
-                <AppleWhatsAppButton product={showFeatured} whatsappUrl={store.whatsapp_url} sourcePath="/iphone" />
-              </div>
-              <span className="apple-support-pill apple-feature-support">{APPLE_SUPPORT_COPY}</span>
-            </div>
-          </article>
-        </section>
-      ) : null}
 
       <section className="apple-filters" id="filtros">
         <label className="apple-filter-field apple-filter-search">
@@ -351,14 +302,6 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
       </section>
 
       <section className="apple-catalog-shell" id="modelos">
-        <div className="apple-catalog-heading">
-          <div>
-            <h2>Colección iPhone</h2>
-            <p>{gridProducts.length} modelos visibles con la estética Apple dedicada.</p>
-          </div>
-          <span className="apple-catalog-count">{filteredProducts.length} resultados</span>
-        </div>
-
         {pagedProducts.length === 0 ? (
           <div className="apple-empty-state">
             <h3>No encontramos equipos con esos filtros.</h3>
@@ -388,6 +331,7 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                   </Link>
 
                   <div className="apple-card-bottom">
+                    <span className="apple-support-pill apple-card-support">{APPLE_SUPPORT_COPY}</span>
                     <div className="apple-card-price">
                       <span>Precio</span>
                       <strong>{formatMoney(product.public_price_ars)}</strong>
@@ -395,7 +339,6 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                     <div className="apple-card-actions">
                       <AppleWhatsAppButton product={product} whatsappUrl={store.whatsapp_url} sourcePath="/iphone" />
                     </div>
-                    <span className="apple-support-pill apple-card-support">{APPLE_SUPPORT_COPY}</span>
                   </div>
                 </article>
               );

@@ -3290,7 +3290,7 @@ nav a:hover {
   --apple-green-text: #0f1219;
   color: var(--apple-text);
   display: grid;
-  gap: 28px;
+  gap: 18px;
   padding: 28px clamp(18px, 3vw, 36px) 42px;
   background:
     radial-gradient(circle at 58% 22%, rgba(80, 89, 112, 0.52), transparent 34%),
@@ -3300,7 +3300,6 @@ nav a:hover {
 }
 
 .apple-storefront-nav,
-.apple-storefront-hero,
 .apple-filters,
 .apple-catalog-shell,
 .apple-detail-shell {
@@ -3374,11 +3373,6 @@ nav a:hover {
   font-weight: 700;
 }
 
-.apple-storefront-hero {
-  display: block;
-}
-
-.apple-feature-card,
 .apple-filters,
 .apple-catalog-shell,
 .apple-detail-shell {
@@ -3397,21 +3391,6 @@ nav a:hover {
   font-size: 0.88rem;
 }
 
-.apple-feature-card {
-  border-radius: 32px;
-  padding: 30px;
-  display: grid;
-  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
-  gap: 18px 26px;
-  align-items: center;
-  position: relative;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 60% 30%, rgba(82, 91, 115, 0.42), transparent 35%),
-    linear-gradient(180deg, rgba(24, 29, 39, 0.98), rgba(15, 18, 25, 0.98));
-}
-
-.apple-feature-card::after,
 .apple-product-card::after,
 .apple-detail-stage::after {
   content: "";
@@ -3424,7 +3403,6 @@ nav a:hover {
   filter: blur(12px);
 }
 
-.apple-feature-copy,
 .apple-card-copy,
 .apple-detail-copy {
   position: relative;
@@ -3434,7 +3412,6 @@ nav a:hover {
   align-content: start;
 }
 
-.apple-feature-link-surface,
 .apple-card-link-surface {
   color: inherit;
   text-decoration: none;
@@ -3455,7 +3432,6 @@ nav a:hover {
   font-weight: 700;
 }
 
-.apple-feature-headline,
 .apple-card-headline,
 .apple-detail-headline {
   display: grid;
@@ -3463,10 +3439,6 @@ nav a:hover {
   font-weight: 700;
   letter-spacing: -0.055em;
   line-height: 0.94;
-}
-
-.apple-feature-headline {
-  font-size: clamp(2.4rem, 5vw, 5.3rem);
 }
 
 .apple-card-headline {
@@ -3477,7 +3449,6 @@ nav a:hover {
   font-size: clamp(2.8rem, 5vw, 5.5rem);
 }
 
-.apple-feature-spec,
 .apple-card-spec,
 .apple-detail-spec,
 .apple-detail-description,
@@ -3486,13 +3457,11 @@ nav a:hover {
   color: var(--apple-muted);
 }
 
-.apple-feature-spec,
 .apple-card-spec,
 .apple-detail-spec {
   font-size: 1.06rem;
 }
 
-.apple-feature-visual,
 .apple-card-visual,
 .apple-detail-visual {
   position: relative;
@@ -3500,7 +3469,7 @@ nav a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 420px;
+  min-height: 380px;
 }
 
 .apple-phone-image,
@@ -3536,32 +3505,28 @@ nav a:hover {
   color: var(--apple-muted);
 }
 
-.apple-feature-footer,
 .apple-card-bottom,
 .apple-detail-footer {
   position: relative;
   z-index: 1;
   display: grid;
-  gap: 14px 18px;
+  gap: 14px;
   border-top: 1px solid var(--apple-line);
   padding-top: 18px;
 }
 
-.apple-feature-price,
 .apple-card-price,
 .apple-detail-price-block {
   display: grid;
   gap: 6px;
 }
 
-.apple-feature-price span,
 .apple-card-price span,
 .apple-detail-price-block span {
   color: var(--apple-muted);
   font-size: 0.9rem;
 }
 
-.apple-feature-price strong,
 .apple-card-price strong,
 .apple-detail-price-block strong {
   font-size: clamp(2rem, 4vw, 3.9rem);
@@ -3569,7 +3534,6 @@ nav a:hover {
   letter-spacing: -0.06em;
 }
 
-.apple-feature-actions,
 .apple-card-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3591,27 +3555,6 @@ nav a:hover {
   color: var(--apple-green-text);
   font-weight: 700;
   padding: 0 22px;
-}
-
-.apple-feature-footer {
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr) auto;
-  align-items: end;
-}
-
-.apple-feature-price {
-  grid-column: 1 / 2;
-}
-
-.apple-feature-actions {
-  grid-column: 1 / 2;
-}
-
-.apple-feature-support {
-  grid-column: 3 / 4;
-  grid-row: 1 / span 2;
-  justify-self: end;
-  align-self: end;
 }
 
 .apple-filters,
@@ -3656,36 +3599,13 @@ nav a:hover {
 
 .apple-catalog-shell {
   display: grid;
-  gap: 20px;
-}
-
-.apple-catalog-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
   gap: 18px;
-}
-
-.apple-catalog-heading h2 {
-  margin: 0;
-  font-size: 1.9rem;
-  letter-spacing: -0.04em;
-}
-
-.apple-catalog-heading p {
-  margin: 6px 0 0;
-  color: var(--apple-muted);
-}
-
-.apple-catalog-count {
-  color: var(--apple-muted);
-  font-size: 0.95rem;
 }
 
 .apple-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 20px;
 }
 
 .apple-product-card {
@@ -3696,36 +3616,21 @@ nav a:hover {
   background:
     radial-gradient(circle at 58% 34%, rgba(82, 91, 115, 0.4), transparent 36%),
     linear-gradient(180deg, rgba(24, 29, 39, 0.98), rgba(15, 18, 25, 0.98));
-  padding: 24px;
+  padding: 28px;
   display: grid;
-  grid-template-rows: auto minmax(280px, 1fr) auto;
-  gap: 18px;
-  min-height: 760px;
+  grid-template-rows: auto minmax(360px, 1fr) auto;
+  gap: 22px;
+  min-height: 820px;
 }
 
 .apple-card-visual {
-  min-height: 360px;
+  min-height: 420px;
+  align-items: center;
 }
 
 .apple-card-bottom {
   margin-top: auto;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-}
-
-.apple-card-price {
-  grid-column: 1 / 2;
-}
-
-.apple-card-actions {
-  grid-column: 1 / 2;
-}
-
-.apple-card-support {
-  grid-column: 2 / 3;
-  grid-row: 1 / span 2;
-  justify-self: end;
-  align-self: end;
+  justify-items: start;
 }
 
 .apple-empty-state {
@@ -3806,7 +3711,7 @@ nav a:hover {
   display: grid;
   grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
   grid-template-rows: auto auto;
-  gap: 20px;
+  gap: 26px 28px;
   align-items: start;
 }
 
@@ -3832,8 +3737,7 @@ nav a:hover {
 
 .apple-detail-footer {
   grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr) auto;
-  align-items: end;
+  justify-items: start;
 }
 
 .apple-detail-actions {
@@ -3861,29 +3765,15 @@ nav a:hover {
 
 .apple-detail-support {
   display: grid;
-  justify-items: end;
+  justify-items: start;
 }
 
 @media (max-width: 1080px) {
-  .apple-feature-card,
   .apple-detail-stage,
-  .apple-feature-footer,
   .apple-detail-footer {
     grid-template-columns: 1fr;
   }
 
-  .apple-feature-support,
-  .apple-card-support {
-    grid-column: auto;
-    grid-row: auto;
-    justify-self: start;
-  }
-
-  .apple-card-bottom {
-    grid-template-columns: 1fr;
-  }
-
-  .apple-feature-visual,
   .apple-detail-visual {
     min-height: 320px;
   }
@@ -3898,8 +3788,7 @@ nav a:hover {
     padding: 20px 14px 32px;
   }
 
-  .apple-storefront-nav,
-  .apple-catalog-heading {
+  .apple-storefront-nav {
     align-items: start;
     flex-direction: column;
   }
@@ -3908,7 +3797,6 @@ nav a:hover {
     grid-template-columns: 1fr;
   }
 
-  .apple-feature-card,
   .apple-product-card,
   .apple-detail-stage,
   .apple-filters,
@@ -3919,7 +3807,7 @@ nav a:hover {
   }
 
   .apple-product-card {
-    min-height: 640px;
+    min-height: 700px;
   }
 
   .apple-card-headline,

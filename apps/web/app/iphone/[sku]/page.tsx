@@ -187,6 +187,10 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
               </div>
 
               <div className="apple-detail-footer">
+                <div className="apple-detail-support">
+                  <span className="apple-support-pill">{APPLE_SUPPORT_COPY}</span>
+                </div>
+
                 <div className="apple-detail-price-block">
                   <span>Precio</span>
                   <strong>{formatMoney(product.public_price_ars)}</strong>
@@ -202,10 +206,6 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
                   note={null}
                   className="apple-detail-actions"
                 />
-
-                <div className="apple-detail-support">
-                  <span className="apple-support-pill">{APPLE_SUPPORT_COPY}</span>
-                </div>
               </div>
             </section>
           </div>
