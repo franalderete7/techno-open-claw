@@ -4013,6 +4013,27 @@ nav a:hover {
     padding: 20px;
   }
 
+  .apple-card-visual {
+    width: 100%;
+    justify-self: center;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    aspect-ratio: auto;
+    max-height: none;
+    min-height: 190px;
+    padding: 6px 0 2px;
+  }
+
+  .apple-card-visual .apple-phone-image,
+  .apple-card-visual .apple-phone-fallback {
+    width: auto;
+    max-width: min(100%, 220px);
+    max-height: min(240px, 42vh);
+    margin-inline: auto;
+    object-position: center center;
+  }
+
   .apple-card-headline {
     font-size: clamp(1.2rem, 3.8vw, 1.85rem);
   }
