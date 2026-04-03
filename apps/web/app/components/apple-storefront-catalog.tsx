@@ -234,12 +234,8 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
   return (
     <div className="apple-storefront">
       <header className="apple-storefront-nav">
-        <Link href="/iphone" className="apple-storefront-brand">
-          <Image src="/brand/logo-negro-salta.png" alt="TechnoStore" width={108} height={28} priority />
-          <span className="apple-storefront-brand-copy">
-            <strong>TechnoStore Apple</strong>
-            <small>Colección iPhone</small>
-          </span>
+        <Link href="/iphone" className="apple-storefront-brand" aria-label="Inicio iPhone">
+          <Image src="/brand/logo-blanco-salta.png" alt="" width={108} height={28} priority />
         </Link>
 
         <div className="apple-storefront-nav-links">
