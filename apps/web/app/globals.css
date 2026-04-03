@@ -3469,7 +3469,7 @@ nav a:hover {
   display: block;
   font-size: clamp(1.45rem, 2.1vw, 2.35rem);
   line-height: 1.12;
-  text-align: center;
+  text-align: left;
   min-width: 0;
 }
 
