@@ -522,7 +522,7 @@ const bulkRepriceProductsSchema = z.object({
 
 const bulkSyncProductsSchema = z.object({
   raw_list: z.string().trim().min(1).optional(),
-  create_missing: z.boolean().optional(),
+  create_missing: z.boolean().optional().default(true),
   active: z.boolean().optional(),
   in_stock: z.boolean().optional(),
   condition: z.enum(productConditionValues).optional(),
@@ -2044,7 +2044,7 @@ function parseCatalogSyncPriceList(
       continue;
     }
 
-    const match = line.match(/^(.*?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)\s*usd\b/i);
+    const match = line.match(/^(.*)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)\s*usd\s*$/i);
     if (!match) {
       continue;
     }
@@ -2135,14 +2135,23 @@ function resolveCatalogSyncMatches(item: CatalogSyncDraftItem, products: Catalog
     .filter((entry) => Number.isFinite(entry.score))
     .sort((left, right) => right.score - left.score);
 
-  if (scored.length === 0 || scored[0].score < 28) {
+  if (scored.length === 0 || scored[0].score < 22) {
     return { kind: "missing" as const };
   }
 
   const topScore = scored[0].score;
-  const nearTop = scored.filter((entry) => topScore - entry.score <= 8);
+  const nearTop = scored.filter((entry) => topScore - entry.score <= 10);
   if (nearTop.length === 1) {
     return { kind: "matched" as const, products: [nearTop[0].product] };
+  }
+
+  const itemSkuNorm = normalizeMatch(item.sku);
+  const skuHit = nearTop.find(
+    (entry) =>
+      normalizeMatch(entry.product.sku) === itemSkuNorm || normalizeMatch(entry.product.slug ?? "") === itemSkuNorm
+  );
+  if (skuHit) {
+    return { kind: "matched" as const, products: [skuHit.product] };
   }
 
   const colorlessKeys = new Set(nearTop.map((entry) => buildColorlessCatalogKey(entry.product.title)));
@@ -2207,6 +2216,7 @@ type MenuIntent =
   | "products_create_help"
   | "products_update_help"
   | "products_bulk_reprice_help"
+  | "products_bulk_sync_help"
   | "products_delete_help"
   | "stock_list_help"
   | "stock_create_help"
@@ -2309,10 +2319,13 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
             { text: "Crear", callback_data: buildOperatorCallbackData("menu", "products_create_help") },
           ],
           [
-            { text: "Repricing por lista", callback_data: buildOperatorCallbackData("menu", "products_bulk_reprice_help") },
-            { text: "Editar", callback_data: buildOperatorCallbackData("menu", "products_update_help") },
+            { text: "Lista USD (sync)", callback_data: buildOperatorCallbackData("menu", "products_bulk_sync_help") },
+            { text: "Repricing SKU", callback_data: buildOperatorCallbackData("menu", "products_bulk_reprice_help") },
           ],
-          [{ text: "Archivar / borrar", callback_data: buildOperatorCallbackData("menu", "products_delete_help") }],
+          [
+            { text: "Editar", callback_data: buildOperatorCallbackData("menu", "products_update_help") },
+            { text: "Archivar / borrar", callback_data: buildOperatorCallbackData("menu", "products_delete_help") },
+          ],
           [{ text: "Inicio", callback_data: buildOperatorCallbackData("menu", "home") }],
         ],
       };
@@ -2385,7 +2398,14 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
       };
     case "products_bulk_reprice_help":
       return {
-        text: "Pegame una lista con nombre completo y costo USD nuevo, una línea por producto. Yo resuelvo SKU, recalculo y te muestro preview con botones.",
+        text:
+          "Repricing por SKU conocido: una línea por producto con referencia y costo USD. Si pegás una lista de proveedor con rubros (XIAOMI, SAMSUNG, PHONE…) y líneas “Producto - 123 USD”, usá el botón “Lista USD (sync)”: el servidor matchea, crea faltantes y recalcula ARS.",
+      };
+    case "products_bulk_sync_help":
+      return {
+        text:
+          "Pegá la lista con títulos de rubro (ej: XIAOMI/REDMI/POCO, SAMSUNG, PHONE, TABLET, MOTOROLA, PARLANTES JBL) y debajo líneas “Nombre del equipo - 123 USD” (una por fila). El bot detecta el pegado solo y prepara sync masivo (crear faltantes + actualizar costos). Si algo queda ambiguo te aviso antes de ejecutar.",
+        buttons: [[{ text: "Volver a Productos", callback_data: buildOperatorCallbackData("menu", "products") }]],
       };
     case "products_delete_help":
       return {
@@ -2669,7 +2689,7 @@ function buildDraftPrompts(params: {
     "Never invent IDs. Keep product_ref, stock_ref, customer_ref and setting keys as plain text from the user's request.",
     "User-facing reply text must sound like an ops assistant, not like schema docs. Never mention internal tool names, table names, or confirmation tokens unless the operator explicitly asks.",
     "For update commands, only include the fields the user explicitly wants to change.",
-    "If the user pastes a supplier-style list grouped by headings with lines like “Producto - 123 USD”, prefer bulk_sync_products and pass raw_list with the pasted text so the server can update existing rows, create missing products, and recalculate pricing.",
+    "If the user pastes a supplier-style list grouped by headings with lines like “Producto - 123 USD”, prefer bulk_sync_products and pass raw_list with the pasted text so the server can update existing rows, create missing products, and recalculate pricing. Default create_missing=true unless the user explicitly asks to only update existing rows (no new products).",
     "If the user pastes multiple product names each with different cost_usd values and they are all definitely existing products, bulk_reprice_products is still valid.",
     "For delete commands, only use them if the user explicitly asked to delete, remove, or permanently erase.",
     "For product archive/deactivate intent, use update_product with active=false.",
@@ -4477,7 +4497,9 @@ async function prepareWriteCommand(
       ]);
 
       if (Number(stockCount[0]?.count ?? 0) > 0) {
-        throw new Error(`No puedo borrar ${product.sku} porque todavía tiene unidades de stock. Archivá el producto primero.`);
+        throw new Error(
+          `No puedo borrar ${product.sku} porque todavía tiene unidades de stock. Mové o liquidá el stock primero, o archivá el producto con update_product (active=false) en vez de borrarlo.`
+        );
       }
 
       return {
@@ -5405,7 +5427,9 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       );
 
       if (Number(stockCount.rows[0]?.count ?? 0) > 0) {
-        throw new Error(`No puedo borrar ${parsed.sku} porque todavía tiene unidades de stock. Archivá el producto primero.`);
+        throw new Error(
+          `No puedo borrar ${parsed.sku} porque todavía tiene unidades de stock. Mové o liquidá el stock primero, o archivá el producto (active=false) en vez de borrarlo.`
+        );
       }
 
       const checkoutIntentDelete = await client.query<{ id: string }>(
@@ -6673,10 +6697,70 @@ async function tryResumePendingResolution(actor: ActorContext): Promise<Operator
   return resolveTelegramOperatorDraft(actor, resumedDraft);
 }
 
+function looksLikeCatalogSyncPaste(text: string): boolean {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) {
+    return false;
+  }
+
+  let priceLines = 0;
+  let sectionLines = 0;
+  for (const line of lines) {
+    if (canonicalizeCatalogSyncSection(line)) {
+      sectionLines += 1;
+    }
+    if (/^(.*)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)\s*usd\s*$/i.test(line)) {
+      priceLines += 1;
+    }
+  }
+
+  if (sectionLines >= 1 && priceLines >= 2) {
+    return true;
+  }
+  if (priceLines >= 5) {
+    return true;
+  }
+  return false;
+}
+
+function tryParseQuickBulkSyncDraft(text: string): Draft | null {
+  if (!looksLikeCatalogSyncPaste(text)) {
+    return null;
+  }
+
+  const trimmed = text.trim();
+  if (trimmed.length < 24) {
+    return null;
+  }
+
+  if (/^(hola|hey|buenas|help|ayuda|menu|menú|\/start)\b/i.test(trimmed) && trimmed.length < 100) {
+    return null;
+  }
+
+  return {
+    mode: "write",
+    command: "bulk_sync_products",
+    params: {
+      raw_list: trimmed,
+      create_missing: true,
+    },
+  };
+}
+
 export async function handleTelegramOperatorMessage(actor: ActorContext): Promise<OperatorMessageResult> {
   const resumedResolution = await tryResumePendingResolution(actor);
   if (resumedResolution) {
     return resumedResolution;
+  }
+
+  const quickBulkSync = tryParseQuickBulkSyncDraft(actor.userMessage);
+  if (quickBulkSync) {
+    const snapshot = await buildOperatorSnapshot();
+    const conversationMemory = await loadConversationMemory(actor.conversationId);
+    return resolveTelegramOperatorDraft(actor, quickBulkSync, snapshot, conversationMemory);
   }
 
   const start = await startTelegramOperatorTurn(actor);
