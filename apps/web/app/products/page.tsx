@@ -1,7 +1,7 @@
 import { getProducts } from "../../lib/api";
 import { getSettings } from "../../lib/api";
 import { getSiteMode } from "../../lib/site-mode";
-import { buildStorefrontProducts, buildStorefrontProfile } from "../../lib/storefront";
+import { buildStorefrontProducts, buildStorefrontProfile, excludeAppleStorefrontProducts } from "../../lib/storefront";
 import { ProductsExplorer } from "../components/products-explorer";
 import { StorefrontCatalog } from "../components/storefront-catalog";
 
@@ -32,7 +32,7 @@ export default async function ProductsPage() {
     ) : (
       <StorefrontCatalog
         store={store}
-        products={buildStorefrontProducts(items)}
+        products={excludeAppleStorefrontProducts(buildStorefrontProducts(items))}
         eyebrow="Seleccion TechnoStore"
         title="Equipos con precio final y compra simple."
         lead="Filtra por RAM, memoria o precio. Cuando elegis el modelo, seguimos la operacion por WhatsApp con el link de pago listo."

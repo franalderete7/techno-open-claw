@@ -360,7 +360,7 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
                 <SearchSparkIcon />
                 <input
                   type="search"
-                  placeholder="iPhone, Xiaomi, Samsung, 8GB, 256GB..."
+                  placeholder="Samsung, Xiaomi, Motorola, 8GB, 256GB..."
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                 />

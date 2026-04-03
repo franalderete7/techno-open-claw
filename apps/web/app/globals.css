@@ -3461,19 +3461,33 @@ nav a:hover {
 
 .apple-card-headline,
 .apple-detail-headline {
-  display: grid;
-  gap: 0;
   font-weight: 700;
   letter-spacing: -0.055em;
-  line-height: 0.94;
 }
 
 .apple-card-headline {
+  display: block;
   font-size: clamp(1.45rem, 2.1vw, 2.35rem);
+  line-height: 1.12;
+  text-align: center;
+  min-width: 0;
+}
+
+.apple-card-headline span {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .apple-detail-headline {
+  display: block;
   font-size: clamp(2.8rem, 5vw, 5.5rem);
+  line-height: 0.94;
+}
+
+.apple-detail-headline span {
+  display: block;
 }
 
 .apple-card-spec,
@@ -3922,7 +3936,10 @@ nav a:hover {
     padding: 20px;
   }
 
-  .apple-card-headline,
+  .apple-card-headline {
+    font-size: clamp(1.2rem, 3.8vw, 1.85rem);
+  }
+
   .apple-detail-headline {
     font-size: clamp(1.9rem, 11vw, 3.2rem);
   }

@@ -37,15 +37,6 @@ function buildAppleProductUrl(storefrontUrl: string | null, sku: string) {
   return `${storefrontUrl.replace(/\/$/, "")}${path}`;
 }
 
-function splitAppleHeadline(value: string) {
-  const words = value.trim().split(/\s+/).filter(Boolean);
-  if (words.length <= 2) {
-    return [value.trim()];
-  }
-
-  return [words.slice(0, 2).join(" "), words.slice(2).join(" ")];
-}
-
 function buildAppleSpecLine(product: StorefrontProduct) {
   return [product.color, product.storage_gb ? `${product.storage_gb}GB` : null].filter(Boolean).join(" · ");
 }
@@ -306,7 +297,7 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
         ) : (
           <div className="apple-card-grid">
             {pagedProducts.map((product) => {
-              const headline = splitAppleHeadline(product.model || product.title);
+              const titleLine = (product.model || product.title).trim();
               const specLine = buildAppleSpecLine(product);
               const detailHref = buildAppleProductPath(product.sku);
 
@@ -315,9 +306,7 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                   <Link href={detailHref} className="apple-card-link-surface apple-card-copy">
                     <AppleTierPill />
                     <div className="apple-card-headline">
-                      {headline.map((line) => (
-                        <span key={line}>{line}</span>
-                      ))}
+                      <span>{titleLine}</span>
                     </div>
                     {specLine ? <p className="apple-card-spec">{specLine}</p> : null}
                   </Link>

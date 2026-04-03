@@ -1,6 +1,6 @@
 import { getConversations, getCustomers, getDashboard, getProducts, getSettings } from "../lib/api";
 import { getSiteMode } from "../lib/site-mode";
-import { buildStorefrontProducts, buildStorefrontProfile } from "../lib/storefront";
+import { buildStorefrontProducts, buildStorefrontProfile, excludeAppleStorefrontProducts } from "../lib/storefront";
 import { DashboardSearch } from "./components/dashboard-search";
 import { SettingView } from "./components/setting-view";
 import { StorefrontCatalog } from "./components/storefront-catalog";
@@ -30,7 +30,7 @@ export default async function HomePage() {
     }
 
     const store = buildStorefrontProfile(settings);
-    const storefrontProducts = buildStorefrontProducts(products);
+    const storefrontProducts = excludeAppleStorefrontProducts(buildStorefrontProducts(products));
 
     return error ? (
       <div className="page-stack">

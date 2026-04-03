@@ -32,15 +32,6 @@ function buildAppleProductPath(sku: string) {
   return `/iphone/${encodeURIComponent(sku.trim().toLowerCase())}`;
 }
 
-function splitAppleHeadline(value: string) {
-  const words = value.trim().split(/\s+/).filter(Boolean);
-  if (words.length <= 2) {
-    return [value.trim()];
-  }
-
-  return [words.slice(0, 2).join(" "), words.slice(2).join(" ")];
-}
-
 function buildAppleSpecLine(product: StorefrontProduct) {
   return [product.color, product.storage_gb ? `${product.storage_gb}GB` : null].filter(Boolean).join(" · ");
 }
@@ -103,7 +94,7 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
     notFound();
   }
 
-  const headline = product ? splitAppleHeadline(product.model || product.title) : [];
+  const titleLine = product ? (product.model || product.title).trim() : "";
   const specLine = product ? buildAppleSpecLine(product) : "";
   const detailHref = product ? buildAppleProductPath(product.sku) : "/iphone";
   const specChips = product
@@ -161,9 +152,7 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
               <div className="apple-detail-copy">
                 <span className="apple-tier-pill">APPLE PREMIUM</span>
                 <div className="apple-detail-headline">
-                  {headline.map((line) => (
-                    <span key={line}>{line}</span>
-                  ))}
+                  <span>{titleLine}</span>
                 </div>
                 {specLine ? <p className="apple-detail-spec">{specLine}</p> : null}
                 {product.description ? <p className="apple-detail-description">{product.description}</p> : null}

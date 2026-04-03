@@ -109,7 +109,7 @@ export function buildStorefrontProfile(settings: SettingRecord[]): StorefrontPro
 
   return {
     name,
-    tagline: "iPhone, Samsung, Xiaomi y mas con precio final y atencion directa.",
+    tagline: "Samsung, Xiaomi, Motorola y mas con precio final y atencion directa.",
     whatsapp_number: whatsappNumber,
     whatsapp_url: whatsappNumber ? `https://wa.me/${whatsappNumber}` : null,
     storefront_url: storefrontUrl || "https://technostoresalta.com",
@@ -162,4 +162,9 @@ export function buildStorefrontProducts(items: ProductRecord[]): StorefrontProdu
       battery_health: item.battery_health,
       in_stock: item.in_stock,
     }));
+}
+
+/** Apple / iPhone lives on `/iphone` only; keep the main storefront grid to other brands. */
+export function excludeAppleStorefrontProducts(products: StorefrontProduct[]): StorefrontProduct[] {
+  return products.filter((product) => product.brand.trim().toLowerCase() !== "apple");
 }
