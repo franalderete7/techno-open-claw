@@ -77,6 +77,13 @@ main.storefront-main:has(.apple-storefront) {
     linear-gradient(180deg, #10131a 0%, #0b0d12 100%);
 }
 
+/* Overscroll / rubber-band: cream html/body otherwise shows past the viewport edges */
+html:has(.apple-storefront),
+body:has(.apple-storefront) {
+  background-color: #0b0d12;
+  background-image: linear-gradient(180deg, #10131a 0%, #0b0d12 100%);
+}
+
 .masthead {
   display: flex;
   align-items: flex-end;
@@ -3551,14 +3558,23 @@ nav a:hover {
   color: var(--apple-muted);
 }
 
-.apple-card-bottom,
-.apple-detail-footer {
+.apple-card-bottom {
   position: relative;
   z-index: 1;
   display: grid;
   gap: 14px;
   border-top: 1px solid var(--apple-line);
   padding-top: 18px;
+}
+
+.apple-detail-footer {
+  position: relative;
+  z-index: 1;
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 18px;
+  border-top: 1px solid var(--apple-line);
+  padding-top: 22px;
 }
 
 .apple-card-price,
@@ -3784,9 +3800,37 @@ nav a:hover {
   font-size: 0.88rem;
 }
 
-.apple-detail-footer {
-  grid-column: 1 / -1;
-  justify-items: start;
+@media (min-width: 1081px) {
+  .apple-detail-copy {
+    align-self: center;
+  }
+
+  .apple-detail-footer {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    column-gap: 36px;
+    row-gap: 14px;
+  }
+
+  .apple-detail-footer .apple-detail-support {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .apple-detail-footer .apple-detail-price-block {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .apple-detail-footer .apple-detail-actions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    justify-self: end;
+    width: min(300px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
 }
 
 .apple-detail-actions {
@@ -3818,9 +3862,19 @@ nav a:hover {
 }
 
 @media (max-width: 1080px) {
-  .apple-detail-stage,
+  .apple-detail-stage {
+    grid-template-columns: 1fr;
+  }
+
   .apple-detail-footer {
     grid-template-columns: 1fr;
+  }
+
+  .apple-detail-footer .apple-detail-actions {
+    width: 100%;
+    max-width: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 
   .apple-detail-visual {
