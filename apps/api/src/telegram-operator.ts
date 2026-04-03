@@ -251,6 +251,8 @@ const deleteProductSchema = z.object({
 const listProductsSchema = z.object({
   query: z.string().trim().optional(),
   brand: z.string().trim().optional(),
+  /** Substring match on products.model (e.g. "iPhone 13 Pro"). */
+  model: z.string().trim().optional(),
   active: filterBooleanSchema.optional(),
   in_stock: filterBooleanSchema.optional(),
   category: z.string().trim().optional(),
@@ -266,6 +268,29 @@ const listProductsSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   all: booleanishSchema.optional(),
 });
+
+type ListProductsParsed = z.infer<typeof listProductsSchema>;
+
+/**
+ * Apple phones store brand "Apple" in DB; models often put "iPhone 13" in `brand` which matches nothing.
+ * Move that text into `query` so title/model/sku search finds rows.
+ */
+function normalizeListProductsFilters(parsed: ListProductsParsed): ListProductsParsed {
+  let query = parsed.query?.trim() || undefined;
+  let brand = parsed.brand?.trim() || undefined;
+
+  if (brand && /\biPhone\b/i.test(brand)) {
+    const merged = [brand, query].filter(Boolean).join(" ").trim();
+    query = merged || query;
+    brand = undefined;
+  }
+
+  return {
+    ...parsed,
+    query,
+    brand,
+  };
+}
 
 const getProductDetailsSchema = z.object({
   product_ref: z.string().trim().min(1),
@@ -2732,6 +2757,7 @@ function buildDraftPrompts(params: {
     "Normalize stock status wording like available/disponible to in_stock.",
     "Normalize Meta Ads status wording like activa/activo to ACTIVE and pausada/pausado to PAUSED when preparing updates.",
     "When the user asks for lists by brand, price range, RAM, storage, sold date, acquisition date, location, stock status, or image presence, use the available filter fields instead of plain text only.",
+    "Apple iPhones are stored with brand Apple and model/title like iPhone 13 / iPhone 17 Pro Max. For 'iPhone 13' or similar, use list_products with query='iPhone 13' (and all=true if they need the full set). Never set brand to the phone line name (e.g. brand=iPhone 13); that matches zero rows.",
     "For price and numeric values, use numbers, not strings, when possible.",
     "If the message is just a greeting like hey/hola, reply briefly in reply and use mode=chat.",
     "Tone: direct ops teammate. No filler, no pep talk, no 'I'd be happy to', no long apologies. If mode=chat or mode=clarify, keep reply under 4 short sentences unless listing data.",
@@ -3598,7 +3624,9 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
     case "list_workflows":
       return listN8nWorkflows();
     case "list_products": {
-      const parsed = listProductsSchema.parse(params);
+      const rawParsed = listProductsSchema.parse(params);
+      const hadIphoneMisassignedBrand = Boolean(rawParsed.brand && /\biPhone\b/i.test(rawParsed.brand));
+      const parsed = normalizeListProductsFilters(rawParsed);
       const limit = parsed.all ? 200 : parsed.limit ?? 24;
       const values: unknown[] = [];
       const where: string[] = [];
@@ -3613,6 +3641,11 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       if (parsed.brand) {
         values.push(`%${parsed.brand}%`);
         where.push(`p.brand ilike $${values.length}`);
+      }
+
+      if (parsed.model) {
+        values.push(`%${parsed.model}%`);
+        where.push(`coalesce(p.model, '') ilike $${values.length}`);
       }
 
       if (parsed.active != null) {
@@ -3708,12 +3741,20 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return "No encontré productos con ese criterio.";
+        return [
+          "No encontré productos con ese criterio.",
+          hadIphoneMisassignedBrand
+            ? "Tip: en catálogo la marca de iPhone suele ser «Apple»; ya busqué por texto en título/modelo/SKU. Si la pediste vos distinto, probá listar con query=iPhone 13 y all=true."
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
       }
 
       const filters = [
         parsed.query ? `texto=${parsed.query}` : "",
         parsed.brand ? `marca=${parsed.brand}` : "",
+        parsed.model ? `modelo=${parsed.model}` : "",
         parsed.active != null ? `activos=${parsed.active ? "sí" : "no"}` : "",
         parsed.in_stock != null ? `in_stock=${parsed.in_stock ? "sí" : "no"}` : "",
         parsed.category ? `categoría=${parsed.category}` : "",
@@ -6627,9 +6668,15 @@ function applyReadIntentDefaults(
   }
 
   const wantsAll = /\b(all|todos?|todas?|entire|full|completo|completa)\b/i.test(actor.userMessage);
+  /** User intends to act on every match (e.g. delete all iPhone 13) — need full list, not first page. */
+  const wantsFullCatalogForBulkAction =
+    command === "list_products" &&
+    /\b(delete|remove|borrar|eliminar|borrá|borra)\b/i.test(actor.userMessage) &&
+    /\b(iphone|product|producto|phone|tel[eé]fono|equipo)\b/i.test(actor.userMessage);
+
   const nextParams = { ...rawParams };
 
-  if (wantsAll && nextParams.all == null) {
+  if ((wantsAll || wantsFullCatalogForBulkAction) && nextParams.all == null) {
     nextParams.all = true;
   }
 

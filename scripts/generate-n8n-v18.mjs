@@ -1097,6 +1097,7 @@ const normalizedUserMessage = String(base.user_message || '')
   .replace(/\\s+/g, ' ')
   .trim();
 const asksColorAvailability = /\\b(blanco|blanca|white|naranja|orange|azul|blue|negro|negra|black|gris|gray|plata|silver|rosa|pink|verde|green|violeta|purple|dorado|gold)\\b/.test(normalizedUserMessage) && /\\b(hay|tenes|tienen|disponible|stock|queda|viene)\\b/.test(normalizedUserMessage);
+const asksBuyingStep = /(pago|pagar|comprar|compra|link de pago|transferencia|cuotas|envio|retiro|como compro|como comprar|senia|seña)/.test(normalizedUserMessage);
 
 let parsed = null;
 try {
@@ -1150,6 +1151,15 @@ if (base.router_output?.route_key === 'exact_product_quote') {
     /Si quer[eé]s,\\s*te paso el link de pago[^.]*\\.?/gi,
     'Si querés, te cuento cómo avanzar con la compra.'
   );
+
+  if (!asksBuyingStep) {
+    replyText = replyText
+      .replace(/Para avanzar con la compra[^.]*\\.?/gi, '')
+      .replace(/Pod[eé]s iniciar la compra[^.]*\\.?/gi, '')
+      .replace(/Si prefer[ií]s avanzar online[^.]*\\.?/gi, '')
+      .replace(/\\s+/g, ' ')
+      .trim();
+  }
 }
 
 if (asksColorAvailability && !/^si[,\\s]/i.test(replyText) && !/^sí[,\\s]/i.test(replyText)) {
