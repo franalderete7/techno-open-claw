@@ -2378,8 +2378,29 @@ nav a:hover {
   align-items: center;
 }
 
+.growth-filter-shell {
+  gap: 14px;
+  padding: 16px;
+}
+
+.growth-filter-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .growth-toolbar-row {
   gap: 12px;
+}
+
+.growth-filter-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.growth-filter-actions {
+  align-items: center;
 }
 
 .growth-filter-submit {
@@ -2411,17 +2432,96 @@ nav a:hover {
 
 .growth-top-grid {
   align-items: start;
+  gap: 16px;
 }
 
-.growth-panel {
+.growth-kpi-grid .stat-card {
+  min-height: 132px;
+}
+
+.growth-section {
+  padding: 0;
+  overflow: hidden;
+}
+
+.growth-section-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.growth-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.growth-section-summary::after {
+  content: "+";
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.growth-section[open] > .growth-section-summary::after {
+  content: "−";
+}
+
+.growth-section-heading {
   display: grid;
-  gap: 14px;
+  gap: 4px;
+}
+
+.growth-section-meta {
+  justify-content: flex-end;
+}
+
+.growth-section-body {
+  display: grid;
+  gap: 16px;
+  padding: 0 18px 18px;
+  border-top: 0.5px solid var(--line);
+}
+
+.growth-table-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+}
+
+.growth-table-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.growth-table-link {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.growth-table-link:hover {
+  text-decoration: underline;
+}
+
+.table.is-compact th,
+.table.is-compact td {
+  padding: 11px 10px;
+}
+
+.table.is-compact td {
+  font-size: 0.9rem;
 }
 
 .growth-chart-card {
   display: grid;
   gap: 14px;
-  padding: 18px;
+  padding: 16px;
   border: 0.5px solid var(--line);
   border-radius: 18px;
   background:
@@ -2535,80 +2635,29 @@ nav a:hover {
   background: linear-gradient(90deg, rgba(62, 106, 47, 0.92), rgba(123, 177, 85, 0.82));
 }
 
-.growth-source-list {
-  display: grid;
-  gap: 12px;
-}
-
-.growth-source-row {
+.growth-people-list {
   display: grid;
   gap: 10px;
-  padding: 14px;
-  border: 0.5px solid var(--line);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.62);
 }
 
-.growth-source-head {
-  display: flex;
+.growth-person-fold {
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.growth-person-summary {
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
 }
 
-.growth-source-head > div {
+.growth-person-summary-main {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
-.growth-source-bar {
-  height: 10px;
+.growth-person-body {
+  margin-top: 12px;
 }
 
-.growth-source-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: var(--soft-text);
-  font-size: 0.82rem;
-}
-
-.growth-people-grid {
-  display: grid;
-  gap: 12px;
-}
-
-.growth-person-card {
-  display: grid;
-  gap: 12px;
-}
-
-.growth-person-header {
-  margin-bottom: 0;
-}
-
-.growth-person-title {
-  margin: 0;
-  font-family: var(--font-serif), serif;
-  font-size: 1.18rem;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-}
-
-.record-note {
-  margin: 0;
-  padding: 12px;
-  border: 0.5px solid var(--line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.62);
-  color: var(--soft-text);
-  line-height: 1.45;
-  overflow: auto;
-}
-
-.ads-note {
-  display: grid;
-  gap: 6px;
+.growth-person-chips {
   margin-top: 12px;
 }
 
@@ -2982,6 +3031,16 @@ nav a:hover {
     align-items: flex-start;
   }
 
+  .growth-filter-top,
+  .growth-section-summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .growth-section-meta {
+    justify-content: flex-start;
+  }
+
   .fold-summary {
     align-items: flex-start;
     flex-direction: column;
@@ -3083,7 +3142,7 @@ nav a:hover {
     align-items: start;
   }
 
-  .growth-people-grid {
+  .growth-table-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

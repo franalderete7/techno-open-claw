@@ -37,6 +37,9 @@ function sourceOptionLabel(value: string) {
 
 function deviceOptionLabel(value: string) {
   if (value.toLowerCase() === "unknown") return "Sin identificar";
+  if (value.toLowerCase() === "desktop web") return "Desktop";
+  if (value.toLowerCase() === "mobile web") return "Mobile web";
+  if (value.toLowerCase() === "tablet web") return "Tablet web";
   return value;
 }
 
@@ -69,57 +72,62 @@ export default async function GrowthPage({ searchParams }: GrowthPageProps) {
         <span className="eyebrow">Growth</span>
         <h2 className="hero-title">Storefront intelligence</h2>
         <p className="hero-copy">
-          First-party traffic, funnel, source and visitor analytics built from the storefront itself, not only Meta’s processed reporting.
+          First-party traffic, funnel, source and visitor analytics built from the storefront itself, with a cleaner operator view instead of a giant wall of cards.
         </p>
-        <div className="chip-row growth-range-row">
-          {DAY_OPTIONS.map((option) => (
-            <Link
-              key={option}
-              href={`/growth?days=${option}${source ? `&source=${encodeURIComponent(source)}` : ""}${device ? `&device=${encodeURIComponent(device)}` : ""}`}
-              className={`chip action-link ${option === days ? "accent" : ""}`}
-            >
-              Últimos {option}d
-            </Link>
-          ))}
-          <span className="chip mono">Generated {snapshot ? new Date(snapshot.generated_at).toLocaleString("es-AR") : "—"}</span>
-        </div>
-        {snapshot ? (
-          <form className="purchase-toolbar-row growth-toolbar-row" method="get">
-            <input type="hidden" name="days" value={String(days)} />
-            <div className="purchase-toolbar-inputs">
-              <label className="toolbar-control">
-                <span>Fuente</span>
-                <select name="source" defaultValue={snapshot.filters.applied.source ?? ""}>
-                  <option value="">Todas</option>
-                  {snapshot.filters.available.sources.map((option) => (
-                    <option key={option} value={option}>
-                      {sourceOptionLabel(option)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="toolbar-control">
-                <span>Dispositivo</span>
-                <select name="device" defaultValue={snapshot.filters.applied.device ?? ""}>
-                  <option value="">Todos</option>
-                  {snapshot.filters.available.devices.map((option) => (
-                    <option key={option} value={option}>
-                      {deviceOptionLabel(option)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+        <section className="search-toolbar growth-filter-shell">
+          <div className="growth-filter-top">
+            <div className="chip-row growth-range-row">
+              {DAY_OPTIONS.map((option) => (
+                <Link
+                  key={option}
+                  href={`/growth?days=${option}${source ? `&source=${encodeURIComponent(source)}` : ""}${device ? `&device=${encodeURIComponent(device)}` : ""}`}
+                  className={`chip action-link ${option === days ? "accent" : ""}`}
+                >
+                  Últimos {option}d
+                </Link>
+              ))}
             </div>
-            <div className="chip-row">
-              <button type="submit" className="chip action-link accent">
-                Aplicar filtros
-              </button>
-              <Link href={`/growth?days=${days}`} className="chip action-link">
-                Limpiar
-              </Link>
-            </div>
-          </form>
-        ) : null}
+            <span className="chip mono">Generado {snapshot ? new Date(snapshot.generated_at).toLocaleString("es-AR") : "—"}</span>
+          </div>
+
+          {snapshot ? (
+            <form className="purchase-toolbar-row growth-toolbar-row" method="get">
+              <input type="hidden" name="days" value={String(days)} />
+              <div className="purchase-toolbar-inputs growth-filter-grid">
+                <label className="toolbar-control">
+                  <span>Fuente</span>
+                  <select name="source" defaultValue={snapshot.filters.applied.source ?? ""}>
+                    <option value="">Todas</option>
+                    {snapshot.filters.available.sources.map((option) => (
+                      <option key={option} value={option}>
+                        {sourceOptionLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="toolbar-control">
+                  <span>Dispositivo</span>
+                  <select name="device" defaultValue={snapshot.filters.applied.device ?? ""}>
+                    <option value="">Todos</option>
+                    {snapshot.filters.available.devices.map((option) => (
+                      <option key={option} value={option}>
+                        {deviceOptionLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="chip-row growth-filter-actions">
+                <button type="submit" className="chip action-link accent growth-filter-submit">
+                  Aplicar filtros
+                </button>
+                <Link href={`/growth?days=${days}`} className="chip action-link">
+                  Limpiar
+                </Link>
+              </div>
+            </form>
+          ) : null}
+        </section>
         {error ? <p className="empty">{error}</p> : null}
       </section>
 

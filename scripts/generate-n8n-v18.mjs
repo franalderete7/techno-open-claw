@@ -133,6 +133,18 @@ function updateNodeExecutionFlags(workflow, nodeName, flags) {
   Object.assign(node, flags);
 }
 
+function updateNodeOptions(workflow, nodeName, optionChanges) {
+  const node = (workflow.nodes ?? []).find((entry) => entry?.name === nodeName);
+  if (!node || !node.parameters) {
+    return;
+  }
+
+  node.parameters.options = {
+    ...(node.parameters.options || {}),
+    ...optionChanges,
+  };
+}
+
 function upsertNode(workflow, nodeName, factory) {
   if (!Array.isArray(workflow.nodes)) {
     workflow.nodes = [];
@@ -956,6 +968,11 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
     delete workflow.connections["Google Gemini Chat Model"];
   }
 
+  updateNodeOptions(workflow, "AI Agent (Sales)", {
+    systemMessage:
+      "Sos el vendedor de WhatsApp de TechnoStore Salta. Respondé en español natural, humano, breve y profesional. Sin markdown, sin viñetas. Tratá todos los productos publicados como disponibles. Si preguntan si un color puntual está disponible, respondé que sí, ese color está disponible. No inventes precios, cuotas, links ni modelos. No aceptamos compras con DNI; si preguntan por medios de pago o cómo comprar, nunca ofrezcas DNI como opción. Usá únicamente los hechos provistos. Si el usuario pidió un modelo exacto, respondé primero sobre ese modelo y no pivotees a otro salvo que pida alternativas o comparación. Si el contexto trae used_iphone_candidates, podés ofrecerlos como alternativa más accesible sin perder el tono premium-comercial. El sitio es secundario y no se comparte por inercia. No cierres todas las respuestas con pago, envío o una pregunta; solo cuando ayuda de verdad. Devolvé SOLO JSON válido con las claves: reply_text, selected_product_keys, actions, state_delta. No agregues explicaciones fuera del JSON.",
+  });
+
   updateNodeJsCode(
     workflow,
     "Build Sales Prompt",
@@ -1030,8 +1047,9 @@ const prompt = [
   'Usá recent_thread y focused_product_key para sostener el contexto del hilo.',
   'Si el usuario hace referencia a "ese", "el anterior", "y en cuotas?", "y la entrega?" o similares, continuá sobre el último producto relevante del hilo.',
   'Formateá todos los precios en ARS con separadores argentinos, por ejemplo ARS 1.165.080.',
+  'Si el usuario pregunta si un color puntual está disponible, respondé que sí, ese color está disponible.',
   'No prometas ni ofrezcas un link de pago directo en una consulta normal de producto. Solo mencioná un link real si ya existe en el contexto del pedido web. Si no, explicá el proceso para avanzar con la compra.',
-  'Si preguntan por pago, link de pago, transferencia o cómo comprar, explicá que en technostoresalta.com avanzan en pocos clics, reciben el link de pago por WhatsApp y pagan transfiriendo al alias que figura en ese link. La entrega o el retiro se coordinan por este mismo chat.',
+  'Si preguntan por pago, link de pago, transferencia o cómo comprar, explicá que en technostoresalta.com avanzan en pocos clics, reciben el link de pago por WhatsApp y pagan transfiriendo al alias que figura en ese link. La entrega o el retiro se coordinan por este mismo chat. No aceptamos compras con DNI.',
   'Devolvé SOLO JSON válido.',
   'Esquema esperado:',
   JSON.stringify({
@@ -1071,6 +1089,14 @@ const raw = $input.first().json || {};
 
 const fallbackExactCandidate = Array.isArray(base.context?.candidate_products) ? base.context.candidate_products[0] : null;
 const rawText = String(raw.output || raw.text || '').trim();
+const normalizedUserMessage = String(base.user_message || '')
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\\u0300-\\u036f]/g, '')
+  .replace(/[^a-z0-9\\s]/g, ' ')
+  .replace(/\\s+/g, ' ')
+  .trim();
+const asksColorAvailability = /\\b(blanco|blanca|white|naranja|orange|azul|blue|negro|negra|black|gris|gray|plata|silver|rosa|pink|verde|green|violeta|purple|dorado|gold)\\b/.test(normalizedUserMessage) && /\\b(hay|tenes|tienen|disponible|stock|queda|viene)\\b/.test(normalizedUserMessage);
 
 let parsed = null;
 try {
@@ -1124,6 +1150,10 @@ if (base.router_output?.route_key === 'exact_product_quote') {
     /Si quer[eé]s,\\s*te paso el link de pago[^.]*\\.?/gi,
     'Si querés, te cuento cómo avanzar con la compra.'
   );
+}
+
+if (asksColorAvailability && !/^si[,\\s]/i.test(replyText) && !/^sí[,\\s]/i.test(replyText)) {
+  replyText = ('Sí, ese color está disponible. ' + replyText).replace(/\\s+/g, ' ').trim();
 }
 
 return [{
@@ -1181,7 +1211,7 @@ const formatArs = (value) => {
 };
 
 const paymentProcess =
-  'Si decidís avanzar, te armamos el link de pago por WhatsApp y pagás transfiriendo al alias que aparece ahí. Después coordinamos la entrega o el retiro por este mismo chat.';
+  'Si decidís avanzar, te armamos el link de pago por WhatsApp y pagás transfiriendo al alias que aparece ahí. No aceptamos compras con DNI. Después coordinamos la entrega o el retiro por este mismo chat.';
 
 const order = storefrontHandoff.order || {};
 const payment = storefrontHandoff.payment || {};

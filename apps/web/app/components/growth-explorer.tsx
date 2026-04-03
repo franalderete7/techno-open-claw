@@ -1,8 +1,15 @@
+import Link from "next/link";
+import type { ReactNode } from "react";
 import type { StorefrontAnalyticsOverviewResponse } from "../../lib/api";
 
 type GrowthExplorerProps = {
   snapshot: StorefrontAnalyticsOverviewResponse;
   days: number;
+};
+
+type GrowthSummaryBadge = {
+  label: string;
+  tone?: "accent" | "good" | "warn";
 };
 
 function asNumber(value: number | null | undefined) {
@@ -53,7 +60,7 @@ function formatDateLabel(value: string) {
 function eventLabel(value: string) {
   switch (value) {
     case "page_view":
-      return "Page view";
+      return "Visita";
     case "search":
       return "Búsqueda";
     case "view_content":
@@ -84,8 +91,7 @@ function eventTone(value: string) {
 
 function sourceLabel(value: string | null | undefined) {
   const normalized = value?.trim().toLowerCase();
-  if (!normalized) return "Directo";
-  if (normalized === "direct") return "Directo";
+  if (!normalized || normalized === "direct") return "Directo";
   if (normalized === "instagram") return "Instagram";
   if (normalized === "facebook") return "Facebook";
   if (normalized === "google") return "Google";
@@ -99,7 +105,9 @@ function sourceLabel(value: string | null | undefined) {
 function deviceLabel(value: string | null | undefined) {
   const normalized = value?.trim().toLowerCase();
   if (!normalized || normalized === "unknown") return "Sin identificar";
-  if (normalized === "desktop web") return "Desktop web";
+  if (normalized === "desktop web") return "Desktop";
+  if (normalized === "mobile web") return "Mobile web";
+  if (normalized === "tablet web") return "Tablet web";
   if (normalized === "iphone") return "iPhone";
   if (normalized === "ipad") return "iPad";
   if (normalized === "android") return "Android";
@@ -110,8 +118,7 @@ function deviceLabel(value: string | null | undefined) {
 }
 
 function browserLabel(value: string | null | undefined) {
-  if (!value) return null;
-  if (value === "Unknown") return null;
+  if (!value || value === "Unknown") return null;
   return value;
 }
 
@@ -131,7 +138,65 @@ function buildLinePath(values: number[], width: number, height: number, padding 
 
 function barWidth(value: number, max: number) {
   if (max <= 0 || value <= 0) return "0%";
-  return `${Math.max(8, (value / max) * 100)}%`;
+  return `${Math.max(6, (value / max) * 100)}%`;
+}
+
+function buildGrowthHref(
+  days: number,
+  applied: { source: string | null; device: string | null },
+  overrides: Partial<{ source: string | null; device: string | null }>
+) {
+  const params = new URLSearchParams();
+  params.set("days", String(days));
+
+  const source = overrides.source !== undefined ? overrides.source : applied.source;
+  const device = overrides.device !== undefined ? overrides.device : applied.device;
+
+  if (source) params.set("source", source);
+  if (device) params.set("device", device);
+  return `/growth?${params.toString()}`;
+}
+
+function isUnknownishDevice(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  return !normalized || normalized === "unknown";
+}
+
+function GrowthSection({
+  title,
+  copy,
+  badges,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  copy: string;
+  badges?: GrowthSummaryBadge[];
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const openProps = defaultOpen ? { open: true } : {};
+
+  return (
+    <details className="panel growth-section" {...openProps}>
+      <summary className="growth-section-summary">
+        <div className="growth-section-heading">
+          <h3 className="panel-title">{title}</h3>
+          <p className="panel-copy">{copy}</p>
+        </div>
+        {badges?.length ? (
+          <div className="chip-row growth-section-meta">
+            {badges.map((badge) => (
+              <span key={badge.label} className={`chip ${badge.tone ?? ""}`}>
+                {badge.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </summary>
+      <div className="growth-section-body">{children}</div>
+    </details>
+  );
 }
 
 function ActivityChart({
@@ -142,31 +207,35 @@ function ActivityChart({
   days: number;
 }) {
   const width = 740;
-  const height = 260;
+  const height = 240;
   const series = [
-    { key: "page_views", label: "Page views", color: "#b68f7a" },
+    { key: "page_views", label: "Visitas", color: "#b68f7a" },
     { key: "searches", label: "Búsquedas", color: "#9366cc" },
     { key: "view_contents", label: "Vistas producto", color: "#bf6f4d" },
-    { key: "contacts", label: "Contactos", color: "#8a6c2c" },
+    { key: "contacts", label: "WhatsApp", color: "#8a6c2c" },
     { key: "checkout_starts", label: "Checkout", color: "#4d698d" },
     { key: "purchases", label: "Compras", color: "#3e6a2f" },
   ] as const;
 
-  const max = Math.max(1, ...daily.flatMap((point) => series.map((item) => point[item.key])));
+  const activeSeries = series.filter((item) => daily.some((point) => point[item.key] > 0));
+  const visibleSeries = activeSeries.length > 0 ? activeSeries : series.slice(0, 1);
+  const values = daily.flatMap((point) => visibleSeries.map((item) => point[item.key]));
+  const max = Math.max(1, ...values);
   const guideValues = [0.25, 0.5, 0.75, 1].map((ratio) => Math.round(max * ratio));
-  const labels = daily.length <= 8 ? daily : daily.filter((_, index) => index === 0 || index === daily.length - 1 || index % 4 === 0);
+  const labelModulo = daily.length > 14 ? 6 : daily.length > 8 ? 4 : 2;
+  const labels = daily.filter((_, index) => index === 0 || index === daily.length - 1 || index % labelModulo === 0);
 
   return (
-    <div className="growth-chart-card">
+    <article className="growth-chart-card">
       <div className="panel-header">
         <div>
-          <h3 className="panel-title">Ritmo de actividad</h3>
-          <p className="panel-copy">Tendencia diaria de visitas, búsqueda, intención y compra en los últimos {days} días.</p>
+          <h4 className="panel-title">Ritmo de actividad</h4>
+          <p className="panel-copy">Tendencia diaria consolidada en los últimos {days} días.</p>
         </div>
       </div>
 
       <div className="growth-legend">
-        {series.map((item) => (
+        {visibleSeries.map((item) => (
           <span key={item.key} className="chip">
             <span className="growth-legend-dot" style={{ backgroundColor: item.color }} />
             {item.label}
@@ -180,7 +249,7 @@ function ActivityChart({
             <span key={value}>{formatNumber(value)}</span>
           ))}
         </div>
-        <svg viewBox={`0 0 ${width} ${height}`} className="growth-chart" role="img" aria-label="Tendencia diaria de eventos">
+        <svg viewBox={`0 0 ${width} ${height}`} className="growth-chart" role="img" aria-label="Tendencia diaria de actividad">
           {guideValues.map((value, index) => {
             const y = 18 + (height - 36) - (value / max) * (height - 36);
             return (
@@ -195,7 +264,7 @@ function ActivityChart({
               />
             );
           })}
-          {series.map((item) => (
+          {visibleSeries.map((item) => (
             <path
               key={item.key}
               d={buildLinePath(
@@ -218,7 +287,7 @@ function ActivityChart({
           <span key={point.date}>{formatDateLabel(point.date)}</span>
         ))}
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -226,11 +295,11 @@ function FunnelPanel({ funnel }: { funnel: StorefrontAnalyticsOverviewResponse["
   const max = Math.max(1, ...funnel.map((item) => item.count));
 
   return (
-    <article className="panel growth-panel">
+    <article className="growth-table-card">
       <div className="panel-header">
         <div>
-          <h3 className="panel-title">Funnel por sesión</h3>
-          <p className="panel-copy">Cada paso muestra cuántas sesiones alcanzaron ese hito dentro de la ventana elegida.</p>
+          <h4 className="panel-title">Embudo por sesión</h4>
+          <p className="panel-copy">Cuántas sesiones llegan a cada hito real del recorrido.</p>
         </div>
       </div>
 
@@ -249,7 +318,7 @@ function FunnelPanel({ funnel }: { funnel: StorefrontAnalyticsOverviewResponse["
             <div className="growth-funnel-bar">
               <div className={`growth-funnel-fill is-${step.key}`} style={{ width: barWidth(step.count, max) }} />
             </div>
-            <span className="muted">{formatPct(step.conversion_from_sessions_pct)} del total de sesiones</span>
+            <span className="muted">{formatPct(step.conversion_from_sessions_pct)} de las sesiones</span>
           </div>
         ))}
       </div>
@@ -257,150 +326,53 @@ function FunnelPanel({ funnel }: { funnel: StorefrontAnalyticsOverviewResponse["
   );
 }
 
-function SourcePanel({ sources }: { sources: StorefrontAnalyticsOverviewResponse["sources"] }) {
-  const max = Math.max(1, ...sources.map((item) => item.sessions));
-
+function GrowthTableCard({
+  title,
+  copy,
+  children,
+}: {
+  title: string;
+  copy: string;
+  children: ReactNode;
+}) {
   return (
-    <article className="panel growth-panel">
+    <article className="table-card growth-table-card">
       <div className="panel-header">
         <div>
-          <h3 className="panel-title">Fuentes</h3>
-          <p className="panel-copy">De dónde llega la sesión inicial. Las autorreferencias del sitio ya se tratan como tráfico directo.</p>
+          <h4 className="panel-title">{title}</h4>
+          <p className="panel-copy">{copy}</p>
         </div>
       </div>
-
-      <div className="growth-source-list">
-        {sources.length === 0 ? <p className="empty">Todavía no hay fuentes registradas.</p> : null}
-        {sources.map((source) => (
-          <div key={source.source} className="growth-source-row">
-            <div className="growth-source-head">
-              <div>
-                <strong>{sourceLabel(source.source)}</strong>
-                <div className="chip-row">
-                  <span className="chip accent">{formatNumber(source.sessions)} sesiones</span>
-                  <span className="chip">{formatNumber(source.visitors)} visitantes</span>
-                  <span className="chip">{formatPct(source.contacts > 0 ? (source.contacts / Math.max(source.sessions, 1)) * 100 : 0)} contacto</span>
-                  {source.top_campaign ? <span className="chip warn">{source.top_campaign}</span> : null}
-                </div>
-              </div>
-              <strong>{formatMoney(source.revenue_ars)}</strong>
-            </div>
-            <div className="growth-source-bar">
-              <div className="growth-source-fill" style={{ width: barWidth(source.sessions, max) }} />
-            </div>
-            <div className="growth-source-meta">
-              <span>{formatNumber(source.searches)} búsquedas</span>
-              <span>{formatNumber(source.view_contents)} vistas producto</span>
-              <span>{formatNumber(source.contacts)} contactos</span>
-              <span>{formatNumber(source.checkout_starts)} checkouts</span>
-              <span>{formatNumber(source.purchases)} compras</span>
-              {source.landing_page ? <span className="mono">{source.landing_page}</span> : null}
-            </div>
-          </div>
-        ))}
-      </div>
+      <div className="table-wrap">{children}</div>
     </article>
   );
 }
 
-function DevicePanel({ devices }: { devices: StorefrontAnalyticsOverviewResponse["devices"] }) {
-  const max = Math.max(1, ...devices.map((item) => item.sessions));
+function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
+  const productUrls = snapshot.products
+    .filter((product) => product.url_path)
+    .sort((a, b) => b.view_contents - a.view_contents || b.contacts - a.contacts || b.checkout_starts - a.checkout_starts)
+    .slice(0, 12);
 
-  return (
-    <article className="panel growth-panel">
-      <div className="panel-header">
-        <div>
-          <h3 className="panel-title">Dispositivos</h3>
-          <p className="panel-copy">Familias de equipo detectadas desde navegador, sistema operativo y user agent.</p>
-        </div>
-      </div>
+  const meaningfulEntryPages = snapshot.landing_pages.filter((landing) => landing.path !== "/" && landing.path !== "(unknown)");
+  const entryPages = meaningfulEntryPages.length > 0 ? meaningfulEntryPages : snapshot.landing_pages;
 
-      <div className="growth-source-list">
-        {devices.length === 0 ? <p className="empty">Todavía no hay datos de dispositivos.</p> : null}
-        {devices.map((device) => (
-          <div key={`${device.device_family}-${device.browser_name ?? "browser"}`} className="growth-source-row">
-            <div className="growth-source-head">
-              <div>
-                <strong>{deviceLabel(device.device_family)}</strong>
-                <div className="chip-row">
-                  <span className="chip accent">{formatNumber(device.sessions)} sesiones</span>
-                  <span className="chip">{device.device_type === "unknown" ? "tipo sin identificar" : device.device_type}</span>
-                  {device.os_name ? <span className="chip">{device.os_name}</span> : null}
-                  {browserLabel(device.browser_name) ? <span className="chip">{browserLabel(device.browser_name)}</span> : null}
-                </div>
-              </div>
-              <strong>{formatMoney(device.revenue_ars)}</strong>
-            </div>
-            <div className="growth-source-bar">
-              <div className="growth-source-fill" style={{ width: barWidth(device.sessions, max) }} />
-            </div>
-            <div className="growth-source-meta">
-              <span>{formatNumber(device.searches)} búsquedas</span>
-              <span>{formatNumber(device.view_contents)} vistas producto</span>
-              <span>{formatNumber(device.contacts)} contactos</span>
-              <span>{formatNumber(device.checkout_starts)} checkouts</span>
-              <span>{formatNumber(device.purchases)} compras</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </article>
-  );
-}
+  const knownDeviceSessions = snapshot.devices
+    .filter((device) => !isUnknownishDevice(device.device_family))
+    .reduce((sum, device) => sum + device.sessions, 0);
+  const deviceSessions = snapshot.devices.reduce((sum, device) => sum + device.sessions, 0);
+  const deviceCoveragePct = deviceSessions > 0 ? (knownDeviceSessions / deviceSessions) * 100 : null;
 
-function SearchPanel({ searches }: { searches: StorefrontAnalyticsOverviewResponse["searches"] }) {
-  const max = Math.max(1, ...searches.map((item) => item.searches));
-
-  return (
-    <article className="panel growth-panel">
-      <div className="panel-header">
-        <div>
-          <h3 className="panel-title">Lo que buscan</h3>
-          <p className="panel-copy">Consultas consolidadas desde la caja de búsqueda. Las refinaciones rápidas se agrupan para no ensuciar la lectura.</p>
-        </div>
-      </div>
-
-      <div className="growth-source-list">
-        {searches.length === 0 ? <p className="empty">Todavía no hay búsquedas registradas.</p> : null}
-        {searches.map((search) => (
-          <div key={search.query} className="growth-source-row">
-            <div className="growth-source-head">
-              <div>
-                <strong className="mono">{search.query}</strong>
-                <div className="chip-row">
-                  <span className="chip accent">{formatNumber(search.searches)} búsquedas</span>
-                  <span className="chip">{formatNumber(search.sessions)} sesiones</span>
-                  <span className="chip">{formatNumber(search.visitors)} visitantes</span>
-                </div>
-              </div>
-              <strong>{search.avg_results_count != null ? `${search.avg_results_count} resultados` : "—"}</strong>
-            </div>
-            <div className="growth-source-bar">
-              <div className="growth-source-fill" style={{ width: barWidth(search.searches, max) }} />
-            </div>
-            <div className="growth-source-meta">
-              {search.top_source ? <span>{sourceLabel(search.top_source)}</span> : null}
-              {search.top_device ? <span>{deviceLabel(search.top_device)}</span> : null}
-            </div>
-          </div>
-        ))}
-      </div>
-    </article>
-  );
-}
-
-export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
   return (
     <div className="page-stack">
       {snapshot.warnings.length > 0 ? (
         <section className="panel growth-warning-panel">
           <div className="panel-header">
             <div>
-              <h3 className="panel-title">Notas del sistema</h3>
-              <p className="panel-copy">Señales rápidas para que marketing y producto sepan qué mirar primero.</p>
+              <h3 className="panel-title">Alertas rápidas</h3>
+              <p className="panel-copy">Señales que conviene revisar antes de sacar conclusiones de marketing.</p>
             </div>
           </div>
-
           <div className="growth-warning-list">
             {snapshot.warnings.map((warning) => (
               <p key={warning} className="growth-warning-item">
@@ -411,7 +383,7 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
         </section>
       ) : null}
 
-      <section className="stats-grid">
+      <section className="stats-grid growth-kpi-grid">
         <article className="stat-card">
           <span className="stat-label">Visitantes</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.visitors)}</strong>
@@ -428,155 +400,335 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
           <span className="stat-note">{formatDuration(snapshot.totals.avg_session_duration_seconds)} promedio por sesión</span>
         </article>
         <article className="stat-card">
-          <span className="stat-label">Contactos WhatsApp</span>
+          <span className="stat-label">WhatsApp</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.contacts)}</strong>
           <span className="stat-note">{formatPct(snapshot.totals.contact_rate_pct)} de sesiones</span>
         </article>
         <article className="stat-card">
-          <span className="stat-label">Inicios de checkout</span>
+          <span className="stat-label">Checkout</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.checkout_starts)}</strong>
           <span className="stat-note">{formatPct(snapshot.totals.checkout_rate_pct)} de sesiones</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Compras</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.purchases)}</strong>
-          <span className="stat-note">{formatPct(snapshot.totals.purchase_rate_pct)} de sesiones</span>
-        </article>
-        <article className="stat-card">
-          <span className="stat-label">Revenue</span>
-          <strong className="stat-value">{formatMoney(snapshot.totals.revenue_ars)}</strong>
-          <span className="stat-note">{formatNumber(snapshot.totals.events)} eventos totales</span>
+          <span className="stat-note">{formatMoney(snapshot.totals.revenue_ars)} revenue</span>
         </article>
       </section>
 
-      <section className="split-grid growth-top-grid">
-        <ActivityChart daily={snapshot.daily} days={days} />
-        <FunnelPanel funnel={snapshot.funnel} />
-      </section>
+      <GrowthSection
+        title="Overview"
+        copy="La parte que más se consulta debería quedar arriba: volumen, tendencia y embudo."
+        badges={[
+          { label: `${formatNumber(snapshot.totals.events)} eventos`, tone: "accent" },
+          { label: `${days} días` },
+          snapshot.filters.applied.source ? { label: `Fuente: ${sourceLabel(snapshot.filters.applied.source)}` } : null,
+          snapshot.filters.applied.device ? { label: `Dispositivo: ${deviceLabel(snapshot.filters.applied.device)}` } : null,
+        ].filter((badge): badge is GrowthSummaryBadge => badge != null)}
+      >
+        <section className="split-grid growth-top-grid">
+          <ActivityChart daily={snapshot.daily} days={days} />
+          <FunnelPanel funnel={snapshot.funnel} />
+        </section>
+      </GrowthSection>
 
-      <section className="split-grid growth-top-grid">
-        <SourcePanel sources={snapshot.sources} />
-
-        <article className="panel growth-panel">
-          <div className="panel-header">
-            <div>
-              <h3 className="panel-title">URLs de entrada</h3>
-              <p className="panel-copy">Ordenadas por vistas de producto dentro de la ventana elegida, no por revenue ni por sesiones.</p>
-            </div>
-          </div>
-
-          <div className="growth-source-list">
-            {snapshot.landing_pages.length === 0 ? <p className="empty">Todavía no hay landings atribuidas.</p> : null}
-            {snapshot.landing_pages.map((landing, index) => (
-              <div key={landing.path} className="growth-source-row">
-                <div className="growth-source-head">
-                  <div>
-                    <strong className="mono">{landing.path}</strong>
-                    <div className="chip-row">
-                      <span className="chip accent">#{index + 1}</span>
-                      <span className="chip">{formatNumber(landing.view_contents)} vistas producto</span>
-                      <span className="chip">{formatNumber(landing.sessions)} sesiones</span>
-                      <span className="chip">{formatNumber(landing.visitors)} visitantes</span>
-                    </div>
-                  </div>
-                  <strong>{formatMoney(landing.revenue_ars)}</strong>
-                </div>
-                <div className="growth-source-bar">
-                  <div
-                    className="growth-source-fill"
-                    style={{ width: barWidth(landing.view_contents || landing.page_views || landing.sessions, Math.max(1, ...snapshot.landing_pages.map((item) => item.view_contents || item.page_views || item.sessions))) }}
-                  />
-                </div>
-                <div className="growth-source-meta">
-                  <span>{formatNumber(landing.page_views)} page views</span>
-                  <span>{formatNumber(landing.contacts)} contactos</span>
-                  <span>{formatNumber(landing.checkout_starts)} checkouts</span>
-                  <span>{formatNumber(landing.purchases)} compras</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className="split-grid growth-top-grid">
-        <DevicePanel devices={snapshot.devices} />
-        <SearchPanel searches={snapshot.searches} />
-      </section>
-
-      <section className="table-card">
-        <div className="panel-header">
-          <div>
-            <h3 className="panel-title">Productos más vistos</h3>
-            <p className="panel-copy">Ordenados por vistas de producto por defecto, con contacto y checkout al lado para ver intención real.</p>
-          </div>
-        </div>
-
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th>Vistas</th>
-                <th>Contactos</th>
-                <th>Checkouts</th>
-                <th>Compras</th>
-                <th>Revenue</th>
-                <th>Última señal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.products.length === 0 ? (
+      <GrowthSection
+        title="Adquisición y demanda"
+        copy="Fuentes, equipos y términos de búsqueda en tablas compactas, para leer la ventana rápido."
+        badges={[
+          { label: `${snapshot.sources.length} fuentes` },
+          { label: `${snapshot.devices.length} dispositivos` },
+          deviceCoveragePct != null ? { label: `${formatPct(deviceCoveragePct)} detección útil`, tone: deviceCoveragePct >= 70 ? "good" : "warn" } : null,
+        ].filter((badge): badge is GrowthSummaryBadge => badge != null)}
+      >
+        <div className="growth-table-grid">
+          <GrowthTableCard
+            title="Fuentes"
+            copy="Ordenadas por sesiones, con links rápidos para filtrar la vista."
+          >
+            <table className="table is-compact">
+              <thead>
                 <tr>
-                  <td colSpan={7} className="empty">Todavía no hay eventos a nivel producto.</td>
+                  <th>Fuente</th>
+                  <th>Sesiones</th>
+                  <th>Visitantes</th>
+                  <th>Vistas</th>
+                  <th>Contactos</th>
+                  <th>Revenue</th>
                 </tr>
-              ) : null}
-              {snapshot.products.map((product) => (
-                <tr key={product.product_id ?? product.sku ?? product.title}>
-                  <td>
-                    <div className="value-stack">
-                      <strong>{product.title}</strong>
-                      <span className="chip-row">
-                        {product.sku ? <span className="chip accent mono">{product.sku}</span> : null}
-                        {product.url_path ? <span className="chip mono">{product.url_path}</span> : null}
-                        {product.brand ? <span className="chip">{product.brand}</span> : null}
-                      </span>
-                    </div>
-                  </td>
-                  <td>{formatNumber(product.view_contents)}</td>
-                  <td>{formatNumber(product.contacts)}</td>
-                  <td>{formatNumber(product.checkout_starts)}</td>
-                  <td>{formatNumber(product.purchases)}</td>
-                  <td>{formatMoney(product.revenue_ars)}</td>
-                  <td>{formatDateTime(product.last_seen)}</td>
+              </thead>
+              <tbody>
+                {snapshot.sources.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="empty">Todavía no hay fuentes registradas.</td>
+                  </tr>
+                ) : null}
+                {snapshot.sources.map((source) => (
+                  <tr key={source.source}>
+                    <td>
+                      <div className="value-stack">
+                        <Link
+                          href={buildGrowthHref(days, snapshot.filters.applied, { source: source.source })}
+                          className="growth-table-link"
+                        >
+                          {sourceLabel(source.source)}
+                        </Link>
+                        <span className="muted">
+                          {source.top_campaign ? source.top_campaign : source.landing_page ?? "Sin campaña"}
+                        </span>
+                      </div>
+                    </td>
+                    <td>{formatNumber(source.sessions)}</td>
+                    <td>{formatNumber(source.visitors)}</td>
+                    <td>{formatNumber(source.view_contents)}</td>
+                    <td>{formatNumber(source.contacts)}</td>
+                    <td>{formatMoney(source.revenue_ars)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </GrowthTableCard>
+
+          <GrowthTableCard
+            title="Dispositivos"
+            copy="Cuando no se puede identificar bien, la fila queda al final como Sin identificar."
+          >
+            <table className="table is-compact">
+              <thead>
+                <tr>
+                  <th>Equipo</th>
+                  <th>Sesiones</th>
+                  <th>Búsquedas</th>
+                  <th>Vistas</th>
+                  <th>Contactos</th>
+                  <th>Checkout</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {snapshot.devices.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="empty">Todavía no hay datos de dispositivos.</td>
+                  </tr>
+                ) : null}
+                {snapshot.devices.map((device) => (
+                  <tr key={`${device.device_family}-${device.browser_name ?? "browser"}`}>
+                    <td>
+                      <div className="value-stack">
+                        <Link
+                          href={buildGrowthHref(days, snapshot.filters.applied, { device: device.device_family })}
+                          className="growth-table-link"
+                        >
+                          {deviceLabel(device.device_family)}
+                        </Link>
+                        <span className="muted">
+                          {[device.device_type === "unknown" ? null : device.device_type, device.os_name, browserLabel(device.browser_name)]
+                            .filter(Boolean)
+                            .join(" · ") || "Sin detalle técnico"}
+                        </span>
+                      </div>
+                    </td>
+                    <td>{formatNumber(device.sessions)}</td>
+                    <td>{formatNumber(device.searches)}</td>
+                    <td>{formatNumber(device.view_contents)}</td>
+                    <td>{formatNumber(device.contacts)}</td>
+                    <td>{formatNumber(device.checkout_starts)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </GrowthTableCard>
         </div>
-      </section>
 
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h3 className="panel-title">Personas y recorridos</h3>
-            <p className="panel-copy">Visitantes agregados por identidad técnica, luego enriquecidos cuando aparece un cliente real.</p>
-          </div>
+        <div className="growth-table-grid">
+          <GrowthTableCard
+            title="Lo que buscan"
+            copy="Consultas reales ya limpiadas para que no manden el panel al ruido."
+          >
+            <table className="table is-compact">
+              <thead>
+                <tr>
+                  <th>Búsqueda</th>
+                  <th>Veces</th>
+                  <th>Sesiones</th>
+                  <th>Resultados</th>
+                  <th>Fuente</th>
+                  <th>Equipo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshot.searches.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="empty">Todavía no hay búsquedas útiles registradas.</td>
+                  </tr>
+                ) : null}
+                {snapshot.searches.map((search) => (
+                  <tr key={search.query}>
+                    <td className="mono">{search.query}</td>
+                    <td>{formatNumber(search.searches)}</td>
+                    <td>{formatNumber(search.sessions)}</td>
+                    <td>{search.avg_results_count != null ? formatNumber(search.avg_results_count) : "—"}</td>
+                    <td>{sourceLabel(search.top_source)}</td>
+                    <td>{deviceLabel(search.top_device)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </GrowthTableCard>
+
+          <GrowthTableCard
+            title="URLs de entrada"
+            copy="Landings reales que abren la relación. El root se corre del foco para no ensuciar la lectura."
+          >
+            <table className="table is-compact">
+              <thead>
+                <tr>
+                  <th>URL</th>
+                  <th>Vistas</th>
+                  <th>Sesiones</th>
+                  <th>Contactos</th>
+                  <th>Checkout</th>
+                  <th>Compras</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entryPages.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="empty">Todavía no hay landings con señal útil.</td>
+                  </tr>
+                ) : null}
+                {entryPages.map((landing) => (
+                  <tr key={landing.path}>
+                    <td className="mono">{landing.path}</td>
+                    <td>{formatNumber(landing.view_contents)}</td>
+                    <td>{formatNumber(landing.sessions)}</td>
+                    <td>{formatNumber(landing.contacts)}</td>
+                    <td>{formatNumber(landing.checkout_starts)}</td>
+                    <td>{formatNumber(landing.purchases)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </GrowthTableCard>
         </div>
+      </GrowthSection>
 
-        <div className="growth-people-grid">
+      <GrowthSection
+        title="Productos y URLs"
+        copy="Las URLs de producto están ordenadas por vistas por defecto, y la tabla de productos conserva contacto, checkout y revenue al lado."
+        badges={[
+          { label: `${snapshot.products.length} productos` },
+          { label: `${productUrls.length} URLs visibles`, tone: "accent" },
+        ]}
+      >
+        <div className="growth-table-grid">
+          <GrowthTableCard
+            title="URLs de producto"
+            copy="Ordenadas por vistas de producto para ver rápido qué PDP mueve más intención."
+          >
+            <table className="table is-compact">
+              <thead>
+                <tr>
+                  <th>URL</th>
+                  <th>Vistas</th>
+                  <th>Contactos</th>
+                  <th>Checkout</th>
+                  <th>Compras</th>
+                  <th>Última señal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productUrls.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="empty">Todavía no hay URLs de producto con actividad.</td>
+                  </tr>
+                ) : null}
+                {productUrls.map((product) => (
+                  <tr key={product.sku ?? product.url_path ?? product.title}>
+                    <td>
+                      <div className="value-stack">
+                        <strong className="mono">{product.url_path}</strong>
+                        <span className="muted">{product.title}</span>
+                      </div>
+                    </td>
+                    <td>{formatNumber(product.view_contents)}</td>
+                    <td>{formatNumber(product.contacts)}</td>
+                    <td>{formatNumber(product.checkout_starts)}</td>
+                    <td>{formatNumber(product.purchases)}</td>
+                    <td>{formatDateTime(product.last_seen)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </GrowthTableCard>
+
+          <GrowthTableCard
+            title="Top productos"
+            copy="Misma lógica: primero vistas, después señales más profundas."
+          >
+            <table className="table is-compact">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th>Vistas</th>
+                  <th>Contactos</th>
+                  <th>Checkout</th>
+                  <th>Compras</th>
+                  <th>Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshot.products.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="empty">Todavía no hay eventos a nivel producto.</td>
+                  </tr>
+                ) : null}
+                {snapshot.products.map((product) => (
+                  <tr key={product.product_id ?? product.sku ?? product.title}>
+                    <td>
+                      <div className="value-stack">
+                        <strong>{product.title}</strong>
+                        <span className="muted">
+                          {[product.sku, product.brand, product.url_path].filter(Boolean).join(" · ") || "Sin detalle"}
+                        </span>
+                      </div>
+                    </td>
+                    <td>{formatNumber(product.view_contents)}</td>
+                    <td>{formatNumber(product.contacts)}</td>
+                    <td>{formatNumber(product.checkout_starts)}</td>
+                    <td>{formatNumber(product.purchases)}</td>
+                    <td>{formatMoney(product.revenue_ars)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </GrowthTableCard>
+        </div>
+      </GrowthSection>
+
+      <GrowthSection
+        title="Personas y recorridos"
+        copy="Queda plegado por defecto para que no invada la lectura. Abrís sólo a quien necesitás mirar."
+        defaultOpen={false}
+        badges={[
+          { label: `${snapshot.people.length} recorridos` },
+          { label: `${formatDuration(snapshot.totals.avg_session_duration_seconds)} promedio`, tone: "accent" },
+        ]}
+      >
+        <div className="growth-people-list">
           {snapshot.people.length === 0 ? <p className="empty">Todavía no hay recorridos de visitantes.</p> : null}
           {snapshot.people.map((person) => (
-            <article key={person.visitor_id} className="record-card growth-person-card">
-              <div className="panel-header growth-person-header">
-                <div>
-                  <h4 className="growth-person-title">{person.label}</h4>
-                  <p className="panel-copy mono">{person.visitor_id}</p>
+            <details key={person.visitor_id} className="field-details growth-person-fold">
+              <summary className="fold-summary growth-person-summary">
+                <div className="growth-person-summary-main">
+                  <strong>{person.label}</strong>
+                  <span className="muted">
+                    {sourceLabel(person.source)} · {formatNumber(person.sessions)} sesiones · {formatDateTime(person.last_seen)}
+                  </span>
                 </div>
-                <span className="chip accent">{sourceLabel(person.source)}</span>
-              </div>
+                <span className="fold-meta">{person.last_product ?? person.landing_page ?? "Sin producto"}</span>
+              </summary>
 
-              <div className="record-meta-grid">
+              <div className="record-meta-grid growth-person-body">
                 <div>
                   <dt>Primera vez</dt>
                   <dd>{formatDateTime(person.first_seen)}</dd>
@@ -586,7 +738,7 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
                   <dd>{formatDateTime(person.last_seen)}</dd>
                 </div>
                 <div>
-                  <dt>Entrada</dt>
+                  <dt>Landing</dt>
                   <dd className="mono">{person.landing_page ?? "—"}</dd>
                 </div>
                 <div>
@@ -597,18 +749,10 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
                   <dt>Dispositivo</dt>
                   <dd>{deviceLabel(person.device_family)}</dd>
                 </div>
-              </div>
-
-              <div className="chip-row">
-                <span className="chip">{person.sessions} sesiones</span>
-                <span className="chip">{person.page_views} page views</span>
-                <span className="chip">{person.view_contents} vistas</span>
-                <span className="chip warn">{person.contacts} contactos</span>
-                <span className="chip accent">{person.checkout_starts} checkouts</span>
-                <span className="chip good">{person.purchases} compras</span>
-              </div>
-
-              <div className="record-meta-grid">
+                <div>
+                  <dt>Navegador</dt>
+                  <dd>{browserLabel(person.browser_name) ?? person.os_name ?? "—"}</dd>
+                </div>
                 <div>
                   <dt>Cliente</dt>
                   <dd>{person.identified_customer ?? "Anónimo"}</dd>
@@ -629,76 +773,85 @@ export function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
                   <dt>Promedio sesión</dt>
                   <dd>{formatDuration(person.avg_session_duration_seconds)}</dd>
                 </div>
-                <div>
-                  <dt>Navegador</dt>
-                  <dd>{browserLabel(person.browser_name) ?? person.os_name ?? "—"}</dd>
-                </div>
               </div>
-            </article>
+
+              <div className="chip-row growth-person-chips">
+                <span className="chip">{formatNumber(person.page_views)} visitas</span>
+                <span className="chip">{formatNumber(person.view_contents)} vistas producto</span>
+                <span className="chip warn">{formatNumber(person.contacts)} contactos</span>
+                <span className="chip accent">{formatNumber(person.checkout_starts)} checkouts</span>
+                <span className="chip good">{formatNumber(person.purchases)} compras</span>
+              </div>
+            </details>
           ))}
         </div>
-      </section>
+      </GrowthSection>
 
-      <section className="table-card">
-        <div className="panel-header">
-          <div>
-            <h3 className="panel-title">Feed reciente de eventos</h3>
-            <p className="panel-copy">Las últimas acciones registradas en storefront, ordenadas de más nueva a más vieja.</p>
-          </div>
-        </div>
-
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Evento</th>
-                <th>Fuente</th>
-                <th>Página</th>
-                <th>Producto o búsqueda</th>
-                <th>Persona</th>
-                <th>Orden</th>
-                <th>Valor</th>
-                <th>Cuándo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.recent_events.length === 0 ? (
+      <GrowthSection
+        title="Feed reciente de eventos"
+        copy="También queda plegado: sirve para inspección fina, no para la vista de gestión."
+        defaultOpen={false}
+        badges={[
+          { label: `${snapshot.recent_events.length} eventos recientes` },
+          { label: "Más nuevo primero", tone: "accent" },
+        ]}
+      >
+        <section className="table-card growth-table-card">
+          <div className="table-wrap">
+            <table className="table is-compact">
+              <thead>
                 <tr>
-                  <td colSpan={8} className="empty">Todavía no hay eventos capturados.</td>
+                  <th>Evento</th>
+                  <th>Fuente</th>
+                  <th>Página</th>
+                  <th>Producto o búsqueda</th>
+                  <th>Persona</th>
+                  <th>Orden</th>
+                  <th>Valor</th>
+                  <th>Cuándo</th>
                 </tr>
-              ) : null}
-              {snapshot.recent_events.map((event) => (
-                <tr key={event.id}>
-                  <td>
-                    <span className={`chip ${eventTone(event.event_name)}`}>{eventLabel(event.event_name)}</span>
-                    <div className="muted">{event.received_from}</div>
-                  </td>
-                  <td>
-                    <div className="value-stack">
-                      <strong>{sourceLabel(event.source)}</strong>
-                      {event.campaign ? <span className="muted">{event.campaign}</span> : null}
-                    </div>
-                  </td>
-                  <td className="mono">{event.page_path ?? "—"}</td>
-                  <td>{event.search_query ? `search: ${event.search_query}` : event.product ?? "—"}</td>
-                  <td>
-                    <div className="value-stack">
-                      <strong>{event.person ?? "Anónimo"}</strong>
-                      <span className="muted mono">
-                        {event.visitor ?? "—"}
-                        {event.device_family ? ` · ${deviceLabel(event.device_family)}` : ""}
-                      </span>
-                    </div>
-                  </td>
-                  <td>{event.order_number ?? "—"}</td>
-                  <td>{event.value_amount != null ? formatMoney(event.value_amount, event.currency_code || "ARS") : "—"}</td>
-                  <td>{formatDateTime(event.at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {snapshot.recent_events.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="empty">Todavía no hay eventos capturados.</td>
+                  </tr>
+                ) : null}
+                {snapshot.recent_events.map((event) => (
+                  <tr key={event.id}>
+                    <td>
+                      <span className={`chip ${eventTone(event.event_name)}`}>{eventLabel(event.event_name)}</span>
+                      <div className="muted">{event.received_from}</div>
+                    </td>
+                    <td>
+                      <div className="value-stack">
+                        <strong>{sourceLabel(event.source)}</strong>
+                        {event.campaign ? <span className="muted">{event.campaign}</span> : null}
+                      </div>
+                    </td>
+                    <td className="mono">{event.page_path ?? "—"}</td>
+                    <td>{event.search_query ? `search: ${event.search_query}` : event.product ?? "—"}</td>
+                    <td>
+                      <div className="value-stack">
+                        <strong>{event.person ?? "Anónimo"}</strong>
+                        <span className="muted mono">
+                          {event.visitor ?? "—"}
+                          {event.device_family ? ` · ${deviceLabel(event.device_family)}` : ""}
+                        </span>
+                      </div>
+                    </td>
+                    <td>{event.order_number ?? "—"}</td>
+                    <td>{event.value_amount != null ? formatMoney(event.value_amount, event.currency_code || "ARS") : "—"}</td>
+                    <td>{formatDateTime(event.at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </GrowthSection>
     </div>
   );
 }
+
+export { GrowthExplorer };

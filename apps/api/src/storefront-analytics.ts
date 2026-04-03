@@ -397,7 +397,25 @@ function canonicalOsName(value: string | null | undefined, userAgent: string | n
   return null;
 }
 
-function canonicalDeviceType(value: string | null | undefined, userAgent: string | null | undefined, osName: string | null | undefined) {
+function inferDeviceTypeFromDimensions(viewportWidth: number | null | undefined, screenWidth: number | null | undefined) {
+  const candidates = [viewportWidth, screenWidth].filter((value): value is number => value != null && Number.isFinite(value) && value > 0);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const width = Math.max(...candidates);
+  if (width <= 820) return "mobile";
+  if (width <= 1180) return "tablet";
+  return "desktop";
+}
+
+function canonicalDeviceType(
+  value: string | null | undefined,
+  userAgent: string | null | undefined,
+  osName: string | null | undefined,
+  viewportWidth?: number | null,
+  screenWidth?: number | null
+) {
   const normalized = normalizeFilterKey(value);
   if (normalized === "mobile" || normalized === "tablet" || normalized === "desktop") {
     return normalized;
@@ -410,6 +428,8 @@ function canonicalDeviceType(value: string | null | undefined, userAgent: string
   const os = normalizeFilterKey(osName);
   if (os === "ios" || os === "android") return "mobile";
   if (os === "macos" || os === "windows" || os === "linux") return "desktop";
+  const inferredFromDimensions = inferDeviceTypeFromDimensions(viewportWidth, screenWidth);
+  if (inferredFromDimensions) return inferredFromDimensions;
   return "unknown";
 }
 
@@ -418,11 +438,15 @@ function canonicalDeviceFamily({
   deviceType,
   osName,
   userAgent,
+  viewportWidth,
+  screenWidth,
 }: {
   deviceFamily: string | null | undefined;
   deviceType: string | null | undefined;
   osName: string | null | undefined;
   userAgent: string | null | undefined;
+  viewportWidth?: number | null | undefined;
+  screenWidth?: number | null | undefined;
 }) {
   const normalized = normalizeFilterKey(deviceFamily);
   if (normalized === "iphone") return "iPhone";
@@ -447,7 +471,11 @@ function canonicalDeviceFamily({
   if (os === "Windows") return "Windows";
   if (os === "Linux") return "Linux";
 
-  return canonicalDeviceType(deviceType, userAgent, osName) === "desktop" ? "Desktop web" : "Unknown";
+  const fallbackType = canonicalDeviceType(deviceType, userAgent, osName, viewportWidth, screenWidth);
+  if (fallbackType === "desktop") return "Desktop web";
+  if (fallbackType === "mobile") return "Mobile web";
+  if (fallbackType === "tablet") return "Tablet web";
+  return "Unknown";
 }
 
 function preferValue(current: string | null | undefined, next: string | null | undefined) {
@@ -461,12 +489,16 @@ function deriveDeviceContext(payload: JsonRecord | null | undefined) {
   const userAgent = payloadString(payload, "user_agent");
   const osName = canonicalOsName(payloadString(payload, "os_name"), userAgent);
   const browserName = canonicalBrowserName(payloadString(payload, "browser_name"), userAgent);
-  const deviceType = canonicalDeviceType(payloadString(payload, "device_type"), userAgent, osName);
+  const viewportWidth = payloadNumber(payload, "viewport_width");
+  const screenWidth = payloadNumber(payload, "screen_width");
+  const deviceType = canonicalDeviceType(payloadString(payload, "device_type"), userAgent, osName, viewportWidth, screenWidth);
   const deviceFamily = canonicalDeviceFamily({
     deviceFamily: payloadString(payload, "device_family"),
     deviceType,
     osName,
     userAgent,
+    viewportWidth,
+    screenWidth,
   });
 
   return {
@@ -486,6 +518,41 @@ function isInternalHost(referrerHost: string | null | undefined, sourceHost: str
 
 function normalizeSearchText(value: string | null | undefined) {
   return trimText(value)?.replace(/\s+/g, " ").toLowerCase() ?? null;
+}
+
+const ALLOWED_SHORT_SEARCH_TERMS = new Set([
+  "a17",
+  "a36",
+  "a56",
+  "a57",
+  "apple",
+  "f7",
+  "f8",
+  "g56",
+  "g60",
+  "g86",
+  "ipad",
+  "iphone",
+  "jbl",
+  "m11",
+  "moto",
+  "poco",
+  "redmi",
+  "s25",
+  "s26",
+  "xiaomi",
+]);
+
+function isMeaningfulSearchQuery(value: string | null | undefined) {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return false;
+  if (normalized.length < 3) return false;
+
+  if (/^[a-z]+$/.test(normalized) && normalized.length < 6 && !ALLOWED_SHORT_SEARCH_TERMS.has(normalized)) {
+    return false;
+  }
+
+  return true;
 }
 
 function isLowSignalLandingPath(value: string | null | undefined) {
@@ -1130,7 +1197,7 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
     personEntry.browser_name = preferValue(personEntry.browser_name, browserName);
     if (row.event_name === "page_view") personEntry.page_views += 1;
     if (row.event_name === "search" && searchQuery) {
-      const normalizedQuery = normalizeSearchText(searchQuery);
+      const normalizedQuery = isMeaningfulSearchQuery(searchQuery) ? normalizeSearchText(searchQuery) : null;
       if (normalizedQuery) {
         const trail = sessionSearchTrail.get(sessionKey) ?? [];
         trail.push({
@@ -1287,7 +1354,7 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
     const collapsed: typeof trail = [];
 
     for (const entry of trail) {
-      if (entry.normalizedQuery.length < 3) {
+      if (!isMeaningfulSearchQuery(entry.normalizedQuery)) {
         continue;
       }
 
