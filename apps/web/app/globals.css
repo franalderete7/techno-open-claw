@@ -63,6 +63,20 @@ main {
   padding: 18px 0 72px;
 }
 
+/* Apple iPhone storefront: remove main padding (was showing body bg as top/bottom strips) and paint main dark */
+main.storefront-main:has(.apple-storefront) {
+  width: 100%;
+  max-width: none;
+  padding-top: 0;
+  padding-bottom: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 58% 22%, rgba(80, 89, 112, 0.52), transparent 34%),
+    radial-gradient(circle at 82% 78%, rgba(32, 36, 45, 0.5), transparent 28%),
+    linear-gradient(180deg, #10131a 0%, #0b0d12 100%);
+}
+
 .masthead {
   display: flex;
   align-items: flex-end;
@@ -3297,6 +3311,7 @@ nav a:hover {
     radial-gradient(circle at 82% 78%, rgba(32, 36, 45, 0.5), transparent 28%),
     linear-gradient(180deg, #10131a 0%, #0b0d12 100%);
   min-height: 100vh;
+  min-height: 100dvh;
   /* Full-bleed dark background: parent main.storefront-main is max-width centered with light body bg */
   width: 100vw;
   margin-left: calc(50% - 50vw);
@@ -3308,7 +3323,7 @@ nav a:hover {
 .apple-filters,
 .apple-catalog-shell,
 .apple-detail-shell {
-  width: min(1320px, 100%);
+  width: min(1440px, 100%);
   margin: 0 auto;
 }
 
@@ -3637,11 +3652,13 @@ nav a:hover {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 20px;
+  align-items: start;
 }
 
 @media (min-width: 1024px) {
   .apple-card-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: stretch;
   }
 }
 
