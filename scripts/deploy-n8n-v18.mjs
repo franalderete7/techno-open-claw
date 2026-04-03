@@ -58,6 +58,9 @@ const N8N_API_BASE =
   "http://127.0.0.1:5678";
 const N8N_SKIP_RESTART = String(process.env.N8N_SKIP_RESTART || "").toLowerCase() === "true";
 const DRY_RUN = process.argv.includes("--dry-run");
+const DEBUG_HTTP =
+  process.argv.includes("--debug-http") ||
+  String(process.env.N8N_DEPLOY_DEBUG_HTTP || "").toLowerCase() === "true";
 
 const CHILD_WORKFLOWS = [
   {
@@ -95,6 +98,12 @@ const EXPECTED_WORKFLOWS = [...CHILD_WORKFLOWS, ENTRY_WORKFLOW];
 
 function log(message) {
   console.log(message);
+}
+
+function debugLog(message) {
+  if (DEBUG_HTTP) {
+    console.log(`[debug] ${message}`);
+  }
 }
 
 function run(command, args, options = {}) {
@@ -290,7 +299,8 @@ function detectAuth(container) {
 }
 
 async function requestJson(auth, method, path, body) {
-  const url = `${auth.apiBase}${path}`;
+  const url = /^https?:\/\//.test(path) ? path : `${auth.apiBase}${path}`;
+  debugLog(`${method} ${url}`);
   const headers = {
     Accept: "application/json",
     ...auth.headers,
@@ -313,6 +323,7 @@ async function requestJson(auth, method, path, body) {
 
   if (!response.ok) {
     const text = await response.text();
+    debugLog(`${method} ${url} -> ${response.status} ${text}`);
     throw new Error(`${method} ${url} failed: ${response.status} ${text}`.trim());
   }
 
@@ -320,30 +331,102 @@ async function requestJson(auth, method, path, body) {
   return text ? JSON.parse(text) : null;
 }
 
-function workflowApiPaths(auth, workflowId) {
-  const suffixes = auth.apiBase.includes("/api/v1")
-    ? [`/workflows/${workflowId}`, `/rest/workflows/${workflowId}`]
-    : [`/rest/workflows/${workflowId}`, `/api/v1/workflows/${workflowId}`];
+function workflowApiUrls(auth, workflowId) {
+  const normalizedBase = auth.apiBase.replace(/\/$/, "");
+  const rootBase = normalizedBase.replace(/\/api\/v1$/, "");
+  const urls = normalizedBase.includes("/api/v1")
+    ? [`${normalizedBase}/workflows/${workflowId}`, `${rootBase}/rest/workflows/${workflowId}`]
+    : [`${normalizedBase}/rest/workflows/${workflowId}`, `${normalizedBase}/api/v1/workflows/${workflowId}`];
 
-  return [...new Set(suffixes)];
+  return [...new Set(urls)];
 }
 
-async function patchWorkflow(auth, workflowId, patch) {
+function workflowPatchAttempts(patch) {
   const attempts = [patch];
 
   if ("isArchived" in patch && !("archived" in patch)) {
     attempts.push({ ...patch, archived: patch.isArchived });
   }
 
+  return attempts;
+}
+
+function buildWorkflowUpdatePayload(workflow, patch) {
+  const payload = {
+    name: workflow.name,
+    nodes: workflow.nodes || [],
+    connections: workflow.connections || {},
+    settings: workflow.settings || {},
+  };
+
+  for (const key of [
+    "active",
+    "description",
+    "staticData",
+    "pinData",
+    "meta",
+    "versionId",
+    "isArchived",
+    "archived",
+  ]) {
+    if (workflow[key] !== undefined) {
+      payload[key] = workflow[key];
+    }
+  }
+
+  Object.assign(payload, patch);
+
+  return payload;
+}
+
+async function getWorkflowForUpdate(auth, workflowId) {
   let lastError = null;
 
-  for (const path of workflowApiPaths(auth, workflowId)) {
+  for (const url of workflowApiUrls(auth, workflowId)) {
+    try {
+      const workflow = await requestJson(auth, "GET", url);
+      return { url, workflow };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error(`Could not load workflow ${workflowId}`);
+}
+
+async function putWorkflow(auth, url, workflow, patch) {
+  const payload = buildWorkflowUpdatePayload(workflow, patch);
+  return requestJson(auth, "PUT", url, payload);
+}
+
+async function patchWorkflow(auth, workflowId, patch) {
+  const attempts = workflowPatchAttempts(patch);
+
+  let lastError = null;
+
+  for (const path of workflowApiUrls(auth, workflowId)) {
     for (const body of attempts) {
       try {
         return await requestJson(auth, "PATCH", path, body);
       } catch (error) {
         lastError = error;
       }
+    }
+  }
+
+  const methodBlocked = String(lastError?.message || "").includes("405");
+
+  if (!methodBlocked && !("isArchived" in patch) && !("archived" in patch)) {
+    throw lastError || new Error(`Could not patch workflow ${workflowId}`);
+  }
+
+  const { url, workflow } = await getWorkflowForUpdate(auth, workflowId);
+
+  for (const body of attempts) {
+    try {
+      return await putWorkflow(auth, url, workflow, body);
+    } catch (error) {
+      lastError = error;
     }
   }
 
