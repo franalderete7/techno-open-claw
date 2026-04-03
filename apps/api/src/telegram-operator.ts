@@ -2129,7 +2129,40 @@ async function loadCatalogSyncProducts() {
   );
 }
 
+/** When the pasted line has no color, apply the same cost to every in-DB color variant of that model/storage (same colorless title key). */
+function expandApplePhoneCatalogVariantsByColorlessKey(
+  item: CatalogSyncDraftItem,
+  products: CatalogSyncProductRow[]
+): CatalogSyncProductRow[] | null {
+  if (item.sectionKey !== "phone" || item.brand !== "Apple" || item.color != null) {
+    return null;
+  }
+
+  const target = item.colorlessTitle;
+  if (!target) return null;
+
+  const matches = products.filter((p) => {
+    if (normalizeMatch(p.brand) !== "apple") return false;
+    const title = p.title ?? "";
+    if (!/\biphone\b/i.test(title)) return false;
+    return buildColorlessCatalogKey(title) === target;
+  });
+
+  if (matches.length === 0) return null;
+
+  const byId = new Map<number, CatalogSyncProductRow>();
+  for (const p of matches) {
+    byId.set(p.id, p);
+  }
+  return Array.from(byId.values());
+}
+
 function resolveCatalogSyncMatches(item: CatalogSyncDraftItem, products: CatalogSyncProductRow[]) {
+  const colorlessFanout = expandApplePhoneCatalogVariantsByColorlessKey(item, products);
+  if (colorlessFanout && colorlessFanout.length > 0) {
+    return { kind: "matched" as const, products: colorlessFanout };
+  }
+
   const scored = products
     .map((product) => ({ product, score: scoreCatalogSyncMatch(item, product) }))
     .filter((entry) => Number.isFinite(entry.score))
