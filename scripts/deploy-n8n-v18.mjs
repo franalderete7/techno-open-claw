@@ -438,6 +438,15 @@ function cliSupports(container, command) {
   return result.status === 0;
 }
 
+function archiveUnsupported(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("patch method not allowed") ||
+    message.includes("request/body must not have additional properties") ||
+    message.includes("unauthorized")
+  );
+}
+
 function unpublishWorkflow(container, auth, workflowId) {
   if (DRY_RUN) return;
 
@@ -478,7 +487,18 @@ async function archiveWorkflow(container, auth, workflowId) {
     return;
   }
 
-  await patchWorkflow(auth, workflowId, { isArchived: true });
+  try {
+    await patchWorkflow(auth, workflowId, { isArchived: true });
+  } catch (error) {
+    if (archiveUnsupported(error)) {
+      log(
+        `Archive unsupported on this n8n version/API surface for workflow ${workflowId}; leaving it unpublished instead.`,
+      );
+      return;
+    }
+
+    throw error;
+  }
 }
 
 async function unarchiveWorkflow(container, auth, workflowId) {
@@ -489,7 +509,18 @@ async function unarchiveWorkflow(container, auth, workflowId) {
     return;
   }
 
-  await patchWorkflow(auth, workflowId, { isArchived: false });
+  try {
+    await patchWorkflow(auth, workflowId, { isArchived: false });
+  } catch (error) {
+    if (archiveUnsupported(error)) {
+      log(
+        `Unarchive unsupported on this n8n version/API surface for workflow ${workflowId}; assuming imported workflow is already usable.`,
+      );
+      return;
+    }
+
+    throw error;
+  }
 }
 
 function sleep(ms) {
