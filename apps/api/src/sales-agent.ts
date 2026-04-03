@@ -174,12 +174,13 @@ const DEFAULT_STAGE_BY_ROUTE: Record<string, string> = {
 };
 
 const BRAND_ALIASES: Record<string, string[]> = {
-  apple: ["apple", "iphone", "ios"],
+  apple: ["apple", "iphone", "ipad", "ios"],
   samsung: ["samsung", "galaxy"],
   motorola: ["motorola", "moto"],
   xiaomi: ["xiaomi", "mi"],
   redmi: ["redmi", "poco"],
   google: ["google", "pixel"],
+  jbl: ["jbl", "parlante", "parlantes", "speaker", "speakers"],
 };
 
 const PRODUCT_MATCH_STOPWORDS = new Set([
@@ -736,8 +737,8 @@ export async function generateResponse(context: TurnContext, router: RouterOutpu
         .map((entry) => formatBrandLabel(entry.brand))
         .join(", ");
       rawText = isGreetingMessage(context.user_message)
-        ? `Si, estamos atendiendo.\n\nSi queres catalogo o lista de precios, te lo filtro por marca asi te queda prolijo.\n\nDecime cual queres ver: ${brands}.`
-        : `Contame que marca o modelo buscas y te paso opciones con precio.\n\nSi queres, te lo filtro por marca, memoria o presupuesto.`;
+        ? `Si, estamos atendiendo.\n\nSi queres catalogo o lista de precios, te lo filtro por marca o categoria para que quede prolijo.\n\nDecime que queres ver: ${brands}.`
+        : `Contame que marca, categoria o modelo buscas y te paso solo opciones publicadas.\n\nSi queres, te lo filtro por marca, tablet, parlante, memoria o presupuesto.`;
       break;
     }
     case "store_info": {

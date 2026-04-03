@@ -25,6 +25,7 @@ type ProductRow = {
   sku: string;
   slug: string;
   brand: string;
+  category: string | null;
   model: string;
   title: string;
   description: string | null;
@@ -54,6 +55,7 @@ type CandidateProduct = {
   product_name: string;
   product_url: string | null;
   brand_key: string;
+  category: string | null;
   condition: string;
   storage_gb: number | null;
   color: string | null;
@@ -440,6 +442,7 @@ function extractMessageBrandKeys(message: string) {
   if (/(^| )(redmi)( |$)/.test(message)) brandKeys.add("redmi");
   if (/(^| )(poco)( |$)/.test(message)) brandKeys.add("redmi");
   if (/(^| )(google|pixel)( |$)/.test(message)) brandKeys.add("google");
+  if (/(^| )(jbl)( |$)/.test(message)) brandKeys.add("jbl");
 
   return [...brandKeys];
 }
@@ -485,6 +488,7 @@ function brandKeyMatchesText(brandKey: string, text: string) {
     xiaomi: ["xiaomi"],
     redmi: ["redmi", "poco"],
     google: ["google", "pixel"],
+    jbl: ["jbl", "parlante", "parlantes", "speaker", "speakers"],
   };
 
   return (tokensByBrand[brandKey] ?? [brandKey]).some((token) => text.includes(token));
@@ -495,7 +499,9 @@ function computeCurrentIntentAdjustment(product: ProductRow, signals: MessagePro
     return 0;
   }
 
-  const haystack = normalizeText(`${product.brand} ${product.model} ${product.title} ${product.description ?? ""}`);
+  const haystack = normalizeText(
+    `${product.brand} ${product.category ?? ""} ${product.model} ${product.title} ${product.description ?? ""}`
+  );
   let adjustment = 0;
 
   if (signals.brandKeys.length > 0) {
@@ -524,7 +530,7 @@ function computeCurrentIntentAdjustment(product: ProductRow, signals: MessagePro
 
   if (signals.storageValue != null) {
     adjustment += new RegExp(`\\b${signals.storageValue}\\s*gb\\b`, "i").test(
-      `${product.model} ${product.title} ${product.description ?? ""}`
+      `${product.category ?? ""} ${product.model} ${product.title} ${product.description ?? ""}`
     )
       ? 5
       : -6;
@@ -539,7 +545,9 @@ function scoreCandidate(product: ProductRow, userMessage: string) {
     return product.in_stock_units > 0 ? 5 : 0;
   }
 
-  const haystack = normalizeText(`${product.brand} ${product.model} ${product.title} ${product.description ?? ""}`);
+  const haystack = normalizeText(
+    `${product.brand} ${product.category ?? ""} ${product.model} ${product.title} ${product.description ?? ""}`
+  );
   const messageTokens = message.split(" ").filter((token) => token.length > 1);
   let score = 0;
 
@@ -999,6 +1007,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           p.sku,
           p.slug,
           p.brand,
+          p.category,
           p.model,
           p.title,
           p.description,
@@ -1062,6 +1071,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           product_name: product.title,
           product_url: null,
           brand_key: normalizeBrandKey(product.brand),
+          category: product.category,
           condition: product.condition,
           storage_gb: product.storage_gb ?? inferStorageGb(product),
           color: product.color ?? inferColor(product),

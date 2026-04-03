@@ -34,7 +34,7 @@ const stringReplacements = [
   ["puntotechno.com", "technostoresalta.com"],
   ["puntotechno\\\\.com", "technostoresalta\\\\.com"],
   ["puntotechno\\\\\\\\.com", "technostoresalta\\\\\\\\.com"],
-  ["No inventes stock, precios, cuotas, links ni modelos.", "Tratá todos los productos publicados como disponibles. No inventes precios, cuotas, links ni modelos."],
+  ["Tratá todos los productos publicados como disponibles. No inventes precios, cuotas, links ni modelos.", "No inventes stock, precios, cuotas, links ni modelos."],
   ["Si querés, te confirmo disponibilidad y vemos cuál te conviene más.", "Si querés, te cuento cómo avanzar con la compra o vemos cuál te conviene más."],
   ["Si querés, te confirmo disponibilidad y te digo cuál te conviene más.", "Si querés, te cuento cómo avanzar con la compra o te digo cuál te conviene más."],
   ["responder preguntas sobre precios y disponibilidad", "responder preguntas sobre precios"],
@@ -716,7 +716,6 @@ const normalized = message
 
 const recentMessages = Array.isArray(context.recent_messages) ? context.recent_messages : [];
 const candidateProducts = Array.isArray(context.candidate_products) ? context.candidate_products : [];
-const usedIphoneCandidates = Array.isArray(context.used_iphone_candidates) ? context.used_iphone_candidates : [];
 const storefrontHandoff = context.storefront_handoff;
 const interestedProductKey = String(customer.interested_product || '').trim();
 
@@ -730,7 +729,16 @@ const extractBrands = (text) => {
   if (/(^| )(redmi)( |$)/.test(text)) brands.push('redmi');
   if (/(^| )(poco)( |$)/.test(text)) brands.push('redmi');
   if (/(^| )(google|pixel)( |$)/.test(text)) brands.push('google');
+  if (/(^| )(jbl)( |$)/.test(text)) brands.push('jbl');
   return unique(brands);
+};
+
+const extractProductTypes = (text) => {
+  const productTypes = [];
+  if (/(^| )(tablet|tablets|tab)( |$)/.test(text)) productTypes.push('tablet');
+  if (/(^| )(ipad)( |$)/.test(text)) productTypes.push('tablet');
+  if (/(^| )(parlante|parlantes|speaker|speakers|bluetooth speaker)( |$)/.test(text)) productTypes.push('speaker');
+  return unique(productTypes);
 };
 
 const extractTier = (text) => {
@@ -744,6 +752,7 @@ const extractTier = (text) => {
 const looksLikeAppleKey = (value) => /(iphone|apple|ipad|macbook)/.test(String(value || '').toLowerCase());
 
 const brandKeys = extractBrands(normalized);
+const productTypeKeys = extractProductTypes(normalized);
 const tierKey = extractTier(normalized);
 const explicitFamilyMatch = normalized.match(/(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\\s+([0-9]{1,3})/i);
 const storageMatch = normalized.match(/\\b(64|128|256|512|1024)\\b(?:\\s*gb)?\\b/);
@@ -755,8 +764,6 @@ const asksCatalogLink = /(catalogo|cat[aá]logo|pagina|p[aá]gina|sitio|web|pasa
 const asksComparison = /(cual de los dos|cu[aá]l de los dos|compar|versus|\\bvs\\b|mejor)/.test(normalized);
 const wantsHoursInfo = /(horario|horarios|abren|cierran|hora|abierto|abierta|abiertos|abiertas|atienden|atencion|atención|abren hoy|hoy esta abierto|hoy esta abierta|hoy estan abiertos|hoy estan abiertas|feriado|feriados)/.test(normalized);
 const wantsStoreInfo = wantsHoursInfo || /(ubicacion|direccion|sucursal|medios de pago|medio de pago|envio|envios|warranty|garantia|como llego|donde estan|donde quedan|retiro|mapa)/.test(normalized);
-const asksBudget = /(barato|barata|economico|economica|presupuesto|hasta|accesible|mas barato|algo mas barato|usado|usados|segunda mano|seminuevo|semi nuevo)/.test(normalized);
-const asksUsedIphones = /(usado|usados|segunda mano|seminuevo|semi nuevo)/.test(normalized);
 const hasConversationProductContext = Boolean(interestedProductKey || candidateProducts[0]?.product_key);
 const asksProductFollowUp = /(cuotas|cuota|tarjeta|transferencia|efectivo|link de pago|pagar|pagarlo|entrega|envio|retiro|garantia|stock|disponible|color|colores|memoria|almacenamiento|ram|usd|dolar|promo|precio)/.test(normalized);
 const usesRelativeReference = /(\\b(ese|esa|este|esta|mismo|misma|anterior|quiero ese|quiero esa|dame ese|dame esa)\\b|^y\\b)/.test(normalized);
@@ -786,6 +793,8 @@ const effectiveBrandKeys = brandKeys.length > 0 ? brandKeys : threadBrandKey ? [
 const topCandidateKeys = candidateProducts.slice(0, 3).map((product) => product.product_key).filter(Boolean);
 const matchesCandidateRequest = (product) => {
   const haystack = String([
+    product.brand_key || '',
+    product.category || '',
     product.product_name || '',
     product.product_key || '',
     product.color || '',
@@ -819,11 +828,18 @@ const matchesCandidateRequest = (product) => {
   if (storageValue !== null && !new RegExp('\\\\b' + storageValue + '\\\\s*gb\\\\b').test(haystack)) {
     return false;
   }
+  if (productTypeKeys.includes('tablet') && !/\\b(tablet|ipad|tab)\\b/.test(haystack)) {
+    return false;
+  }
+  if (productTypeKeys.includes('speaker') && !/\\b(jbl|parlante|parlantes|speaker|speakers)\\b/.test(haystack)) {
+    return false;
+  }
   return true;
 };
 const hasExactNewCandidateMatch = candidateProducts.some(matchesCandidateRequest);
 const hasExplicitExactIntent = effectiveBrandKeys.length > 0 && (familyNumber !== null || storageValue !== null || hasModelVariantToken || asksPriceDirectly || (brandKeys.length > 0 && tierKey !== null));
 const hasContextualExactIntent = brandKeys.length === 0 && Boolean(threadBrandKey) && (familyNumber !== null || storageValue !== null || hasModelVariantToken || tierKey !== null);
+const hasCategoryBrowseIntent = productTypeKeys.length > 0 && !hasExplicitExactIntent && !hasContextualExactIntent;
 
 let route_key = 'generic_sales';
 let retrieval_scope = 'catalog_broad';
@@ -891,12 +907,16 @@ if (storefrontHandoff && storefrontHandoff.ok === true) {
   rationale = 'La consulta es sobre ubicación, horarios, pagos, envíos o garantía.';
   use_info_responder = true;
   should_offer_store_url = asksCatalogLink;
-} else if (brandKeys.length > 0 || tierKey !== null) {
+} else if (brandKeys.length > 0 || tierKey !== null || hasCategoryBrowseIntent) {
   route_key = 'brand_catalog';
   retrieval_scope = 'catalog_broad';
-  search_mode = asksComparison ? 'comparison' : tierKey ? 'tier_browse' : 'brand_browse';
+  search_mode = asksComparison ? 'comparison' : tierKey ? 'tier_browse' : hasCategoryBrowseIntent ? 'category_browse' : 'brand_browse';
   confidence = 0.82;
-  rationale = asksComparison ? 'Consulta de comparación dentro del catálogo.' : 'Consulta de catálogo por marca o línea.';
+  rationale = asksComparison
+    ? 'Consulta de comparación dentro del catálogo.'
+    : hasCategoryBrowseIntent
+      ? 'Consulta de catálogo por categoría de producto.'
+      : 'Consulta de catálogo por marca o línea.';
   should_offer_store_url = asksCatalogLink;
 } else {
   route_key = 'generic_sales';
@@ -905,18 +925,6 @@ if (storefrontHandoff && storefrontHandoff.ok === true) {
   confidence = 0.7;
   rationale = 'Consulta comercial amplia sin producto exacto.';
   should_offer_store_url = asksCatalogLink;
-}
-
-if (usedIphoneCandidates.length > 0) {
-  if (asksBudget || asksUsedIphones) {
-    should_offer_used_iphones = true;
-  } else if (route_key === 'brand_catalog' && effectiveBrandKeys.includes('apple')) {
-    should_offer_used_iphones = true;
-  } else if (route_key === 'generic_sales' && effectiveBrandKeys.includes('apple')) {
-    should_offer_used_iphones = true;
-  } else if (route_key === 'exact_product_quote' && (effectiveBrandKeys.includes('apple') || interestedProductKey) && !hasExactNewCandidateMatch) {
-    should_offer_used_iphones = true;
-  }
 }
 
 return [{
@@ -931,7 +939,6 @@ return [{
       should_offer_store_url,
       should_offer_used_iphones,
       selected_candidate_product_keys: topCandidateKeys,
-      used_iphone_candidate_ids: usedIphoneCandidates.slice(0, 4).map((item) => item.id).filter(Boolean),
       rationale,
     },
   }
@@ -970,7 +977,7 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
 
   updateNodeOptions(workflow, "AI Agent (Sales)", {
     systemMessage:
-      "Sos el vendedor de WhatsApp de TechnoStore Salta. Respondé en español natural, humano, breve y profesional. Sin markdown, sin viñetas. Tratá todos los productos publicados como disponibles. Si preguntan si un color puntual está disponible, respondé que sí, ese color está disponible. No inventes precios, cuotas, links ni modelos. No aceptamos compras con DNI; si preguntan por medios de pago o cómo comprar, nunca ofrezcas DNI como opción. Usá únicamente los hechos provistos. Si el usuario pidió un modelo exacto, respondé primero sobre ese modelo y no pivotees a otro salvo que pida alternativas o comparación. Si el contexto trae used_iphone_candidates, podés ofrecerlos como alternativa más accesible sin perder el tono premium-comercial. El sitio es secundario y no se comparte por inercia. No cierres todas las respuestas con pago, envío o una pregunta; solo cuando ayuda de verdad. Devolvé SOLO JSON válido con las claves: reply_text, selected_product_keys, actions, state_delta. No agregues explicaciones fuera del JSON.",
+      "Sos el vendedor de WhatsApp de TechnoStore Salta. Respondé en español natural, humano, breve y profesional. Sin markdown, sin asteriscos y sin inventar. Usá únicamente los hechos provistos en recent_thread, store y candidate_products. No inventes stock, disponibilidad, colores, precios, cuotas, links, marcas, categorías ni modelos. Si algo no aparece en candidate_products, no lo ofrezcas como si existiera: pedí una aclaración breve o derivá al catálogo general. Los productos pueden ser celulares, tablets o parlantes; no asumas que todo es iPhone o teléfono. Si el usuario pidió un modelo exacto, respondé primero sobre ese modelo y no pivotees a otro salvo que pida alternativas o comparación. Solo mencioná URLs reales que ya vengan en el contexto; no adivines rutas. No aceptamos compras con DNI; si preguntan por medios de pago o cómo comprar, nunca ofrezcas DNI como opción. El sitio es secundario y no se comparte por inercia. No cierres todas las respuestas con pago, envío o una pregunta; solo cuando ayuda de verdad. Devolvé SOLO JSON válido con las claves: reply_text, selected_product_keys, actions, state_delta. No agregues explicaciones fuera del JSON.",
   });
 
   updateNodeJsCode(
@@ -1010,6 +1017,8 @@ for (const product of candidateProducts) {
 const curatedCandidates = prioritizedCandidates.slice(0, router.route_key === 'exact_product_quote' ? 4 : 5).map((product) => ({
   product_key: product.product_key,
   product_name: product.product_name,
+  brand_key: product.brand_key,
+  category: product.category || null,
   condition: product.condition,
   storage_gb: product.storage_gb,
   color: product.color,
@@ -1019,6 +1028,7 @@ const curatedCandidates = prioritizedCandidates.slice(0, router.route_key === 'e
   promo_price_ars: product.promo_price_ars,
   price_usd: product.price_usd,
   image_url: product.image_url,
+  product_url: product.product_url || null,
 }));
 
 const promptPayload = {
@@ -1047,7 +1057,12 @@ const prompt = [
   'Usá recent_thread y focused_product_key para sostener el contexto del hilo.',
   'Si el usuario hace referencia a "ese", "el anterior", "y en cuotas?", "y la entrega?" o similares, continuá sobre el último producto relevante del hilo.',
   'Formateá todos los precios en ARS con separadores argentinos, por ejemplo ARS 1.165.080.',
-  'Si el usuario pregunta si un color puntual está disponible, respondé que sí, ese color está disponible.',
+  'No inventes disponibilidad, colores ni stock. Si el dato no está respaldado por candidate_products, decí que te lo consulten por catálogo o pedí una aclaración breve.',
+  'Si listás productos, hacelo con un producto por línea y texto plano, sin markdown ni **.',
+  'candidate_products es la única fuente de verdad para productos. No menciones marcas, categorías, modelos o precios que no estén ahí.',
+  'Si la consulta es amplia como "catálogo", "lista de precios" o "modelos", primero intentá acotarla por marca o categoría. Si candidate_products ya viene claramente filtrado, podés listar esos resultados sin inventar otros.',
+  'Los productos pueden incluir celulares, tablets y parlantes JBL.',
+  'Solo usá product_url si ya viene en candidate_products. No inventes links. En este negocio los iPhone usan /iphone/{sku} y el resto usa /{sku}, pero preferí siempre el product_url provisto.',
   'No prometas ni ofrezcas un link de pago directo en una consulta normal de producto. Solo mencioná un link real si ya existe en el contexto del pedido web. Si no, explicá el proceso para avanzar con la compra.',
   'Si preguntan por pago, link de pago, transferencia o cómo comprar, explicá que en technostoresalta.com avanzan en pocos clics, reciben el link de pago por WhatsApp y pagan transfiriendo al alias que figura en ese link. La entrega o el retiro se coordinan por este mismo chat. No aceptamos compras con DNI.',
   'Devolvé SOLO JSON válido.',
@@ -1096,7 +1111,6 @@ const normalizedUserMessage = String(base.user_message || '')
   .replace(/[^a-z0-9\\s]/g, ' ')
   .replace(/\\s+/g, ' ')
   .trim();
-const asksColorAvailability = /\\b(blanco|blanca|white|naranja|orange|azul|blue|negro|negra|black|gris|gray|plata|silver|rosa|pink|verde|green|violeta|purple|dorado|gold)\\b/.test(normalizedUserMessage) && /\\b(hay|tenes|tienen|disponible|stock|queda|viene)\\b/.test(normalizedUserMessage);
 const asksBuyingStep = /(pago|pagar|comprar|compra|link de pago|transferencia|cuotas|envio|retiro|como compro|como comprar|senia|seña)/.test(normalizedUserMessage);
 
 let parsed = null;
@@ -1118,6 +1132,13 @@ const formatArs = (value) => {
   if (!Number.isFinite(amount)) return null;
   return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(amount);
 };
+const normalizeReplySpacing = (value) =>
+  String(value || '')
+    .replace(/\\r\\n/g, '\\n')
+    .replace(/[ \\t]+\\n/g, '\\n')
+    .replace(/\\n{3,}/g, '\\n\\n')
+    .replace(/[ \\t]{2,}/g, ' ')
+    .trim();
 
 const fallbackReply = (() => {
   if (base.router_output?.route_key === 'exact_product_quote' && fallbackExactCandidate) {
@@ -1130,7 +1151,7 @@ const fallbackReply = (() => {
 const selected = Array.isArray(parsed?.selected_product_keys) ? parsed.selected_product_keys : [];
 const actions = Array.isArray(parsed?.actions) ? parsed.actions : [];
 const stateDelta = parsed?.state_delta && typeof parsed.state_delta === 'object' ? parsed.state_delta : {};
-let replyText = String(parsed?.reply_text || fallbackReply).replace(/\\s+/g, ' ').trim();
+let replyText = normalizeReplySpacing(parsed?.reply_text || fallbackReply);
 
 const priceCandidates = Array.isArray(base.context?.candidate_products) ? base.context.candidate_products : [];
 for (const product of priceCandidates) {
@@ -1157,13 +1178,8 @@ if (base.router_output?.route_key === 'exact_product_quote') {
       .replace(/Para avanzar con la compra[^.]*\\.?/gi, '')
       .replace(/Pod[eé]s iniciar la compra[^.]*\\.?/gi, '')
       .replace(/Si prefer[ií]s avanzar online[^.]*\\.?/gi, '')
-      .replace(/\\s+/g, ' ')
       .trim();
   }
-}
-
-if (asksColorAvailability && !/^si[,\\s]/i.test(replyText) && !/^sí[,\\s]/i.test(replyText)) {
-  replyText = ('Sí, ese color está disponible. ' + replyText).replace(/\\s+/g, ' ').trim();
 }
 
 return [{
@@ -1329,7 +1345,6 @@ const router = data.router_output || {};
 const responder = data.responder_output || {};
 
 const candidateProducts = Array.isArray(context.candidate_products) ? context.candidate_products : [];
-const usedIphoneCandidates = Array.isArray(context.used_iphone_candidates) ? context.used_iphone_candidates : [];
 const candidateMap = new Map(candidateProducts.map((product) => [product.product_key, product]));
 const recentMessages = Array.isArray(context.recent_messages) ? context.recent_messages : [];
 const website = String(context.store?.store_website_url || 'https://technostoresalta.com').trim();
@@ -1360,17 +1375,24 @@ const allowedActions = new Set([
   'no_reply',
 ]);
 
+const normalizeReplySpacing = (value) =>
+  String(value || '')
+    .replace(/\\r\\n/g, '\\n')
+    .replace(/[ \\t]+\\n/g, '\\n')
+    .replace(/\\n{3,}/g, '\\n\\n')
+    .replace(/[ \\t]{2,}/g, ' ')
+    .trim();
+
 const stripUnexpectedUrls = (text, allowedUrls = []) =>
-  String(text || '')
+  normalizeReplySpacing(text)
     .replace(/https?:\\/\\/\\S+/gi, (url) => {
       if (!allowedUrls.length) return '';
       return allowedUrls.some((allowedUrl) => url.includes(String(allowedUrl).replace(/^https?:\\/\\//, ''))) ? url : '';
     })
-    .replace(/\\s+/g, ' ')
     .trim();
 
 const stripDanglingUrlPrompts = (text) => {
-  const current = String(text || '').trim();
+  const current = normalizeReplySpacing(text);
   if (/https?:\\/\\//i.test(current)) {
     return current;
   }
@@ -1380,15 +1402,12 @@ const stripDanglingUrlPrompts = (text) => {
     .replace(/(?:^|[\\s.])ac[aá]\\s*:?(?=\\s|$)/gi, ' ')
     .replace(/\\s*,\\s*([.!?]|$)/g, '$1')
     .replace(/\\s+([.,!?])/g, '$1')
-    .replace(/\\s+/g, ' ')
     .trim();
 };
 
 const appendExactProductUrl = (text, productUrl) => {
-  if (!productUrl) return text.trim();
-  const trimmed = String(text || '')
-    .replace(/\\s+/g, ' ')
-    .trim()
+  if (!productUrl) return normalizeReplySpacing(text);
+  const trimmed = normalizeReplySpacing(text)
     .replace(/[,:;]+$/, '')
     .replace(/\\b(?:si te interesa|si te sirve|si quer[eé]s(?: ver m[aá]s detalles)?)(?:[,:;.]*)$/i, '')
     .trim();
@@ -1397,20 +1416,6 @@ const appendExactProductUrl = (text, productUrl) => {
   const separator = /[.!?]$/.test(trimmed) ? ' ' : '. ';
   return (trimmed + separator + 'Lo podés ver acá: ' + productUrl).trim();
 };
-
-const formatUsedIphoneOption = (item) => {
-  const parts = [item.model_name];
-  if (item.storage_gb != null) parts.push(String(item.storage_gb) + ' GB');
-  if (item.color) parts.push(String(item.color));
-  const batteryLabel = item.battery_note
-    ? String(item.battery_note)
-    : Number.isFinite(Number(item.battery_health_pct))
-      ? String(item.battery_health_pct) + '% batería'
-      : null;
-  return parts.join(' ') + ' en USD ' + String(item.sale_price_usd) + (batteryLabel ? ' (' + batteryLabel + ')' : '');
-};
-
-const usedIphoneSnippet = usedIphoneCandidates.slice(0, 3).map(formatUsedIphoneOption).join(', ');
 const [topCandidate, secondCandidate] = candidateProducts;
 const topCandidateScore = Number(topCandidate?.score || 0);
 const secondCandidateScore = Number(secondCandidate?.score || 0);
@@ -1503,11 +1508,6 @@ if (!replyText) {
     if (shouldAppendExactProductUrl) {
       replyText = appendExactProductUrl(replyText, String(product.product_url || '').trim());
     }
-    if (router.should_offer_used_iphones === true && usedIphoneSnippet) {
-      replyText += ' Si querés una alternativa más accesible, también tengo usados como ' + usedIphoneSnippet + '.';
-    }
-  } else if (router.should_offer_used_iphones === true && usedIphoneSnippet) {
-    replyText = 'Si querés un iPhone más accesible, también tengo usados como ' + usedIphoneSnippet + '. Si te sirve, te digo cuál conviene más según tu presupuesto.';
   } else if (router.route_key === 'storefront_order' && storefrontPaymentUrl) {
     const order = context.storefront_handoff?.order || {};
     const totalText = Number(order.total || order.subtotal);
@@ -1520,18 +1520,9 @@ if (!replyText) {
   }
 }
 
-const replyMentionsUsedAlternatives = /(usd\\s*\\d+|usado|usados|segunda mano|sellado|sealed)/i.test(replyText);
-if (router.should_offer_used_iphones === true && usedIphoneSnippet && !replyMentionsUsedAlternatives) {
-  if (['brand_catalog', 'generic_sales'].includes(router.route_key)) {
-    replyText = (replyText + ' Si querés algo más accesible, también tengo usados como ' + usedIphoneSnippet + '.').replace(/\\s+/g, ' ').trim();
-  } else if (router.route_key === 'exact_product_quote') {
-    replyText = (replyText + ' Si querés una alternativa más accesible, también tengo usados como ' + usedIphoneSnippet + '.').replace(/\\s+/g, ' ').trim();
-  }
-}
-
 if (canAppendStoreUrl && !/technostoresalta\\.com/i.test(replyText)) {
   const appendText = ' Si querés mirar el catálogo completo, está en ' + website + '.';
-  replyText = (replyText + appendText).replace(/\\s+/g, ' ').trim();
+  replyText = normalizeReplySpacing(replyText + appendText);
 }
 
 if (router.route_key === 'exact_product_quote') {
@@ -1564,7 +1555,7 @@ if (router.route_key === 'exact_product_quote') {
   }
 }
 
-replyText = stripDanglingUrlPrompts(replyText).slice(0, 1100).trim();
+replyText = normalizeReplySpacing(stripDanglingUrlPrompts(replyText)).slice(0, 1100).trim();
 
 const replyMessages = [{ type: 'text', text: replyText }];
 const shouldSend = !actionList.includes('no_reply');
