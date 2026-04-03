@@ -49,6 +49,12 @@ const configSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   UPLOADS_DIR: z.string().default(resolve(process.cwd(), "data/uploads")),
   PUBLIC_API_BASE_URL: z.string().default(""),
+  /** Set all three to upload Telegram /media images to Cloudinary with public_id `{folder}/{sku}`. */
+  CLOUDINARY_CLOUD_NAME: z.string().default(""),
+  CLOUDINARY_API_KEY: z.string().default(""),
+  CLOUDINARY_API_SECRET: z.string().default(""),
+  /** Folder prefix for product image public_id (no leading/trailing slash). */
+  CLOUDINARY_PRODUCTS_FOLDER: z.string().default("assets"),
   OLLAMA_BASE_URL: z.string().default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().default("qwen3.5:cloud"),
   GROQ_API_KEY: z.string().default(""),

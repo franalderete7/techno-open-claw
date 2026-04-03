@@ -29,6 +29,7 @@ import {
   updateMetaAdSet,
   updateMetaCampaign,
 } from "./meta-ads.js";
+import { resolveProductImageUrlForCloudinary } from "./cloudinary-upload.js";
 import {
   countRecentTelegramImageBatch,
   extractStockCandidatesFromRecentImages,
@@ -2652,8 +2653,8 @@ async function generateChatReply(params: {
     prompt: params.prompt,
     images: params.imageBase64 ? [params.imageBase64.split(",").pop() || ""] : undefined,
     options: {
-      temperature: 0.2,
-      top_p: 0.9,
+      temperature: 0.1,
+      top_p: 0.85,
     },
   });
   return raw.response.trim();
@@ -2680,7 +2681,7 @@ const OPERATOR_SCHEMA_GUIDE = [
   "- public.settings stores key/value configuration. Stable ref: key. update_setting requires key and value. delete_setting removes the key.",
   "- public.customers stores operator and customer contacts. Stable refs: id, external_ref, phone, email. create_customer requires at least one of external_ref, phone, or email.",
   "- public.conversations stores thread headers by channel_thread_key. public.messages stores the actual interaction timeline. Each Telegram inbound and outbound message is saved in public.messages.",
-  "- Product images can use public URLs. If the operator attached a Telegram image, the API can persist it on the VPS and provide a /media/... URL for image_url.",
+  "- Product images: any public URL works. Telegram photos are saved under /media/... first; on create_product/update_product the API may upload that file to Cloudinary (public_id assets/{sku}) and store the https secure_url when Cloudinary env is set.",
   "- Recent Telegram image batches can be used to extract IMEIs and serials for bulk stock creation or stock status updates. Those flows must preview matches before execution.",
   "- public.operator_confirmations stores pending write actions. Low-risk single-row writes can auto-execute. Higher-risk actions use inline approve/edit/cancel buttons.",
   "- public.audit_logs stores executed mutations and important operator actions.",
@@ -2733,6 +2734,8 @@ function buildDraftPrompts(params: {
     "When the user asks for lists by brand, price range, RAM, storage, sold date, acquisition date, location, stock status, or image presence, use the available filter fields instead of plain text only.",
     "For price and numeric values, use numbers, not strings, when possible.",
     "If the message is just a greeting like hey/hola, reply briefly in reply and use mode=chat.",
+    "Tone: direct ops teammate. No filler, no pep talk, no 'I'd be happy to', no long apologies. If mode=chat or mode=clarify, keep reply under 4 short sentences unless listing data.",
+    "If an image is attached and the user wants it on a product (new or existing), use mode=write with create_product or update_product and pass the attached URL as image_url unless they give a different URL.",
   ].join("\n");
 
   const prompt = [
@@ -2743,7 +2746,7 @@ function buildDraftPrompts(params: {
     JSON.stringify(params.snapshot, null, 2),
     "",
     params.attachedImageUrl
-      ? "The operator attached an image with this VPS-hosted URL candidate. Use it as image_url for product create/update unless they explicitly override it."
+      ? "The operator attached an image. Use this exact URL as image_url for create_product or update_product when they want the photo on a product: the server will save the product with this URL and push the file to Cloudinary (assets/{sku}) when configured."
       : "",
     params.attachedImageUrl ? `attached_image_url: ${params.attachedImageUrl}` : "",
     "",
@@ -5113,6 +5116,7 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
   switch (command) {
     case "create_product": {
       const body = createProductSchema.parse(payload);
+      const imageUrlForDb = await resolveProductImageUrlForCloudinary(body.image_url ?? null, body.sku);
       const result = await client.query(
         `
           insert into public.products (
@@ -5175,7 +5179,7 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
           body.delivery_type ?? null,
           body.delivery_days ?? null,
           body.usd_rate ?? null,
-          body.image_url || null,
+          imageUrlForDb,
           body.ram_gb ?? null,
           body.storage_gb ?? null,
           body.network ?? null,
@@ -5206,7 +5210,15 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
         })
         .parse(payload);
 
-      const entries = Object.entries(parsed.changes);
+      let nextChanges = { ...parsed.changes } as Record<string, unknown>;
+      if (nextChanges.image_url != null && typeof nextChanges.image_url === "string") {
+        nextChanges = {
+          ...nextChanges,
+          image_url: await resolveProductImageUrlForCloudinary(nextChanges.image_url, parsed.sku),
+        };
+      }
+
+      const entries = Object.entries(nextChanges);
       const sql = entries.map(([key], index) => `${key} = $${index + 1}`).join(", ");
       const values = entries.map(([, value]) => value);
       const result = await client.query(
@@ -5238,14 +5250,14 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       );
 
       const product = result.rows[0];
-      await writeAudit(client, actor, "telegram.product.updated", "product", String(product.id), parsed.changes);
+      await writeAudit(client, actor, "telegram.product.updated", "product", String(product.id), nextChanges);
       return [
         "Producto actualizado.",
         `• ID: ${product.id}`,
         `• SKU: ${product.sku}`,
         `• Título: ${product.title}`,
         "• Campos aplicados:",
-        ...Object.entries(parsed.changes).map(([key, value]) => `  - ${key}: ${formatJsonPreview(value)}`),
+        ...Object.entries(nextChanges).map(([key, value]) => `  - ${key}: ${formatJsonPreview(value)}`),
         parsed.pricing_recalculated ? "• Repricing aplicado desde settings." : "",
         ...buildPricingPreviewLines(product),
       ]
@@ -5350,7 +5362,14 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
       let createdCount = 0;
 
       for (const item of parsed.update_items) {
-        const entries = Object.entries(item.changes);
+        let syncChanges = { ...item.changes } as Record<string, unknown>;
+        if (syncChanges.image_url != null && typeof syncChanges.image_url === "string") {
+          syncChanges = {
+            ...syncChanges,
+            image_url: await resolveProductImageUrlForCloudinary(syncChanges.image_url, item.sku),
+          };
+        }
+        const entries = Object.entries(syncChanges);
         const sql = entries.map(([key], index) => `${key} = $${index + 1}`).join(", ");
         const values = entries.map(([, value]) => value);
         const result = await client.query<{
@@ -5367,13 +5386,14 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
         await writeAudit(client, actor, "telegram.product.synced_repriced", "product", String(row.id), {
           source_line: item.source_line,
           source_section: item.source_section,
-          changes: item.changes,
+          changes: syncChanges,
         });
         updatedCount += 1;
         resultLines.push(`• ${row.sku} actualizado · cost_usd ${row.cost_usd ?? "-"} · ${formatMoney(row.price_amount, "ARS")}`);
       }
 
       for (const createItem of parsed.create_items) {
+        const syncCreateImageUrl = await resolveProductImageUrlForCloudinary(createItem.image_url ?? null, createItem.sku);
         const result = await client.query(
           `
             insert into public.products (
@@ -5418,7 +5438,7 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
             createItem.delivery_type ?? null,
             createItem.delivery_days ?? null,
             createItem.usd_rate ?? null,
-            createItem.image_url || null,
+            syncCreateImageUrl,
             createItem.ram_gb ?? null,
             createItem.storage_gb ?? null,
             createItem.network ?? null,
@@ -6185,13 +6205,13 @@ function buildChatPrompts(params: {
   const systemPrompt = [
     "You are the trusted operator assistant for TechnoStore Ops.",
     "Respond in the same language the operator uses.",
-    "Be concise, exact, and technical when needed.",
+    "Be concise, exact, and technical when needed. No marketing tone, no emojis unless the operator used them, no 'as an AI', no hedging, no three-paragraph lectures.",
     "You know the operator schema contract below and should answer like an internal system operator, not like a generic chatbot.",
     OPERATOR_SCHEMA_GUIDE,
     OPERATOR_SKILL_GUIDE,
     "You must never claim a mutation happened unless the deterministic command layer executed it.",
-    "If the user asks for a mutation but there is not enough information, ask for the missing field or exact reference.",
-    "Keep the reply short and natural. Do not dump schema explanations, command names, or validation rules unless explicitly asked.",
+    "If the user asks for a mutation but there is not enough information, ask for the missing field or exact reference in one short question.",
+    "Keep replies under 6 sentences unless listing tabular data. Do not dump schema, SQL, tool names, or validation rules unless explicitly asked.",
     "Use recent thread history to resolve follow-up references and preserve conversational continuity.",
     "Recent thread history:",
     params.conversationMemory,

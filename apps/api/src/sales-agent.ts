@@ -15,8 +15,7 @@
  */
 
 import { config } from "./config.js";
-import { pool, query } from "./db.js";
-import { ollamaGenerate } from "./ollama.js";
+import { pool } from "./db.js";
 
 // ============ Types ============
 
@@ -69,6 +68,8 @@ export interface Product {
   price_amount: number | null;
   currency_code: string;
   active: boolean;
+  in_stock: boolean;
+  delivery_days: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -77,6 +78,8 @@ export interface StoreSettings {
   name: string;
   storefront_url: string;
   ops_host: string;
+  address: string | null;
+  hours: string | null;
 }
 
 export interface TurnContext {
@@ -170,7 +173,71 @@ const DEFAULT_STAGE_BY_ROUTE: Record<string, string> = {
   store_info: "browsing",
 };
 
-const PUBLISHED_PRODUCTS_ALWAYS_AVAILABLE = true;
+const BRAND_ALIASES: Record<string, string[]> = {
+  apple: ["apple", "iphone", "ios"],
+  samsung: ["samsung", "galaxy"],
+  motorola: ["motorola", "moto"],
+  xiaomi: ["xiaomi", "mi"],
+  redmi: ["redmi", "poco"],
+  google: ["google", "pixel"],
+};
+
+const PRODUCT_MATCH_STOPWORDS = new Set([
+  "apple",
+  "ars",
+  "blue",
+  "buenas",
+  "catalogo",
+  "catalogos",
+  "celular",
+  "celulares",
+  "color",
+  "con",
+  "cuanto",
+  "de",
+  "del",
+  "disponible",
+  "disponibles",
+  "el",
+  "en",
+  "equipo",
+  "equipos",
+  "esta",
+  "este",
+  "hay",
+  "hola",
+  "iphone",
+  "la",
+  "las",
+  "lista",
+  "los",
+  "mas",
+  "me",
+  "modelo",
+  "modelos",
+  "para",
+  "precio",
+  "precios",
+  "pro",
+  "que",
+  "queria",
+  "queria",
+  "queres",
+  "queria",
+  "quiero",
+  "samsung",
+  "son",
+  "stock",
+  "tarde",
+  "tenes",
+  "tienen",
+  "tienen",
+  "ultra",
+  "un",
+  "una",
+  "whatsapp",
+  "y",
+]);
 
 const INTENT_KEYWORDS: Record<string, string[]> = {
   price_inquiry: ["precio", "cuanto", "valor", "costa", "cuanto sale", "precio tiene"],
@@ -200,6 +267,285 @@ function normalizeMessageText(raw: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function toTokens(value: string) {
+  return normalizeMessageText(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function isGreetingMessage(text: string) {
+  const normalized = normalizeMessageText(text);
+  return /^(hola|buenas|buen dia|buenas tardes|buenas noches|como va|como andan|estan atendiendo)\b/.test(normalized);
+}
+
+function isCatalogRequest(text: string) {
+  const normalized = normalizeMessageText(text);
+  return /(catalogo|catalogos|lista de precios|lista de precio|lista|modelos|disponibles|que tenes|que tienen|que hay|ver modelos|ver equipos|equipos disponibles|precios)/.test(
+    normalized
+  );
+}
+
+function isAppleBrand(value: string) {
+  const normalized = normalizeMessageText(value);
+  return normalized === "apple" || normalized === "iphone";
+}
+
+function formatBrandLabel(brand: string) {
+  return isAppleBrand(brand) ? "iPhone" : brand.trim();
+}
+
+function buildStorefrontProductPath(sku: string) {
+  const normalizedSku = sku.trim().toLowerCase();
+  if (!normalizedSku) {
+    return "/";
+  }
+
+  return normalizedSku.startsWith("iphone-")
+    ? `/iphone/${encodeURIComponent(normalizedSku)}`
+    : `/${encodeURIComponent(normalizedSku)}`;
+}
+
+function buildStorefrontProductUrl(storefrontUrl: string, sku: string) {
+  return `${storefrontUrl.replace(/\/$/, "")}${buildStorefrontProductPath(sku)}`;
+}
+
+function buildBrandCatalogUrl(storefrontUrl: string, brand: string) {
+  return isAppleBrand(brand) ? `${storefrontUrl.replace(/\/$/, "")}/iphone` : storefrontUrl.replace(/\/$/, "");
+}
+
+function formatMoney(amount: number | null, currencyCode: string) {
+  if (amount == null) {
+    return "Consultar precio";
+  }
+
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: currencyCode || "ARS",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatAvailability(product: Product) {
+  if (product.in_stock) {
+    return "En stock";
+  }
+
+  if (product.delivery_days != null && product.delivery_days > 0) {
+    return `Entrega en ${product.delivery_days} dias`;
+  }
+
+  return "Consultar disponibilidad";
+}
+
+function getDistinctBrands(products: Product[]) {
+  const counters = new Map<string, { brand: string; count: number }>();
+
+  for (const product of products) {
+    const key = normalizeMessageText(product.brand);
+    const current = counters.get(key);
+    if (current) {
+      current.count += 1;
+    } else {
+      counters.set(key, { brand: product.brand, count: 1 });
+    }
+  }
+
+  return [...counters.values()].sort((left, right) => right.count - left.count || left.brand.localeCompare(right.brand));
+}
+
+function detectBrandMention(text: string, products: Product[]) {
+  const normalized = normalizeMessageText(text);
+  const brands = getDistinctBrands(products);
+
+  for (const entry of brands) {
+    const brandKey = normalizeMessageText(entry.brand);
+    const aliases = BRAND_ALIASES[brandKey] ?? [brandKey];
+    if (aliases.some((alias) => normalized.includes(alias))) {
+      return entry.brand;
+    }
+  }
+
+  return null;
+}
+
+function productSpecificityScore(text: string, product: Product) {
+  const normalized = normalizeMessageText(text);
+  const normalizedSku = normalizeMessageText(product.sku);
+  const normalizedSlug = normalizeMessageText(product.slug);
+  const normalizedTitle = normalizeMessageText(product.title);
+  const normalizedModel = normalizeMessageText(product.model);
+
+  if (normalized.includes(normalizedSku) || normalized.includes(normalizedSlug)) {
+    return 100;
+  }
+
+  if (normalizedTitle && normalizedTitle.length >= 12 && normalized.includes(normalizedTitle)) {
+    return 92;
+  }
+
+  if (normalizedModel && normalizedModel.length >= 10 && normalized.includes(normalizedModel)) {
+    return 85;
+  }
+
+  const messageTokens = new Set(toTokens(text));
+  const brandTokens = new Set(toTokens(product.brand));
+  const productTokens = [...new Set(toTokens(`${product.model} ${product.title} ${product.sku} ${product.slug}`))]
+    .filter((token) => token.length >= 2)
+    .filter((token) => !brandTokens.has(token))
+    .filter((token) => !PRODUCT_MATCH_STOPWORDS.has(token));
+
+  const sharedTokens = productTokens.filter((token) => messageTokens.has(token));
+  const hasNumericSignal = sharedTokens.some((token) => /\d/.test(token));
+
+  if (sharedTokens.length >= 2 && hasNumericSignal) {
+    return 70 + sharedTokens.length;
+  }
+
+  if (sharedTokens.length >= 3) {
+    return 60 + sharedTokens.length;
+  }
+
+  return 0;
+}
+
+function findSpecificProductMatches(text: string, products: Product[]) {
+  const scored = products
+    .map((product) => ({ product, score: productSpecificityScore(text, product) }))
+    .filter((entry) => entry.score >= 72)
+    .sort((left, right) => right.score - left.score || left.product.title.localeCompare(right.product.title));
+
+  if (scored.length === 0) {
+    return [];
+  }
+
+  const bestScore = scored[0].score;
+  return scored
+    .filter((entry) => bestScore - entry.score <= 8)
+    .slice(0, 4)
+    .map((entry) => entry.product);
+}
+
+function filterProductsByBrand(products: Product[], brand: string) {
+  const brandKey = normalizeMessageText(brand);
+  return products.filter((product) => normalizeMessageText(product.brand) === brandKey);
+}
+
+function isDisallowedWorkflowProduct(product: Pick<Product, "brand" | "condition">) {
+  return isAppleBrand(product.brand) && product.condition.trim().toLowerCase() !== "new";
+}
+
+function sortProductsForCatalog(products: Product[]) {
+  return [...products].sort((left, right) => {
+    if (left.in_stock !== right.in_stock) {
+      return left.in_stock ? -1 : 1;
+    }
+
+    if (left.price_amount != null && right.price_amount != null && left.price_amount !== right.price_amount) {
+      return left.price_amount - right.price_amount;
+    }
+
+    if (left.price_amount == null && right.price_amount != null) {
+      return 1;
+    }
+
+    if (left.price_amount != null && right.price_amount == null) {
+      return -1;
+    }
+
+    return right.updated_at.localeCompare(left.updated_at);
+  });
+}
+
+function buildBrandChooserReply(products: Product[]) {
+  const brands = getDistinctBrands(products).slice(0, 8);
+  const lines = [
+    "Si, te paso el catalogo mejor filtrado por marca para que quede claro.",
+    "",
+    "Decime cual queres ver:",
+    ...brands.map((entry) => `- ${formatBrandLabel(entry.brand)} (${entry.count})`),
+    "",
+    "Si queres, tambien te lo filtro por memoria o presupuesto.",
+  ];
+
+  return lines.join("\n");
+}
+
+function buildCatalogListReply(params: {
+  intro: string;
+  products: Product[];
+  storefrontUrl: string;
+  catalogUrl?: string;
+}) {
+  const lines = [params.intro];
+  let message = lines.join("\n");
+
+  for (const [index, product] of params.products.entries()) {
+    const block = [
+      "",
+      `${index + 1}. ${product.title}`,
+      `Precio: ${formatMoney(product.price_amount, product.currency_code)}`,
+      `Estado: ${formatAvailability(product)}`,
+      `Link: ${buildStorefrontProductUrl(params.storefrontUrl, product.sku)}`,
+    ].join("\n");
+
+    if (`${message}${block}`.length > 1050) {
+      break;
+    }
+
+    message += block;
+  }
+
+  if (params.catalogUrl && `${message}\n\nCatalogo completo: ${params.catalogUrl}`.length <= 1080) {
+    message += `\n\nCatalogo completo: ${params.catalogUrl}`;
+  }
+
+  return `${message}\n\nSi queres, te filtro la lista por memoria, precio o color.`;
+}
+
+function buildExactProductReply(products: Product[], storefrontUrl: string) {
+  if (products.length === 0) {
+    return "Decime el modelo exacto y te paso precio y link directo.";
+  }
+
+  if (products.length === 1) {
+    const product = products[0];
+    return [
+      "Si, lo tengo publicado:",
+      "",
+      product.title,
+      `Precio: ${formatMoney(product.price_amount, product.currency_code)}`,
+      `Estado: ${formatAvailability(product)}`,
+      `Link: ${buildStorefrontProductUrl(storefrontUrl, product.sku)}`,
+      "",
+      "Si queres, tambien te paso otras variantes de ese modelo.",
+    ].join("\n");
+  }
+
+  return buildCatalogListReply({
+    intro: "Encontre estas variantes publicadas:",
+    products,
+    storefrontUrl,
+  });
+}
+
+function buildStoreInfoReply(store: StoreSettings) {
+  const lines = [`Te paso los datos de ${store.name}:`];
+
+  if (store.address) {
+    lines.push("", `Direccion: ${store.address}`);
+  }
+
+  if (store.hours) {
+    lines.push(`Horarios: ${store.hours}`);
+  }
+
+  lines.push(`Catalogo: ${store.storefront_url}`);
+  lines.push("", "Si queres, tambien te paso modelos por marca directo por WhatsApp.");
+
+  return lines.join("\n");
 }
 
 /**
@@ -237,26 +583,6 @@ function detectFunnelStage(text: string): string {
 }
 
 /**
- * Detect product mentions from message text
- */
-function detectProductMentions(text: string, products: Product[]): string[] {
-  const normalized = normalizeMessageText(text);
-  const mentioned: string[] = [];
-  
-  for (const product of products) {
-    const brandNorm = normalizeMessageText(product.brand);
-    const modelNorm = normalizeMessageText(product.model);
-    const titleNorm = normalizeMessageText(product.title);
-    
-    if (normalized.includes(brandNorm) || normalized.includes(modelNorm) || normalized.includes(titleNorm)) {
-      mentioned.push(`${product.brand}-${product.model}`.toLowerCase().replace(/\s+/g, "-"));
-    }
-  }
-  
-  return mentioned;
-}
-
-/**
  * Detect city from message text (simple heuristic)
  */
 function detectCity(text: string): string | null {
@@ -276,17 +602,30 @@ function detectCity(text: string): string | null {
  */
 export async function routeTurn(context: TurnContext): Promise<RouterOutput> {
   const text = context.user_message;
-  const normalized = normalizeMessageText(text);
   const products = context.candidate_products;
+  const normalized = normalizeMessageText(text);
+  const matchedBrand = detectBrandMention(text, products);
+
+  if (isCatalogRequest(text)) {
+    return {
+      route_key: "brand_catalog",
+      confidence: matchedBrand ? 0.88 : 0.8,
+      matched_product_keys: [],
+      matched_brand: matchedBrand,
+      detected_city: detectCity(text),
+      detected_budget_range: null,
+      detected_payment_method: null,
+    };
+  }
   
   // Check for exact product quote
-  const mentionedProducts = detectProductMentions(text, products);
+  const mentionedProducts = findSpecificProductMatches(text, products);
   if (mentionedProducts.length > 0) {
     return {
       route_key: "exact_product_quote",
-      confidence: 0.8,
-      matched_product_keys: mentionedProducts,
-      matched_brand: null,
+      confidence: 0.9,
+      matched_product_keys: mentionedProducts.map((product) => product.sku),
+      matched_brand: matchedBrand,
       detected_city: detectCity(text),
       detected_budget_range: null,
       detected_payment_method: null,
@@ -294,18 +633,16 @@ export async function routeTurn(context: TurnContext): Promise<RouterOutput> {
   }
   
   // Check for brand catalog
-  for (const product of products) {
-    if (normalized.includes(normalizeMessageText(product.brand))) {
-      return {
-        route_key: "brand_catalog",
-        confidence: 0.7,
-        matched_product_keys: [],
-        matched_brand: product.brand,
-        detected_city: detectCity(text),
-        detected_budget_range: null,
-        detected_payment_method: null,
-      };
-    }
+  if (matchedBrand) {
+    return {
+      route_key: "brand_catalog",
+      confidence: 0.75,
+      matched_product_keys: [],
+      matched_brand: matchedBrand,
+      detected_city: detectCity(text),
+      detected_budget_range: null,
+      detected_payment_method: null,
+    };
   }
   
   // Check for storefront order intent
@@ -347,132 +684,94 @@ export async function routeTurn(context: TurnContext): Promise<RouterOutput> {
 }
 
 /**
- * Generate AI response using Ollama
+ * Generate deterministic sales response for WhatsApp/ManyChat
  */
 export async function generateResponse(context: TurnContext, router: RouterOutput): Promise<ResponderOutput> {
-  const systemPrompt = `Eres un asistente de ventas de TechnoStore, una tienda de teléfonos móviles en Argentina.
-Tu rol es ayudar a los clientes a encontrar el equipo que buscan, responder preguntas sobre precios y guiarlos hacia la compra.
+  const actions: string[] = [];
+  const storefrontUrl = context.store.storefront_url || "https://technostoresalta.com";
+  const intentKey =
+    router.route_key !== "unknown" ? DEFAULT_INTENT_BY_ROUTE[router.route_key] || detectIntent(context.user_message) : detectIntent(context.user_message);
+  const funnelStage = DEFAULT_STAGE_BY_ROUTE[router.route_key] || detectFunnelStage(context.user_message);
+  const leadScoreDelta = funnelStage === "closing" ? 15 : funnelStage === "interested" ? 10 : 5;
 
-Reglas:
-- Sé conciso y amable
-- Tratá todos los productos publicados del catálogo como disponibles
-- No inventes precios o datos que no tienes
-- Si no sabes algo, di que vas a consultar
-- Mantén el tono profesional pero cercano
-- Responde en español argentino
-- Máximo 1100 caracteres por respuesta`;
+  let rawText = "";
+  let selectedProductKeys = router.matched_product_keys;
 
-  const userContext = buildPromptContext(context, router);
-  
-  const prompt = `${systemPrompt}
+  switch (router.route_key) {
+    case "brand_catalog": {
+      if (!router.matched_brand) {
+        rawText = buildBrandChooserReply(context.candidate_products);
+        break;
+      }
 
-Contexto de la conversación:
-${userContext}
+      const brandProducts = sortProductsForCatalog(filterProductsByBrand(context.candidate_products, router.matched_brand)).slice(0, 10);
+      if (brandProducts.length === 0) {
+        rawText = `No veo productos activos de ${formatBrandLabel(
+          router.matched_brand
+        )} en este momento. Si queres, te paso otra marca o te filtro por presupuesto.`;
+        break;
+      }
 
-Mensaje del cliente: "${context.user_message}"
-
-Genera una respuesta natural y útil.`;
-
-  try {
-    const data = await ollamaGenerate({
-      prompt,
-      options: {
-        temperature: 0.7,
-        top_p: 0.9,
-      },
-    });
-    const rawText = data.response || "";
-    
-    // Extract actions from response
-    const actions: string[] = [];
-    if (rawText.toLowerCase().includes("https://")) {
+      rawText = buildCatalogListReply({
+        intro: `Te paso algunos ${formatBrandLabel(router.matched_brand)} publicados ahora:`,
+        products: brandProducts,
+        storefrontUrl,
+        catalogUrl: buildBrandCatalogUrl(storefrontUrl, router.matched_brand),
+      });
       actions.push("attach_store_url");
+      break;
     }
-    if (router.route_key === "store_info") {
-      actions.push("share_store_location");
+    case "exact_product_quote": {
+      const matchedProducts = sortProductsForCatalog(
+        context.candidate_products.filter((product) => router.matched_product_keys.includes(product.sku))
+      );
+      selectedProductKeys = matchedProducts.map((product) => product.sku);
+      rawText = buildExactProductReply(matchedProducts, storefrontUrl);
+      actions.push("attach_store_url");
+      break;
     }
-    
-    // Determine state delta
-    const intentKey = router.route_key !== "unknown" 
-      ? DEFAULT_INTENT_BY_ROUTE[router.route_key] || detectIntent(context.user_message)
-      : detectIntent(context.user_message);
-    
-    const funnelStage = DEFAULT_STAGE_BY_ROUTE[router.route_key] || detectFunnelStage(context.user_message);
-    
-    const leadScoreDelta = funnelStage === "closing" ? 15 : funnelStage === "interested" ? 10 : 5;
-    
-    return {
-      selected_product_keys: router.matched_product_keys,
-      actions: actions.length > 0 ? actions : [],
-      state_delta: {
-        intent_key: intentKey,
-        funnel_stage: funnelStage,
-        lead_score_delta: leadScoreDelta,
-        selected_product_keys: router.matched_product_keys.length > 0 ? router.matched_product_keys : undefined,
-        share_store_location: actions.includes("share_store_location"),
-      },
-      raw_text: rawText.trim(),
-    };
-  } catch (error) {
-    console.error("AI response generation failed:", error);
-    
-    // Fallback response
-    return {
-      selected_product_keys: [],
-      actions: [],
-      state_delta: {
-        intent_key: "unknown",
-        funnel_stage: "browsing",
-        lead_score_delta: 0,
-      },
-      raw_text: "Gracias por tu mensaje. Te respondo en breve con la información que necesitas.",
-    };
-  }
-}
-
-/**
- * Build prompt context for AI
- */
-function buildPromptContext(context: TurnContext, router: RouterOutput): string {
-  const lines: string[] = [];
-  
-  // Customer info
-  if (context.customer) {
-    const name = [context.customer.first_name, context.customer.last_name].filter(Boolean).join(" ") || "Cliente";
-    lines.push(`Cliente: ${name}`);
-  }
-  
-  // Recent messages
-  if (context.recent_messages.length > 0) {
-    lines.push("\nÚltimos mensajes:");
-    for (const msg of context.recent_messages.slice(-3)) {
-      const text = msg.text_body || msg.transcript || "(media)";
-      lines.push(`  - ${msg.sender_kind}: ${text}`);
+    case "generic_sales": {
+      const brands = getDistinctBrands(context.candidate_products)
+        .slice(0, 5)
+        .map((entry) => formatBrandLabel(entry.brand))
+        .join(", ");
+      rawText = isGreetingMessage(context.user_message)
+        ? `Si, estamos atendiendo.\n\nSi queres catalogo o lista de precios, te lo filtro por marca asi te queda prolijo.\n\nDecime cual queres ver: ${brands}.`
+        : `Contame que marca o modelo buscas y te paso opciones con precio.\n\nSi queres, te lo filtro por marca, memoria o presupuesto.`;
+      break;
     }
-  }
-  
-  // Products
-  if (context.candidate_products.length > 0) {
-    lines.push("\nProductos disponibles:");
-    for (const p of context.candidate_products.slice(0, 5)) {
-      lines.push(`  - ${p.title} ($${p.price_amount || "?"} ${p.currency_code})`);
+    case "store_info": {
+      rawText = buildStoreInfoReply(context.store);
+      actions.push("attach_store_url");
+      if (context.store.address) {
+        actions.push("share_store_location");
+      }
+      break;
     }
-  }
-  
-  // Store info
-  lines.push(`\nTienda: ${context.store.name}`);
-  lines.push(`Web: ${context.store.storefront_url}`);
-  
-  // Router context
-  if (router.route_key !== "unknown") {
-    lines.push(`\nIntento detectado: ${router.route_key}`);
+    case "storefront_order": {
+      rawText =
+        "Decime que modelo queres comprar y te paso el link correcto.\n\nSi preferis, tambien te puedo mostrar la lista por marca para elegir mas rapido.";
+      actions.push("attach_store_url");
+      break;
+    }
+    default: {
+      rawText = "Contame que modelo o marca buscas y te paso precio y opciones publicadas.";
+      break;
+    }
   }
 
-  if (PUBLISHED_PRODUCTS_ALWAYS_AVAILABLE) {
-    lines.push("\nRegla comercial: tratá todos los productos publicados como disponibles.");
-  }
-  
-  return lines.join("\n");
+  return {
+    selected_product_keys: selectedProductKeys,
+    actions,
+    state_delta: {
+      intent_key: intentKey,
+      funnel_stage: funnelStage,
+      lead_score_delta: leadScoreDelta,
+      selected_product_keys: selectedProductKeys.length > 0 ? selectedProductKeys : undefined,
+      share_store_location: actions.includes("share_store_location"),
+    },
+    raw_text: rawText.trim(),
+  };
 }
 
 /**
@@ -499,20 +798,43 @@ export function validateResponse(data: {
   }
   
   // Strip unexpected URLs (only allow store URL)
-  const allowedUrl = context.store.storefront_url.replace(/^https?:\/\//, "");
+  const allowedHost = (() => {
+    try {
+      return new URL(context.store.storefront_url).host;
+    } catch {
+      return "";
+    }
+  })();
   replyText = replyText
     .replace(/logo en\s*https?:\/\/[^\s]+\.?/gi, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
     .replace(/https?:\/\/[^\s]+/gi, (url) => {
-      if (!allowedUrl || !url.includes(allowedUrl)) {
-        validationWarnings.push({
-          code: "unexpected_url",
-          message: `Stripped unexpected URL: ${url}`,
-        });
-        return "";
+      if (!allowedHost) {
+        return url;
       }
-      return url;
+
+      try {
+        const parsed = new URL(url);
+        if (parsed.host === allowedHost) {
+          return url;
+        }
+      } catch {
+        // Ignore parse failure and strip the URL below.
+      }
+
+      validationWarnings.push({
+        code: "unexpected_url",
+        message: `Stripped unexpected URL: ${url}`,
+      });
+      return "";
     })
-    .replace(/\s+/g, " ")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
   
   // Filter actions
@@ -621,24 +943,42 @@ export async function fetchTurnContext(params: {
   // Fetch candidate products (all active published products)
   const productResult = await pool.query(
     `
-    SELECT id, sku, slug, brand, model, title, description, condition, price_amount, currency_code, active, created_at, updated_at
+    SELECT id, sku, slug, brand, model, title, description, condition, price_amount, currency_code, active, in_stock, delivery_days, created_at, updated_at
     FROM public.products
     WHERE active = true
-    ORDER BY created_at DESC
-    LIMIT 8
+    ORDER BY in_stock DESC, price_amount ASC NULLS LAST, updated_at DESC, id DESC
+    LIMIT 40
     `
   );
-  const candidateProducts = productResult.rows;
+  const candidateProducts = productResult.rows.filter((product) => !isDisallowedWorkflowProduct(product));
   
   // Fetch store settings
   const settingsResult = await pool.query(
     `SELECT value FROM public.settings WHERE key = 'store'`
   );
-  const store: StoreSettings = settingsResult.rows[0]?.value || {
+  const storeRoot = (settingsResult.rows[0]?.value as Record<string, unknown> | undefined) || {};
+  const store: StoreSettings = {
+    name: typeof storeRoot.name === "string" && storeRoot.name.trim() ? storeRoot.name.trim() : "TechnoStore Salta",
+    storefront_url:
+      typeof storeRoot.storefront_url === "string" && storeRoot.storefront_url.trim()
+        ? storeRoot.storefront_url.trim()
+        : typeof storeRoot.store_website_url === "string" && storeRoot.store_website_url.trim()
+          ? storeRoot.store_website_url.trim()
+          : "https://technostoresalta.com",
+    ops_host:
+      typeof storeRoot.ops_host === "string" && storeRoot.ops_host.trim() ? storeRoot.ops_host.trim() : "https://aldegol.com",
+    address: typeof storeRoot.address === "string" && storeRoot.address.trim() ? storeRoot.address.trim() : null,
+    hours: typeof storeRoot.hours === "string" && storeRoot.hours.trim() ? storeRoot.hours.trim() : null,
+  };
+  if (!settingsResult.rows[0]) {
+    Object.assign(store, {
     name: "TechnoStore",
     storefront_url: "https://technostoresalta.com",
     ops_host: "https://aldegol.com",
-  };
+      address: null,
+      hours: null,
+    });
+  }
   
   return {
     customer,

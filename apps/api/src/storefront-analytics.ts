@@ -1298,7 +1298,7 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
         productMap.set(productKey, {
           product_id: row.product_id,
           sku: trimText(row.product_sku),
-          url_path: trimText(row.product_sku) ? `/${trimText(row.product_sku)}` : null,
+          url_path: trimText(row.product_sku) ? buildStorefrontProductPath(trimText(row.product_sku) as string) : null,
           title: productLabel || "Unknown product",
           brand: trimText(row.product_brand),
           view_contents: 0,
@@ -1685,4 +1685,10 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
         currency_code: trimText(row.currency_code) || trimText(row.order_currency_code),
       })),
   };
+}
+function buildStorefrontProductPath(sku: string) {
+  const normalizedSku = sku.trim().toLowerCase();
+  return normalizedSku.startsWith("iphone-")
+    ? `/iphone/${encodeURIComponent(normalizedSku)}`
+    : `/${encodeURIComponent(normalizedSku)}`;
 }

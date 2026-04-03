@@ -953,7 +953,7 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
     groqNode.type = "@n8n/n8n-nodes-langchain.lmChatGroq";
     groqNode.typeVersion = 1;
     groqNode.parameters = {
-      model: '={{ $json.responder_model_name || "llama3-8b-8192" }}',
+      model: '={{ $json.responder_model_name || "qwen/qwen3-32b" }}',
       options: {},
     };
     groqNode.credentials = {
@@ -1075,7 +1075,7 @@ const prompt = [
 return [{
   json: {
     ...data,
-    responder_model_name: String($env.GROQ_MODEL_SALES || 'llama3-8b-8192'),
+    responder_model_name: String($env.GROQ_MODEL_SALES || 'qwen/qwen3-32b'),
     chatInput: prompt,
   }
 }];`
@@ -1167,7 +1167,7 @@ return [{
       state_delta: stateDelta,
     },
     responder_provider_name: 'groq',
-    responder_model_name: base.responder_model_name || 'llama3-8b-8192',
+    responder_model_name: base.responder_model_name || 'qwen/qwen3-32b',
     responder_raw_text: rawText,
   }
 }];`

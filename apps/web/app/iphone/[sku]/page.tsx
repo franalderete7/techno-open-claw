@@ -165,6 +165,15 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
                     ))}
                   </div>
                 ) : null}
+                <div className="apple-detail-mobile-cta">
+                  <StorefrontProductActions
+                    product={product}
+                    whatsappUrl={store.whatsapp_url}
+                    sourcePath={detailHref}
+                    note={null}
+                    className="apple-detail-actions"
+                  />
+                </div>
               </div>
 
               <div className="apple-detail-visual">
@@ -189,7 +198,7 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
                   whatsappUrl={store.whatsapp_url}
                   sourcePath={detailHref}
                   note={null}
-                  className="apple-detail-actions"
+                  className="apple-detail-actions apple-detail-actions--footer"
                 />
               </div>
             </section>

@@ -120,7 +120,10 @@ export function buildStorefrontProfile(settings: SettingRecord[]): StorefrontPro
 }
 
 export function buildStorefrontProductPath(sku: string) {
-  return `/${encodeURIComponent(sku.trim().toLowerCase())}`;
+  const normalizedSku = sku.trim().toLowerCase();
+  return normalizedSku.startsWith("iphone-")
+    ? `/iphone/${encodeURIComponent(normalizedSku)}`
+    : `/${encodeURIComponent(normalizedSku)}`;
 }
 
 export function buildStorefrontProductUrl(storefrontUrl: string | null, sku: string) {

@@ -3,9 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { trackMetaContact } from "../../lib/meta-pixel";
-import { buildStorefrontConsultUrl, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
 import { trackStorefrontEvent, trackStorefrontSearch } from "../../lib/storefront-analytics";
+import { type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
+import { StorefrontProductActions } from "./storefront-product-actions";
 
 type AppleStorefrontCatalogProps = {
   store: StorefrontProfile;
@@ -69,60 +69,6 @@ function ProductImage({ product, eager = false }: { product: StorefrontProduct; 
 
 function AppleTierPill() {
   return <span className="apple-tier-pill">APPLE PREMIUM</span>;
-}
-
-function AppleWhatsAppButton({
-  product,
-  whatsappUrl,
-  sourcePath,
-}: {
-  product: Pick<StorefrontProduct, "id" | "sku" | "title" | "brand" | "public_price_ars">;
-  whatsappUrl: string | null;
-  sourcePath: string;
-}) {
-  const consultUrl = buildStorefrontConsultUrl(whatsappUrl, product);
-
-  if (!consultUrl) {
-    return null;
-  }
-
-  return (
-    <a
-      className="apple-whatsapp-button"
-      href={consultUrl}
-      target="_blank"
-      rel="noreferrer"
-      onClick={() => {
-        trackMetaContact({
-          sku: product.sku,
-          title: product.title,
-          brand: product.brand,
-          value: product.public_price_ars,
-          currency: "ARS",
-        });
-        trackStorefrontEvent("contact", {
-          product_id: product.id,
-          sku: product.sku,
-          value_amount: product.public_price_ars,
-          currency_code: "ARS",
-          payload: {
-            title: product.title,
-            brand: product.brand,
-            channel: "whatsapp",
-            placement: "iphone_storefront_card",
-          },
-        });
-      }}
-      data-fast-goal="click_consultar"
-      data-fast-goal-product-id={String(product.id)}
-      data-fast-goal-product-sku={product.sku}
-      data-fast-goal-product-title={product.title}
-      data-fast-goal-price-ars={product.public_price_ars != null ? String(product.public_price_ars) : undefined}
-      data-fast-goal-source-path={sourcePath}
-    >
-      Consultar por WhatsApp
-    </a>
-  );
 }
 
 export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatalogProps) {
@@ -315,9 +261,13 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                       <span>Precio</span>
                       <strong>{formatMoney(product.public_price_ars)}</strong>
                     </div>
-                    <div className="apple-card-actions">
-                      <AppleWhatsAppButton product={product} whatsappUrl={store.whatsapp_url} sourcePath="/iphone" />
-                    </div>
+                    <StorefrontProductActions
+                      product={product}
+                      whatsappUrl={store.whatsapp_url}
+                      sourcePath="/iphone"
+                      note="Abrimos WhatsApp con este modelo ya cargado."
+                      className="apple-card-actions storefront-card-actions"
+                    />
                   </div>
                 </article>
               );

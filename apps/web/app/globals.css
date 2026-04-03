@@ -3354,6 +3354,7 @@ nav a:hover {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
+  width: 100%;
 }
 
 .apple-storefront-brand {
@@ -3367,8 +3368,11 @@ nav a:hover {
 .apple-storefront-nav-links {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .apple-storefront-link,
@@ -3528,6 +3532,9 @@ nav a:hover {
   max-height: min(260px, 34vmin);
   width: auto;
   max-width: 100%;
+  display: block;
+  margin-inline: auto;
+  object-position: center center;
 }
 
 .apple-card-visual .apple-phone-fallback {
@@ -3621,6 +3628,32 @@ nav a:hover {
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
+}
+
+.apple-storefront .apple-card-actions.storefront-card-actions {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.apple-storefront .apple-card-actions .storefront-pay-button {
+  background: var(--apple-green);
+  color: var(--apple-green-text);
+  font-weight: 700;
+}
+
+.apple-storefront .apple-card-actions .storefront-secondary-button {
+  border: 1px solid var(--apple-line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--apple-soft);
+}
+
+.apple-storefront .apple-card-actions .storefront-card-action-note {
+  color: var(--apple-muted);
+}
+
+.apple-detail-mobile-cta {
+  display: none;
 }
 
 .apple-whatsapp-button {
@@ -3895,6 +3928,17 @@ nav a:hover {
 }
 
 @media (max-width: 1080px) {
+  .apple-detail-mobile-cta {
+    display: grid;
+    gap: 12px;
+    width: 100%;
+    margin-top: 6px;
+  }
+
+  .apple-detail-footer .apple-detail-actions.apple-detail-actions--footer {
+    display: none;
+  }
+
   .apple-detail-stage {
     grid-template-columns: 1fr;
   }
@@ -3923,6 +3967,9 @@ nav a:hover {
     width: 100%;
     max-width: 100%;
     max-height: min(58vh, 520px);
+    display: block;
+    margin-inline: auto;
+    object-position: center center;
   }
 
   .apple-detail-support {
@@ -3936,8 +3983,21 @@ nav a:hover {
   }
 
   .apple-storefront-nav {
-    align-items: start;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .apple-storefront-brand {
+    min-width: 0;
+  }
+
+  .apple-storefront-brand img {
+    width: auto;
+    max-width: min(104px, 46vw);
+    height: auto;
   }
 
   .apple-filters {

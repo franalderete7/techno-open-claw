@@ -221,11 +221,13 @@ function buildProductUrl(storeWebsiteUrl: string | null | undefined, productKey:
     return null;
   }
 
+  const path = sku.startsWith("iphone-") ? `/iphone/${encodeURIComponent(sku)}` : `/${encodeURIComponent(sku)}`;
+
   if (!storeWebsiteUrl) {
-    return `/${encodeURIComponent(sku)}`;
+    return path;
   }
 
-  return `${storeWebsiteUrl.replace(/\/$/, "")}/${encodeURIComponent(sku)}`;
+  return `${storeWebsiteUrl.replace(/\/$/, "")}${path}`;
 }
 
 function messageRequestsPaymentLink(userMessage: string) {
@@ -634,51 +636,11 @@ function selectUsedIphoneCandidates(params: {
   customerState: NotesState;
   limit: number;
 }) {
-  const signals = getMessageProductSignals(params.userMessage);
-  const wantsBudgetOrUsed = messageAsksForBudgetOrUsed(signals.normalizedMessage);
-  const prefersAffordableUsed =
-    wantsBudgetOrUsed &&
-    signals.familyNumber == null &&
-    signals.tierKey == null &&
-    signals.storageValue == null &&
-    !signals.modelVariantToken;
-  const hasAppleContext =
-    signals.brandKeys.includes("apple") ||
-    params.customerState.brandsMentioned.includes("apple") ||
-    looksLikeAppleReference(params.customerState.interestedProduct);
+  return [];
+}
 
-  if (!hasAppleContext || staticUsedIphoneCatalog.items.length === 0) {
-    return [];
-  }
-
-  return staticUsedIphoneCatalog.items
-    .map((item) => ({
-      ...item,
-      score: scoreUsedIphoneCandidate(item, signals),
-    }))
-    .filter((item) => item.score > 0 || wantsBudgetOrUsed)
-    .sort((left, right) => {
-      if (prefersAffordableUsed) {
-        if (left.condition !== right.condition) {
-          if (left.condition === "used") return -1;
-          if (right.condition === "used") return 1;
-        }
-        if (left.sale_price_usd !== right.sale_price_usd) return left.sale_price_usd - right.sale_price_usd;
-        if ((right.battery_health_pct ?? 0) !== (left.battery_health_pct ?? 0)) {
-          return (right.battery_health_pct ?? 0) - (left.battery_health_pct ?? 0);
-        }
-        if (right.score !== left.score) return right.score - left.score;
-        return left.source_row - right.source_row;
-      }
-
-      if (right.score !== left.score) return right.score - left.score;
-      if (left.sale_price_usd !== right.sale_price_usd) return left.sale_price_usd - right.sale_price_usd;
-      if ((right.battery_health_pct ?? 0) !== (left.battery_health_pct ?? 0)) {
-        return (right.battery_health_pct ?? 0) - (left.battery_health_pct ?? 0);
-      }
-      return left.source_row - right.source_row;
-    })
-    .slice(0, params.limit);
+function isDisallowedWorkflowProduct(product: Pick<ProductRow, "brand" | "condition">) {
+  return normalizeText(product.brand) === "apple" && normalizeText(product.condition) !== "new";
 }
 
 function asRecord(value: unknown) {
@@ -1075,13 +1037,14 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
 
     const interestedProductKey = customerState.interestedProduct?.trim().toLowerCase() || null;
     const currentProductSignals = getMessageProductSignals(userMessage);
-    const usedIphoneCandidates = selectUsedIphoneCandidates({
+    const usedIphoneCandidates: UsedIphoneCandidate[] = selectUsedIphoneCandidates({
       userMessage,
       customerState,
       limit: Math.min(6, candidateLimit),
     });
 
     const rawCandidateProducts = productRows
+      .filter((product) => !isDisallowedWorkflowProduct(product))
       .map((product) => {
         const productKey = product.sku.trim().toLowerCase();
         const currentIntentAdjustment = computeCurrentIntentAdjustment(product, currentProductSignals);
@@ -1311,11 +1274,11 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           })),
         candidate_products: candidateProducts,
         used_iphone_catalog: {
-          enabled: staticUsedIphoneCatalog.items.length > 0,
+          enabled: false,
           currency: staticUsedIphoneCatalog.currency,
-          markup_pct: staticUsedIphoneCatalog.markup_pct,
-          total_items: staticUsedIphoneCatalog.items.length,
-          captured_on: staticUsedIphoneCatalog.source.captured_on ?? null,
+          markup_pct: 0,
+          total_items: 0,
+          captured_on: null,
         },
         used_iphone_candidates: usedIphoneCandidates.map((item) => ({
           id: item.id,

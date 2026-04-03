@@ -70,7 +70,10 @@ async function getStorefrontUrl() {
 }
 
 function buildStorefrontProductPath(sku: string) {
-  return `/${encodeURIComponent(sku.trim().toLowerCase())}`;
+  const normalizedSku = sku.trim().toLowerCase();
+  return normalizedSku.startsWith("iphone-")
+    ? `/iphone/${encodeURIComponent(normalizedSku)}`
+    : `/${encodeURIComponent(normalizedSku)}`;
 }
 
 function buildEventSourceUrl(storefrontUrl: string, sku: string | null) {
