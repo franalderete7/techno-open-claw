@@ -275,24 +275,10 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
         </div>
       </header>
 
-      <section className="apple-storefront-hero">
-        <div className="apple-storefront-hero-copy">
-          <span className="apple-storefront-kicker">TechnoStore Apple</span>
-          <h1 className="apple-storefront-title">iPhone con estética propia, precio final y atención directa.</h1>
-          <p className="apple-storefront-lead">
-            Una tienda dedicada para Apple dentro de TechnoStore. Mismo backend, misma operación, una experiencia visual hecha para tus campañas y publicaciones premium.
-          </p>
-
-          <div className="apple-storefront-meta">
-            <span>{products.length} modelos nuevos</span>
-            <span>Diseño Apple-first</span>
-            <span>Pago directo y WhatsApp</span>
-          </div>
-        </div>
-
-        {showFeatured ? (
+      {showFeatured ? (
+        <section className="apple-storefront-hero">
           <article className="apple-feature-card">
-            <div className="apple-feature-copy">
+            <Link href={buildAppleProductPath(showFeatured.sku)} className="apple-feature-link-surface apple-feature-copy">
               <AppleTierPill />
               <div className="apple-feature-headline">
                 {heroHeadline.map((line) => (
@@ -300,11 +286,11 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                 ))}
               </div>
               {heroSpec ? <p className="apple-feature-spec">{heroSpec}</p> : null}
-            </div>
+            </Link>
 
-            <div className="apple-feature-visual">
+            <Link href={buildAppleProductPath(showFeatured.sku)} className="apple-feature-link-surface apple-feature-visual" aria-label={`Ver ${showFeatured.title}`}>
               <ProductImage product={showFeatured} eager />
-            </div>
+            </Link>
 
             <div className="apple-feature-footer">
               <div className="apple-feature-price">
@@ -313,15 +299,12 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
               </div>
               <div className="apple-feature-actions">
                 <AppleWhatsAppButton product={showFeatured} whatsappUrl={store.whatsapp_url} sourcePath="/iphone" />
-                <Link className="apple-feature-link" href={buildAppleProductPath(showFeatured.sku)}>
-                  Ver equipo
-                </Link>
               </div>
-              <span className="apple-support-pill">{APPLE_SUPPORT_COPY}</span>
+              <span className="apple-support-pill apple-feature-support">{APPLE_SUPPORT_COPY}</span>
             </div>
           </article>
-        ) : null}
-      </section>
+        </section>
+      ) : null}
 
       <section className="apple-filters" id="filtros">
         <label className="apple-filter-field apple-filter-search">
@@ -390,7 +373,7 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
 
               return (
                 <article key={product.id} className="apple-product-card">
-                  <div className="apple-card-copy">
+                  <Link href={detailHref} className="apple-card-link-surface apple-card-copy">
                     <AppleTierPill />
                     <div className="apple-card-headline">
                       {headline.map((line) => (
@@ -398,22 +381,21 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                       ))}
                     </div>
                     {specLine ? <p className="apple-card-spec">{specLine}</p> : null}
-                  </div>
+                  </Link>
 
-                  <div className="apple-card-visual">
+                  <Link href={detailHref} className="apple-card-link-surface apple-card-visual" aria-label={`Ver ${product.title}`}>
                     <ProductImage product={product} />
-                  </div>
+                  </Link>
 
                   <div className="apple-card-bottom">
                     <div className="apple-card-price">
                       <span>Precio</span>
                       <strong>{formatMoney(product.public_price_ars)}</strong>
                     </div>
-                    <AppleWhatsAppButton product={product} whatsappUrl={store.whatsapp_url} sourcePath="/iphone" />
-                    <Link className="apple-card-link" href={detailHref}>
-                      Ver equipo
-                    </Link>
-                    <span className="apple-support-pill">{APPLE_SUPPORT_COPY}</span>
+                    <div className="apple-card-actions">
+                      <AppleWhatsAppButton product={product} whatsappUrl={store.whatsapp_url} sourcePath="/iphone" />
+                    </div>
+                    <span className="apple-support-pill apple-card-support">{APPLE_SUPPORT_COPY}</span>
                   </div>
                 </article>
               );

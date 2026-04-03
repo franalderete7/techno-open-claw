@@ -32,15 +32,6 @@ function buildAppleProductPath(sku: string) {
   return `/iphone/${encodeURIComponent(sku.trim().toLowerCase())}`;
 }
 
-function buildAppleProductUrl(storefrontUrl: string | null, sku: string) {
-  const path = buildAppleProductPath(sku);
-  if (!storefrontUrl) {
-    return path;
-  }
-
-  return `${storefrontUrl.replace(/\/$/, "")}${path}`;
-}
-
 function splitAppleHeadline(value: string) {
   const words = value.trim().split(/\s+/).filter(Boolean);
   if (words.length <= 2) {
@@ -115,7 +106,6 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
   const headline = product ? splitAppleHeadline(product.model || product.title) : [];
   const specLine = product ? buildAppleSpecLine(product) : "";
   const detailHref = product ? buildAppleProductPath(product.sku) : "/iphone";
-  const productUrl = product ? buildAppleProductUrl(store.storefront_url, product.sku) : store.storefront_url || "/iphone";
   const specChips = product
     ? [product.ram_gb ? `${product.ram_gb}GB RAM` : null, product.storage_gb ? `${product.storage_gb}GB` : null, product.network, product.color]
         .filter(Boolean)
@@ -195,30 +185,27 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
               <div className="apple-detail-visual">
                 <ProductMedia product={product} />
               </div>
-            </section>
 
-            <section className="apple-detail-purchase">
-              <div className="apple-detail-price-block">
-                <span>Precio</span>
-                <strong>{formatMoney(product.public_price_ars)}</strong>
-                <small>
-                  {product.delivery_days ? `Entrega estimada en ${product.delivery_days} días` : "Retiro o entrega coordinada"}
-                </small>
-              </div>
+              <div className="apple-detail-footer">
+                <div className="apple-detail-price-block">
+                  <span>Precio</span>
+                  <strong>{formatMoney(product.public_price_ars)}</strong>
+                  <small>
+                    {product.delivery_days ? `Entrega estimada en ${product.delivery_days} días` : "Retiro o entrega coordinada"}
+                  </small>
+                </div>
 
-              <StorefrontProductActions
-                product={product}
-                whatsappUrl={store.whatsapp_url}
-                sourcePath={detailHref}
-                note={null}
-                className="apple-detail-actions"
-              />
+                <StorefrontProductActions
+                  product={product}
+                  whatsappUrl={store.whatsapp_url}
+                  sourcePath={detailHref}
+                  note={null}
+                  className="apple-detail-actions"
+                />
 
-              <div className="apple-detail-support">
-                <span className="apple-support-pill">{APPLE_SUPPORT_COPY}</span>
-                <a className="apple-share-link" href={productUrl}>
-                  {productUrl}
-                </a>
+                <div className="apple-detail-support">
+                  <span className="apple-support-pill">{APPLE_SUPPORT_COPY}</span>
+                </div>
               </div>
             </section>
           </div>
