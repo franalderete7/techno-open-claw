@@ -7,10 +7,16 @@ type GrowthPageProps = {
     days?: string;
     source?: string;
     device?: string;
+    interval?: string;
   }>;
 };
 
 const DAY_OPTIONS = [7, 30, 90] as const;
+const INTERVAL_OPTIONS = [
+  { value: "day", label: "Día" },
+  { value: "week", label: "Semana" },
+  { value: "month", label: "Mes" },
+] as const;
 
 function sourceOptionLabel(value: string) {
   switch (value) {
@@ -52,16 +58,25 @@ function normalizeDays(rawValue: string | undefined) {
   return Math.max(1, Math.min(180, Math.trunc(parsed)));
 }
 
+function normalizeInterval(rawValue: string | undefined) {
+  if (rawValue === "week" || rawValue === "month") {
+    return rawValue;
+  }
+
+  return "day";
+}
+
 export default async function GrowthPage({ searchParams }: GrowthPageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const days = normalizeDays(resolvedSearchParams.days);
   const source = resolvedSearchParams.source?.trim() || null;
   const device = resolvedSearchParams.device?.trim() || null;
+  const interval = normalizeInterval(resolvedSearchParams.interval);
   let snapshot = null as Awaited<ReturnType<typeof getStorefrontAnalyticsOverview>> | null;
   let error: string | null = null;
 
   try {
-    snapshot = await getStorefrontAnalyticsOverview({ days, source, device });
+    snapshot = await getStorefrontAnalyticsOverview({ days, source, device, interval });
   } catch (caught) {
     error = caught instanceof Error ? caught.message : "Failed to load storefront analytics";
   }
@@ -80,7 +95,7 @@ export default async function GrowthPage({ searchParams }: GrowthPageProps) {
               {DAY_OPTIONS.map((option) => (
                 <Link
                   key={option}
-                  href={`/growth?days=${option}${source ? `&source=${encodeURIComponent(source)}` : ""}${device ? `&device=${encodeURIComponent(device)}` : ""}`}
+                  href={`/growth?days=${option}&interval=${interval}${source ? `&source=${encodeURIComponent(source)}` : ""}${device ? `&device=${encodeURIComponent(device)}` : ""}`}
                   className={`chip action-link ${option === days ? "accent" : ""}`}
                 >
                   Últimos {option}d
@@ -94,6 +109,16 @@ export default async function GrowthPage({ searchParams }: GrowthPageProps) {
             <form className="purchase-toolbar-row growth-toolbar-row" method="get">
               <input type="hidden" name="days" value={String(days)} />
               <div className="purchase-toolbar-inputs growth-filter-grid">
+                <label className="toolbar-control">
+                  <span>Intervalo</span>
+                  <select name="interval" defaultValue={snapshot.filters.applied.interval}>
+                    {INTERVAL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="toolbar-control">
                   <span>Fuente</span>
                   <select name="source" defaultValue={snapshot.filters.applied.source ?? ""}>
@@ -121,7 +146,7 @@ export default async function GrowthPage({ searchParams }: GrowthPageProps) {
                 <button type="submit" className="chip action-link accent growth-filter-submit">
                   Aplicar filtros
                 </button>
-                <Link href={`/growth?days=${days}`} className="chip action-link">
+                <Link href={`/growth?days=${days}&interval=${interval}`} className="chip action-link">
                   Limpiar
                 </Link>
               </div>

@@ -50,13 +50,6 @@ function formatDateTime(value: string | null | undefined) {
   });
 }
 
-function formatDateLabel(value: string) {
-  return new Date(`${value}T00:00:00Z`).toLocaleDateString("es-AR", {
-    month: "short",
-    day: "numeric",
-  });
-}
-
 function eventLabel(value: string) {
   switch (value) {
     case "page_view":
@@ -143,17 +136,19 @@ function barWidth(value: number, max: number) {
 
 function buildGrowthHref(
   days: number,
-  applied: { source: string | null; device: string | null },
-  overrides: Partial<{ source: string | null; device: string | null }>
+  applied: { source: string | null; device: string | null; interval: "day" | "week" | "month" },
+  overrides: Partial<{ source: string | null; device: string | null; interval: "day" | "week" | "month" | null }>
 ) {
   const params = new URLSearchParams();
   params.set("days", String(days));
 
   const source = overrides.source !== undefined ? overrides.source : applied.source;
   const device = overrides.device !== undefined ? overrides.device : applied.device;
+  const interval = overrides.interval !== undefined ? overrides.interval : applied.interval;
 
   if (source) params.set("source", source);
   if (device) params.set("device", device);
+  if (interval) params.set("interval", interval);
   return `/growth?${params.toString()}`;
 }
 
@@ -202,9 +197,11 @@ function GrowthSection({
 function ActivityChart({
   daily,
   days,
+  interval,
 }: {
   daily: StorefrontAnalyticsOverviewResponse["daily"];
   days: number;
+  interval: "day" | "week" | "month";
 }) {
   const width = 740;
   const height = 240;
@@ -230,7 +227,9 @@ function ActivityChart({
       <div className="panel-header">
         <div>
           <h4 className="panel-title">Ritmo de actividad</h4>
-          <p className="panel-copy">Tendencia diaria consolidada en los últimos {days} días.</p>
+          <p className="panel-copy">
+            Tendencia por {interval === "month" ? "mes" : interval === "week" ? "semana" : "día"} en los últimos {days} días.
+          </p>
         </div>
       </div>
 
@@ -284,43 +283,64 @@ function ActivityChart({
 
       <div className="growth-chart-labels">
         {labels.map((point) => (
-          <span key={point.date}>{formatDateLabel(point.date)}</span>
+          <span key={point.date}>{point.label}</span>
         ))}
       </div>
     </article>
   );
 }
 
-function FunnelPanel({ funnel }: { funnel: StorefrontAnalyticsOverviewResponse["funnel"] }) {
-  const max = Math.max(1, ...funnel.map((item) => item.count));
+function JourneyPanel({
+  journey,
+  searches,
+  checkouts,
+}: {
+  journey: StorefrontAnalyticsOverviewResponse["journey"];
+  searches: number;
+  checkouts: number;
+}) {
+  const max = Math.max(1, ...journey.map((item) => item.count));
 
   return (
     <article className="growth-table-card">
       <div className="panel-header">
         <div>
-          <h4 className="panel-title">Embudo por sesión</h4>
-          <p className="panel-copy">Cuántas sesiones llegan a cada hito real del recorrido.</p>
+          <h4 className="panel-title">Journey real</h4>
+          <p className="panel-copy">Sólo etapas ordenadas del recorrido para que los porcentajes sean entendibles.</p>
         </div>
       </div>
 
-      <div className="growth-funnel">
-        {funnel.map((step) => (
-          <div key={step.key} className="growth-funnel-row">
-            <div className="growth-funnel-head">
-              <div>
-                <strong>{step.label}</strong>
-                <span className="muted">
-                  {step.conversion_from_previous_pct == null ? "Base" : `${formatPct(step.conversion_from_previous_pct)} desde el paso anterior`}
-                </span>
+      <div className="growth-journey-flow">
+        {journey.map((step, index) => (
+          <div key={step.key} className="growth-journey-stage">
+            <div className="growth-journey-card">
+              <span className="stat-label">{step.label}</span>
+              <strong className="growth-journey-value">{formatNumber(step.count)}</strong>
+              <span className="growth-journey-copy">{step.detail}</span>
+              <div className="growth-funnel-bar">
+                <div className={`growth-funnel-fill is-${step.key === "sessions" ? "page_view" : step.key}`} style={{ width: barWidth(step.count, max) }} />
               </div>
-              <strong>{formatNumber(step.count)}</strong>
+              <div className="growth-journey-metrics">
+                <span>{formatPct(step.conversion_from_sessions_pct)} de sesiones</span>
+                <span>{step.conversion_from_previous_pct == null ? "Base" : `${formatPct(step.conversion_from_previous_pct)} desde el paso anterior`}</span>
+              </div>
             </div>
-            <div className="growth-funnel-bar">
-              <div className={`growth-funnel-fill is-${step.key}`} style={{ width: barWidth(step.count, max) }} />
-            </div>
-            <span className="muted">{formatPct(step.conversion_from_sessions_pct)} de las sesiones</span>
+            {index < journey.length - 1 ? <div className="growth-journey-arrow" aria-hidden="true">→</div> : null}
           </div>
         ))}
+      </div>
+
+      <div className="growth-journey-sidekicks">
+        <div className="growth-mini-metric">
+          <span className="stat-label">Búsquedas</span>
+          <strong>{formatNumber(searches)}</strong>
+          <span className="muted">Se leen aparte porque no todas las sesiones buscan.</span>
+        </div>
+        <div className="growth-mini-metric">
+          <span className="stat-label">Checkout</span>
+          <strong>{formatNumber(checkouts)}</strong>
+          <span className="muted">Se muestra como señal paralela, no como paso obligatorio.</span>
+        </div>
       </div>
     </article>
   );
@@ -418,17 +438,18 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
 
       <GrowthSection
         title="Overview"
-        copy="La parte que más se consulta debería quedar arriba: volumen, tendencia y embudo."
+        copy="La vista principal ahora usa un journey ordenado y un gráfico con intervalo controlable."
         badges={[
           { label: `${formatNumber(snapshot.totals.events)} eventos`, tone: "accent" },
           { label: `${days} días` },
+          { label: `Vista: ${snapshot.filters.applied.interval === "month" ? "Mes" : snapshot.filters.applied.interval === "week" ? "Semana" : "Día"}` },
           snapshot.filters.applied.source ? { label: `Fuente: ${sourceLabel(snapshot.filters.applied.source)}` } : null,
           snapshot.filters.applied.device ? { label: `Dispositivo: ${deviceLabel(snapshot.filters.applied.device)}` } : null,
         ].filter((badge): badge is GrowthSummaryBadge => badge != null)}
       >
         <section className="split-grid growth-top-grid">
-          <ActivityChart daily={snapshot.daily} days={days} />
-          <FunnelPanel funnel={snapshot.funnel} />
+          <ActivityChart daily={snapshot.daily} days={days} interval={snapshot.filters.applied.interval} />
+          <JourneyPanel journey={snapshot.journey} searches={snapshot.totals.searches} checkouts={snapshot.totals.checkout_starts} />
         </section>
       </GrowthSection>
 

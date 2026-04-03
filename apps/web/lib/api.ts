@@ -531,10 +531,12 @@ export type StorefrontAnalyticsOverviewResponse = {
     applied: {
       source: string | null;
       device: string | null;
+      interval: "day" | "week" | "month";
     };
     available: {
       sources: string[];
       devices: string[];
+      intervals: Array<"day" | "week" | "month">;
     };
   };
   warnings: string[];
@@ -554,15 +556,17 @@ export type StorefrontAnalyticsOverviewResponse = {
     purchase_rate_pct: number | null;
     avg_session_duration_seconds: number | null;
   };
-  funnel: Array<{
-    key: "page_view" | "search" | "view_content" | "contact" | "initiate_checkout" | "purchase";
+  journey: Array<{
+    key: "sessions" | "view_content" | "engaged" | "purchase";
     label: string;
+    detail: string;
     count: number;
     conversion_from_previous_pct: number | null;
     conversion_from_sessions_pct: number | null;
   }>;
   daily: Array<{
     date: string;
+    label: string;
     page_views: number;
     searches: number;
     view_contents: number;
@@ -749,7 +753,12 @@ export async function getMetaAdsOverview(options?: { days?: number; limit?: numb
   return apiFetch<MetaAdsOverviewResponse>(`/v1/meta/ads/overview${query ? `?${query}` : ""}`);
 }
 
-export async function getStorefrontAnalyticsOverview(options?: { days?: number; source?: string | null; device?: string | null }) {
+export async function getStorefrontAnalyticsOverview(options?: {
+  days?: number;
+  source?: string | null;
+  device?: string | null;
+  interval?: "day" | "week" | "month" | null;
+}) {
   const params = new URLSearchParams();
   if (options?.days != null) {
     params.set("days", String(options.days));
@@ -759,6 +768,9 @@ export async function getStorefrontAnalyticsOverview(options?: { days?: number; 
   }
   if (options?.device) {
     params.set("device", options.device);
+  }
+  if (options?.interval) {
+    params.set("interval", options.interval);
   }
 
   const query = params.toString();

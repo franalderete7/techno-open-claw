@@ -10,6 +10,7 @@ const overviewQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(180).default(30),
   source: z.string().trim().max(120).optional().nullable(),
   device: z.string().trim().max(120).optional().nullable(),
+  interval: z.enum(["day", "week", "month"]).optional().nullable(),
 });
 
 const createEventBodySchema = z.object({

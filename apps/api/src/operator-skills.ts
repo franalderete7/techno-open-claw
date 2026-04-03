@@ -207,7 +207,7 @@ const SKILLS: OperatorSkillDefinition[] = [
     label: "Borrar producto",
     mode: "write",
     entity: "products",
-    summary: "Elimina un producto de forma permanente solo si no tiene stock asociado.",
+    summary: "Elimina un producto de forma permanente si no tiene stock asociado. Si existen checkout intents del storefront, también los limpia automáticamente.",
     requiredInputs: ["product_ref"],
     optionalInputs: [],
     guardrails: [

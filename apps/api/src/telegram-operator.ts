@@ -2390,7 +2390,7 @@ function buildOperatorMenuReply(intent: MenuIntent): { text: string; buttons?: O
     case "products_delete_help":
       return {
         text:
-          "Podés pedirme archivar o borrar un producto. Si querés borrarlo de verdad, decilo explícito. Si tiene stock, no lo borro; en ese caso conviene archivarlo.",
+          "Podés pedirme archivar o borrar un producto. Si querés borrarlo de verdad, decilo explícito. Si tiene stock, no lo borro; en ese caso conviene archivarlo. Los checkout intents del storefront se limpian automáticamente.",
       };
     case "stock_list_help":
       return {
@@ -2637,6 +2637,7 @@ const OPERATOR_SCHEMA_GUIDE = [
   "- Use product_ref, stock_ref, customer_ref, and setting key exactly from the operator request until deterministic resolution happens.",
   "- Never claim a row was created, updated, or deleted unless the deterministic command layer executed it.",
   "- If the operator asks to archive a product, prefer update_product with active=false. Use delete_product only for explicit permanent deletion intent.",
+  "- delete_product must remove associated storefront checkout intents automatically before deleting the product row. Do not block deletion because of storefront intents.",
 ].join("\n");
 
 const OPERATOR_SKILL_GUIDE = buildOperatorSkillGuide();
@@ -4479,19 +4480,23 @@ async function prepareWriteCommand(
         throw new Error(`No puedo borrar ${product.sku} porque todavía tiene unidades de stock. Archivá el producto primero.`);
       }
 
-      if (Number(checkoutIntentCount[0]?.count ?? 0) > 0) {
-        throw new Error(
-          `No puedo borrar ${product.sku} porque tiene checkout intents del storefront asociados. Archivá el producto primero.`
-        );
-      }
-
       return {
         command,
-        summary: [`Borrar producto`, `• ${product.sku}`, `• ${product.title}`].join("\n"),
+        summary: [
+          `Borrar producto`,
+          `• ${product.sku}`,
+          `• ${product.title}`,
+          Number(checkoutIntentCount[0]?.count ?? 0) > 0
+            ? `• También se borran ${Number(checkoutIntentCount[0]?.count ?? 0)} checkout intents del storefront`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
         payload: {
           product_id: product.id,
           sku: product.sku,
           title: product.title,
+          checkout_intent_count: Number(checkoutIntentCount[0]?.count ?? 0),
         },
       };
     }
@@ -5390,6 +5395,7 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
           product_id: z.coerce.number().int().positive(),
           sku: z.string(),
           title: z.string(),
+          checkout_intent_count: z.coerce.number().int().nonnegative().optional(),
         })
         .parse(payload);
 
@@ -5402,23 +5408,23 @@ async function executeWriteCommand(client: PoolClient, actor: ActorContext, comm
         throw new Error(`No puedo borrar ${parsed.sku} porque todavía tiene unidades de stock. Archivá el producto primero.`);
       }
 
-      const checkoutIntentCount = await client.query<{ count: string }>(
-        "select count(*)::text as count from public.storefront_checkout_intents where product_id = $1",
+      const checkoutIntentDelete = await client.query<{ id: string }>(
+        "delete from public.storefront_checkout_intents where product_id = $1 returning id",
         [parsed.product_id]
       );
-
-      if (Number(checkoutIntentCount.rows[0]?.count ?? 0) > 0) {
-        throw new Error(
-          `No puedo borrar ${parsed.sku} porque tiene checkout intents del storefront asociados. Archivá el producto primero.`
-        );
-      }
 
       await client.query("delete from public.products where id = $1", [parsed.product_id]);
       await writeAudit(client, actor, "telegram.product.deleted", "product", String(parsed.product_id), {
         sku: parsed.sku,
         title: parsed.title,
+        deleted_checkout_intents: checkoutIntentDelete.rowCount ?? 0,
       });
-      return `Producto borrado.\n• ID: ${parsed.product_id}\n• SKU: ${parsed.sku}`;
+      return [
+        `Producto borrado.`,
+        `• ID: ${parsed.product_id}`,
+        `• SKU: ${parsed.sku}`,
+        `• Checkout intents borrados: ${checkoutIntentDelete.rowCount ?? 0}`,
+      ].join("\n");
     }
     case "update_meta_campaign": {
       const parsed = z

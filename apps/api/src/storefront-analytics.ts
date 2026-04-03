@@ -43,6 +43,7 @@ export type StorefrontAnalyticsOverviewOptions = {
   days?: number;
   source?: string | null;
   device?: string | null;
+  interval?: "day" | "week" | "month" | null;
 };
 
 type PurchaseContextRow = QueryResultRow & {
@@ -105,10 +106,12 @@ export type StorefrontAnalyticsOverview = {
     applied: {
       source: string | null;
       device: string | null;
+      interval: "day" | "week" | "month";
     };
     available: {
       sources: string[];
       devices: string[];
+      intervals: Array<"day" | "week" | "month">;
     };
   };
   warnings: string[];
@@ -128,15 +131,17 @@ export type StorefrontAnalyticsOverview = {
     purchase_rate_pct: number | null;
     avg_session_duration_seconds: number | null;
   };
-  funnel: Array<{
-    key: StorefrontEventName;
+  journey: Array<{
+    key: "sessions" | "view_content" | "engaged" | "purchase";
     label: string;
+    detail: string;
     count: number;
     conversion_from_previous_pct: number | null;
     conversion_from_sessions_pct: number | null;
   }>;
   daily: Array<{
     date: string;
+    label: string;
     page_views: number;
     searches: number;
     view_contents: number;
@@ -560,6 +565,69 @@ function isLowSignalLandingPath(value: string | null | undefined) {
   return !normalized || normalized === "/" || normalized === "(unknown)";
 }
 
+type TimeBucketInterval = "day" | "week" | "month";
+
+function normalizeTimeBucketInterval(value: string | null | undefined): TimeBucketInterval {
+  const normalized = normalizeFilterKey(value);
+  if (normalized === "week") return "week";
+  if (normalized === "month") return "month";
+  return "day";
+}
+
+function startOfUtcDay(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function startOfUtcWeek(date: Date) {
+  const dayStart = startOfUtcDay(date);
+  const day = dayStart.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  dayStart.setUTCDate(dayStart.getUTCDate() + diff);
+  return dayStart;
+}
+
+function startOfUtcMonth(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function bucketStartForDate(date: Date, interval: TimeBucketInterval) {
+  if (interval === "week") return startOfUtcWeek(date);
+  if (interval === "month") return startOfUtcMonth(date);
+  return startOfUtcDay(date);
+}
+
+function addBucket(date: Date, interval: TimeBucketInterval) {
+  const next = new Date(date);
+  if (interval === "week") {
+    next.setUTCDate(next.getUTCDate() + 7);
+    return next;
+  }
+  if (interval === "month") {
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    return next;
+  }
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+}
+
+function formatBucketLabel(date: Date, interval: TimeBucketInterval) {
+  if (interval === "month") {
+    return date.toLocaleDateString("es-AR", { month: "short", year: "2-digit", timeZone: "UTC" });
+  }
+
+  if (interval === "week") {
+    const weekEnd = new Date(date);
+    weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+    return `${date.toLocaleDateString("es-AR", { month: "short", day: "numeric", timeZone: "UTC" })}–${weekEnd.toLocaleDateString("es-AR", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    })}`;
+  }
+
+  return date.toLocaleDateString("es-AR", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 async function resolveProductId(executor: SqlExecutor, productId: number | null | undefined, sku: string | null | undefined) {
   if (productId != null && Number.isFinite(productId)) {
     return productId;
@@ -873,6 +941,7 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
   const days = Math.max(1, Math.min(180, Number(options?.days ?? 30) || 30));
   const sourceFilter = normalizeFilterKey(options?.source);
   const deviceFilter = normalizeFilterKey(options?.device);
+  const interval = normalizeTimeBucketInterval(options?.interval);
   const rows = await query<AnalyticsEventRow>(
     `
       select
@@ -1013,10 +1082,14 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
   const end = new Date();
   const start = new Date(end);
   start.setUTCDate(start.getUTCDate() - (days - 1));
-  for (let cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+  const firstBucket = bucketStartForDate(start, interval);
+  const lastBucket = bucketStartForDate(end, interval);
+
+  for (let cursor = new Date(firstBucket); cursor <= lastBucket; cursor = addBucket(cursor, interval)) {
     const key = cursor.toISOString().slice(0, 10);
     dailyMap.set(key, {
       date: key,
+      label: formatBucketLabel(cursor, interval),
       page_views: 0,
       searches: 0,
       view_contents: 0,
@@ -1034,7 +1107,7 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
     const sessionId = trimText(row.session_id);
     const visitorKey = visitorId || (sessionId ? `session:${sessionId}` : `event:${row.id}`);
     const sessionKey = sessionId || (visitorId ? `visitor:${visitorId}` : `event:${row.id}`);
-    const dateKey = eventDateKey(row.event_time);
+    const dateKey = bucketStartForDate(new Date(row.event_time), interval).toISOString().slice(0, 10);
     const valueAmount = toNumber(row.value_amount) ?? 0;
     const person = customerLabel(row);
     const deviceContext = deriveDeviceContext(row.payload);
@@ -1436,6 +1509,23 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
   totals.checkout_rate_pct = formatPct(sessionStepCounts.initiate_checkout, totals.sessions);
   totals.purchase_rate_pct = formatPct(sessionStepCounts.purchase, totals.sessions);
 
+  const journeyCounts = {
+    sessions: totals.sessions,
+    view_content: 0,
+    engaged: 0,
+    purchase: 0,
+  };
+
+  for (const session of sessionMap.values()) {
+    const viewed = session.counts.view_content > 0;
+    const engaged = viewed && (session.counts.contact > 0 || session.counts.initiate_checkout > 0);
+    const purchased = engaged && session.counts.purchase > 0;
+
+    if (viewed) journeyCounts.view_content += 1;
+    if (engaged) journeyCounts.engaged += 1;
+    if (purchased) journeyCounts.purchase += 1;
+  }
+
   if (totals.page_views > 0 && totals.view_contents === 0) {
     warnings.push("Page views are being recorded, but no product detail views have been captured yet.");
   }
@@ -1452,13 +1542,16 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
     warnings.push("Traffic is mostly direct right now. Add UTM tags to campaigns to improve source attribution.");
   }
 
-  const funnelSteps: Array<{ key: StorefrontEventName; label: string; count: number }> = [
-    { key: "page_view", label: "Sesiones con visita", count: sessionStepCounts.page_view },
-    { key: "search", label: "Sesiones con búsqueda", count: sessionStepCounts.search },
-    { key: "view_content", label: "Sesiones con vista de producto", count: sessionStepCounts.view_content },
-    { key: "contact", label: "Sesiones con contacto", count: sessionStepCounts.contact },
-    { key: "initiate_checkout", label: "Sesiones con checkout", count: sessionStepCounts.initiate_checkout },
-    { key: "purchase", label: "Sesiones con compra", count: sessionStepCounts.purchase },
+  const journeySteps: Array<{
+    key: "sessions" | "view_content" | "engaged" | "purchase";
+    label: string;
+    detail: string;
+    count: number;
+  }> = [
+    { key: "sessions", label: "Sesiones", detail: "Base total del período", count: journeyCounts.sessions },
+    { key: "view_content", label: "Vista de producto", detail: "Entraron a una PDP real", count: journeyCounts.view_content },
+    { key: "engaged", label: "Señal de intención", detail: "WhatsApp o checkout", count: journeyCounts.engaged },
+    { key: "purchase", label: "Compra", detail: "Orden finalizada con señal previa", count: journeyCounts.purchase },
   ];
 
   return {
@@ -1468,6 +1561,7 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
       applied: {
         source: sourceFilter,
         device: deviceFilter,
+        interval,
       },
       available: {
         sources: Array.from(availableSources).sort((a, b) => a.localeCompare(b)),
@@ -1476,15 +1570,17 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
           if (!isUnknownish(a) && isUnknownish(b)) return -1;
           return a.localeCompare(b);
         }),
+        intervals: ["day", "week", "month"],
       },
     },
     warnings,
     totals,
-    funnel: funnelSteps.map((step, index) => ({
+    journey: journeySteps.map((step, index) => ({
       key: step.key,
       label: step.label,
+      detail: step.detail,
       count: step.count,
-      conversion_from_previous_pct: index === 0 ? null : formatPct(step.count, funnelSteps[index - 1]?.count ?? 0),
+      conversion_from_previous_pct: index === 0 ? null : formatPct(step.count, journeySteps[index - 1]?.count ?? 0),
       conversion_from_sessions_pct: formatPct(step.count, totals.sessions),
     })),
     daily: Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
@@ -1527,18 +1623,22 @@ export async function getStorefrontAnalyticsOverview(options?: StorefrontAnalyti
         return b.sessions - a.sessions || b.view_contents - a.view_contents || b.searches - a.searches;
       })
       .slice(0, 12),
-    searches: Array.from(searchMap.values())
-      .map((entry) => ({
-        query: entry.query,
-        searches: entry.searches,
-        visitors: entry._visitors.size,
-        sessions: entry._sessions.size,
-        avg_results_count: entry._resultsSeen > 0 ? Number((entry._resultsTotal / entry._resultsSeen).toFixed(1)) : null,
-        top_source: Array.from(entry._sources.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
-        top_device: Array.from(entry._devices.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
-      }))
-      .sort((a, b) => b.searches - a.searches || b.sessions - a.sessions)
-      .slice(0, 16),
+    searches: (() => {
+      const entries = Array.from(searchMap.values())
+        .map((entry) => ({
+          query: entry.query,
+          searches: entry.searches,
+          visitors: entry._visitors.size,
+          sessions: entry._sessions.size,
+          avg_results_count: entry._resultsSeen > 0 ? Number((entry._resultsTotal / entry._resultsSeen).toFixed(1)) : null,
+          top_source: Array.from(entry._sources.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+          top_device: Array.from(entry._devices.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+        }))
+        .sort((a, b) => b.searches - a.searches || b.sessions - a.sessions || (b.avg_results_count ?? -1) - (a.avg_results_count ?? -1));
+
+      const filtered = entries.filter((entry) => entry.searches >= 2 || entry.sessions >= 2 || (entry.avg_results_count ?? 0) > 0);
+      return (filtered.length > 0 ? filtered : entries).slice(0, 16);
+    })(),
     landing_pages: Array.from(landingMap.values())
       .map((entry) => ({
         path: entry.path,
