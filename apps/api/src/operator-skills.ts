@@ -54,7 +54,7 @@ const SKILLS: OperatorSkillDefinition[] = [
     mode: "read",
     entity: "products",
     summary:
-      "Busca productos por query (titulo/sku/marca/modelo), marca real (ej. Apple), modelo (substring), precio, RAM, storage, stock o imagen. Para lineas iPhone usar query=iPhone 13; no usar marca=iPhone 13.",
+      "Busca productos por query (titulo/sku/marca/modelo), marca real (ej. Apple o Samsung), modelo, precio, RAM, storage, stock o imagen (has_image false = sin foto). En Telegram, si hay hasta ~20 filas, el bot manda botones por SKU para abrir la ficha. iPhone: usar query=iPhone 13, no marca=iPhone 13.",
     requiredInputs: [],
     optionalInputs: [
       "query",

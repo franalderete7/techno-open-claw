@@ -411,6 +411,198 @@ async function fetchProductsForListFilters(parsed: ListProductsParsed, limit: nu
   );
 }
 
+/** Telegram hard limit for callback_data (bytes). Keep under this. */
+const TELEGRAM_CALLBACK_DATA_MAX_BYTES = 64;
+/** Inline SKU buttons when the list is small enough (Telegram ~button count / payload). */
+const LIST_PRODUCTS_MAX_INLINE_BUTTONS = 20;
+
+function buildProductListPickCallbackPayload(sku: string, productId: number): string {
+  const withSku = buildOperatorCallbackData("pick", sku);
+  if (Buffer.byteLength(withSku, "utf8") <= TELEGRAM_CALLBACK_DATA_MAX_BYTES) {
+    return sku;
+  }
+  return `id:${productId}`;
+}
+
+function truncateTelegramButtonText(value: string, maxChars = 54): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars - 1)}…`;
+}
+
+async function runListProductsQuery(params: Record<string, unknown>) {
+  const rawParsed = listProductsSchema.parse(params);
+  const hadIphoneMisassignedBrand = Boolean(rawParsed.brand && /\biPhone\b/i.test(rawParsed.brand));
+  const parsed = normalizeListProductsFilters(rawParsed);
+  const limit = parsed.all ? 200 : parsed.limit ?? 24;
+  const rows = await fetchProductsForListFilters(parsed, limit);
+  return { rawParsed, parsed, limit, rows, hadIphoneMisassignedBrand };
+}
+
+function buildListProductsFilterSummary(parsed: ListProductsParsed): string {
+  return [
+    parsed.query ? `texto=${parsed.query}` : "",
+    parsed.brand ? `marca=${parsed.brand}` : "",
+    parsed.model ? `modelo=${parsed.model}` : "",
+    parsed.active != null ? `activos=${parsed.active ? "sí" : "no"}` : "",
+    parsed.in_stock != null ? `in_stock=${parsed.in_stock ? "sí" : "no"}` : "",
+    parsed.category ? `categoría=${parsed.category}` : "",
+    parsed.min_price_ars != null || parsed.max_price_ars != null
+      ? `precio=${parsed.min_price_ars ?? "-"}..${parsed.max_price_ars ?? "-"}`
+      : "",
+    parsed.min_ram_gb != null || parsed.max_ram_gb != null
+      ? `ram=${parsed.min_ram_gb ?? "-"}..${parsed.max_ram_gb ?? "-"}`
+      : "",
+    parsed.min_storage_gb != null || parsed.max_storage_gb != null
+      ? `storage=${parsed.min_storage_gb ?? "-"}..${parsed.max_storage_gb ?? "-"}`
+      : "",
+    parsed.has_image != null ? `imagen=${parsed.has_image ? "sí" : "no"}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function describeListProductsIntentNatural(parsed: ListProductsParsed): string {
+  if (parsed.has_image === false) return "activos sin imagen cargada";
+  if (parsed.brand?.toLowerCase() === "samsung") return "Samsung";
+  if (parsed.query?.toLowerCase().includes("jbl")) return "JBL";
+  const q = parsed.query?.trim();
+  if (q && /\biphone\b/i.test(q)) return q;
+  if (parsed.min_storage_gb === 256 && parsed.max_storage_gb === 256) return "con 256GB";
+  if (parsed.model) return `modelo ${parsed.model}`;
+  if (parsed.brand) return `marca ${parsed.brand}`;
+  if (q) return `“${q}”`;
+  return "con ese filtro";
+}
+
+function buildEmptyProductListMessage(parsed: ListProductsParsed, hadIphoneMisassignedBrand: boolean): string {
+  const intent = describeListProductsIntentNatural(parsed);
+  const bits = [
+    `No tenemos nada en catálogo que calce con ${intent}.`,
+    hadIphoneMisassignedBrand
+      ? "Los iPhone suelen estar como marca Apple y el modelo en el título; ya combiné eso en la búsqueda."
+      : "",
+    parsed.has_image === false
+      ? "Si el catálogo ya tiene fotos en todos, este filtro no va a devolver filas."
+      : "",
+    `Si querés, probá otra palabra (ej. otro modelo), “marca Samsung”, “256GB”, o decime que liste todo el catálogo.`,
+  ];
+  return bits.filter(Boolean).join(" ");
+}
+
+function buildListProductsResultLines(
+  rows: ProductRow[],
+  parsed: ListProductsParsed,
+  limit: number
+): string[] {
+  const filters = buildListProductsFilterSummary(parsed);
+  const head = `Productos${filters ? ` (${filters})` : ""} · ${rows.length}${parsed.all ? "" : ` máx. ${limit}`}`;
+  const lines = rows.map(
+    (row) =>
+      `• ${row.sku} · ${row.title} · ${formatMoney(row.promo_price_ars ?? row.price_amount, row.currency_code)} · ${
+        row.active ? "activo" : "inactivo"
+      } · stock ${row.stock_units_available ?? 0} · imagen ${row.image_url ? "sí" : "no"}`
+  );
+  return [head, ...lines];
+}
+
+function buildListProductsIntroWithButtons(rows: ProductRow[], parsed: ListProductsParsed): string {
+  const n = rows.length;
+  const scope = describeListProductsIntentNatural(parsed);
+  const intro =
+    n === 1
+      ? `Hay uno que coincide con ${scope}. Datos abajo; tocá el botón para ver la ficha completa.`
+      : `Te listo ${n} que calzan con ${scope}. Abajo el detalle; tocá un botón para abrir ese SKU (fila completa).`;
+  return intro;
+}
+
+function buildListProductsInlineButtons(rows: ProductRow[]): OperatorButton[][] | undefined {
+  if (rows.length === 0 || rows.length > LIST_PRODUCTS_MAX_INLINE_BUTTONS) return undefined;
+  return rows.map((row, index) => [
+    {
+      text: truncateTelegramButtonText(`${index + 1}. ${row.sku}`),
+      callback_data: buildOperatorCallbackData("pick", buildProductListPickCallbackPayload(row.sku, row.id)),
+    },
+  ]);
+}
+
+async function listProductsTelegramReply(
+  params: Record<string, unknown>
+): Promise<Extract<OperatorTurnStartResult, { kind: "reply" }>> {
+  const { rows, parsed, limit, hadIphoneMisassignedBrand } = await runListProductsQuery(params);
+
+  if (rows.length === 0) {
+    return {
+      kind: "reply",
+      text: buildEmptyProductListMessage(parsed, hadIphoneMisassignedBrand),
+    };
+  }
+
+  const lines = buildListProductsResultLines(rows, parsed, limit);
+  const buttons = buildListProductsInlineButtons(rows);
+  const text = [buttons?.length ? buildListProductsIntroWithButtons(rows, parsed) : "", ...lines].filter(Boolean).join("\n");
+
+  return {
+    kind: "reply",
+    text,
+    buttons,
+  };
+}
+
+function parseSyntheticProductPickRef(text: string): string | null {
+  const m = text.trim().match(/^__pick_product:(.+)__$/);
+  const raw = m?.[1]?.trim();
+  return raw || null;
+}
+
+/**
+ * Deterministic list_products params for very common operator phrases (reduces bad empty lists from the model).
+ */
+function parseLooseListProductsIntent(text: string): Record<string, unknown> | null {
+  const t = text.trim();
+  if (t.length < 3) return null;
+
+  const listCue =
+    /\b(list|listar|listá|lista|mostrar|mostrá|mostrame|muéstrame|dame|decime|traé|trae|ver|buscar|buscá|filtrar|catálogo|catalogo|qué hay|que hay|tenemos|encontr(ar|á|ás)|productos?|equipos?|catálogo)\b/i.test(
+      t
+    );
+  if (!listCue) return null;
+
+  const wantsAll = /\b(todos?|todas?|completo|full|all|entero|enteros)\b/i.test(t);
+
+  if (/\b(sin imagen|sin foto|sin fotos|without image|missing image|no (tienen )?imagen)\b/i.test(t)) {
+    return { has_image: false, active: true, ...(wantsAll ? { all: true } : { limit: 60 }) };
+  }
+
+  if (/\b256\s*gb\b/i.test(t)) {
+    return {
+      min_storage_gb: 256,
+      max_storage_gb: 256,
+      ...(wantsAll ? { all: true } : { limit: 60 }),
+    };
+  }
+
+  if (/\bjbl\b/i.test(t)) {
+    return { query: "JBL", ...(wantsAll ? { all: true } : { limit: 50 }) };
+  }
+
+  if (/\bsamsung\b/i.test(t) && !/\biphone\b/i.test(t)) {
+    return { brand: "Samsung", ...(wantsAll ? { all: true } : { limit: 60 }) };
+  }
+
+  if (/\biphone\b/i.test(t)) {
+    const im = t.match(
+      /\biphone\s+(\d{1,2})(\s+se)?(\s+pro\s+max|\s+pro|\s+plus|\s+mini)?\b/i
+    );
+    let q = "iPhone";
+    if (im) {
+      q = `iPhone ${im[1]}${im[2] || ""}${im[3] || ""}`.replace(/\s+/g, " ").trim();
+    }
+    return { query: q, ...(wantsAll ? { all: true } : { limit: 60 }) };
+  }
+
+  return null;
+}
+
 const bulkDeleteProductsSchema = z
   .object({
     query: z.string().trim().optional(),
@@ -2898,6 +3090,8 @@ function buildDraftPrompts(params: {
     "Normalize Meta Ads status wording like activa/activo to ACTIVE and pausada/pausado to PAUSED when preparing updates.",
     "When the user asks for lists by brand, price range, RAM, storage, sold date, acquisition date, location, stock status, or image presence, use the available filter fields instead of plain text only.",
     "Apple iPhones are stored with brand Apple and model/title like iPhone 13 / iPhone 17 Pro Max. For 'iPhone 13' or similar, use list_products with query='iPhone 13' (and all=true if they need the full set). Never set brand to the phone line name (e.g. brand=iPhone 13); that matches zero rows.",
+    "Common list_products intents: all iPhones → query=iPhone or query=iPhone 13; all Samsung → brand=Samsung; JBL → query=JBL; 256GB phones → min_storage_gb=256 and max_storage_gb=256; products missing storefront image → has_image=false (often with active=true).",
+    "After list_products in Telegram, the server may attach one button per SKU when the result count is small (≤20); picks open get_product_details for that SKU or id.",
     "For price and numeric values, use numbers, not strings, when possible.",
     "If the message is just a greeting like hey/hola, reply briefly in reply and use mode=chat.",
     "Tone: direct ops teammate. No filler, no pep talk, no 'I'd be happy to', no long apologies. If mode=chat or mode=clarify, keep reply under 4 short sentences unless listing data.",
@@ -3764,53 +3958,11 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
     case "list_workflows":
       return listN8nWorkflows();
     case "list_products": {
-      const rawParsed = listProductsSchema.parse(params);
-      const hadIphoneMisassignedBrand = Boolean(rawParsed.brand && /\biPhone\b/i.test(rawParsed.brand));
-      const parsed = normalizeListProductsFilters(rawParsed);
-      const limit = parsed.all ? 200 : parsed.limit ?? 24;
-      const rows = await fetchProductsForListFilters(parsed, limit);
-
+      const { rows, parsed, limit, hadIphoneMisassignedBrand } = await runListProductsQuery(params);
       if (rows.length === 0) {
-        return [
-          "No encontré productos con ese criterio.",
-          hadIphoneMisassignedBrand
-            ? "Tip: en catálogo la marca de iPhone suele ser «Apple»; ya busqué por texto en título/modelo/SKU. Si la pediste vos distinto, probá listar con query=iPhone 13 y all=true."
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n");
+        return buildEmptyProductListMessage(parsed, hadIphoneMisassignedBrand);
       }
-
-      const filters = [
-        parsed.query ? `texto=${parsed.query}` : "",
-        parsed.brand ? `marca=${parsed.brand}` : "",
-        parsed.model ? `modelo=${parsed.model}` : "",
-        parsed.active != null ? `activos=${parsed.active ? "sí" : "no"}` : "",
-        parsed.in_stock != null ? `in_stock=${parsed.in_stock ? "sí" : "no"}` : "",
-        parsed.category ? `categoría=${parsed.category}` : "",
-        parsed.min_price_ars != null || parsed.max_price_ars != null
-          ? `precio=${parsed.min_price_ars ?? "-"}..${parsed.max_price_ars ?? "-"}`
-          : "",
-        parsed.min_ram_gb != null || parsed.max_ram_gb != null
-          ? `ram=${parsed.min_ram_gb ?? "-"}..${parsed.max_ram_gb ?? "-"}`
-          : "",
-        parsed.min_storage_gb != null || parsed.max_storage_gb != null
-          ? `storage=${parsed.min_storage_gb ?? "-"}..${parsed.max_storage_gb ?? "-"}`
-          : "",
-        parsed.has_image != null ? `imagen=${parsed.has_image ? "sí" : "no"}` : "",
-      ]
-        .filter(Boolean)
-        .join(" · ");
-
-      return [
-        `Productos${filters ? ` (${filters})` : ""} · ${rows.length}${parsed.all ? "" : ` máx. ${limit}`}`,
-        ...rows.map(
-          (row) =>
-            `• ${row.sku} · ${row.title} · ${formatMoney(row.promo_price_ars ?? row.price_amount, row.currency_code)} · ${
-              row.active ? "activo" : "inactivo"
-            } · stock ${row.stock_units_available ?? 0} · imagen ${row.image_url ? "sí" : "no"}`
-        ),
-      ].join("\n");
+      return buildListProductsResultLines(rows, parsed, limit).join("\n");
     }
     case "get_product_details": {
       const parsed = getProductDetailsSchema.parse(params);
@@ -7078,6 +7230,9 @@ export async function startTelegramOperatorTurn(actor: ActorContext): Promise<Op
     const menuReply = buildOperatorMenuReply(syntheticMenuIntent);
     const reportCommand = buildSyntheticReportCommand(menuReply.text);
     if (reportCommand) {
+      if (reportCommand.command === "list_products") {
+        return listProductsTelegramReply(reportCommand.params);
+      }
       return {
         kind: "reply",
         text: await executeReadCommand(reportCommand.command, reportCommand.params),
@@ -7100,7 +7255,24 @@ export async function startTelegramOperatorTurn(actor: ActorContext): Promise<Op
 
   const quickCommand = parseQuickReadCommand(actor.userMessage);
   if (quickCommand) {
+    if (quickCommand.command === "list_products") {
+      return listProductsTelegramReply(quickCommand.params);
+    }
     return { kind: "reply", text: await executeReadCommand(quickCommand.command, quickCommand.params) };
+  }
+
+  const looseList = parseLooseListProductsIntent(actor.userMessage);
+  if (looseList) {
+    return listProductsTelegramReply(looseList);
+  }
+
+  const synthPickRef = parseSyntheticProductPickRef(actor.userMessage);
+  if (synthPickRef) {
+    const productRef = synthPickRef.startsWith("id:") ? synthPickRef.slice(3).trim() : synthPickRef;
+    return {
+      kind: "reply",
+      text: await executeReadCommand("get_product_details", { product_ref: productRef }),
+    };
   }
 
   const quickMetaDraft = parseQuickMetaDraft(actor.userMessage);
@@ -7174,6 +7346,9 @@ export async function resolveTelegramOperatorDraft(
 
   try {
     if (draft.mode === "read") {
+      if (draft.command === "list_products") {
+        return listProductsTelegramReply(params);
+      }
       return {
         kind: "reply",
         text: await executeReadCommand(draft.command as ReadCommandName, params),
