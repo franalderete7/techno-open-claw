@@ -1231,7 +1231,10 @@ const buildAggressiveIphoneReply = (products) => {
     selectedKeys.add(String(familyCandidate.product_key || ''));
   }
 
-  const selectedProducts = selectedByFamily.length > 0 ? selectedByFamily : appleProducts.slice(0, 4);
+  const remainderProducts = appleProducts.filter(
+    (product) => !selectedKeys.has(String(product?.product_key || ''))
+  );
+  const selectedProducts = [...selectedByFamily, ...remainderProducts].slice(0, 4);
   if (selectedProducts.length === 0) {
     return null;
   }
@@ -1251,6 +1254,12 @@ const buildAggressiveIphoneReply = (products) => {
   return {
     replyText: normalizeReplySpacing(lines.join('\\n')),
     selectedProductKeys: selectedProducts.map((product) => String(product.product_key || '')).filter(Boolean),
+    summary:
+      'Se mostraron ' +
+      String(selectedProducts.length) +
+      ' modelos iPhone priorizados: ' +
+      selectedProducts.map((product) => String(product.product_name || 'iPhone')).join(', ') +
+      '.',
   };
 };
 const hasSpecificModelSignal = /(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\\s+[0-9]{1,3}|\\b(64|128|256|512|1024)\\b(?:\\s*gb)?|\\bpro max\\b|\\bpromax\\b|\\bultra\\b|\\bpro\\b|\\bplus\\b|\\b(?:a\\d{1,3}|s\\d{1,3}|g\\d{1,3}|x\\d{1,3}|z\\s?flip\\s?\\d|z\\s?fold\\s?\\d|edge\\s?\\d{1,3}|note\\s?\\d{1,3}|reno\\s?\\d{1,3}|find\\s?x\\d{1,2})\\b/i.test(normalizedUserMessage);
@@ -1291,9 +1300,10 @@ if (asksBroadIphoneCatalog) {
   if (iphoneCatalogReply) {
     replyText = iphoneCatalogReply.replyText;
     selectedProductKeys = iphoneCatalogReply.selectedProductKeys;
-    if (selectedProductKeys.length > 0 && !Array.isArray(stateDelta.selected_product_keys)) {
+    if (selectedProductKeys.length > 0) {
       stateDelta.selected_product_keys = selectedProductKeys;
     }
+    stateDelta.summary = iphoneCatalogReply.summary;
   }
 }
 
@@ -1563,6 +1573,9 @@ if (router.route_key === 'exact_product_quote' && selectedProductKeys.length ===
   selectedProductKeys = [String(topCandidate.product_key)];
 }
 
+const selectedCatalogProductUrls = unique(
+  selectedProductKeys.map((key) => String(candidateMap.get(key)?.product_url || '').trim())
+);
 const exactProductUrls = router.route_key === 'exact_product_quote' && (selectedProductKeys.length > 0 || hasConfidentExactCandidate)
   ? unique([
       ...selectedProductKeys.map((key) => String(candidateMap.get(key)?.product_url || '').trim()),
@@ -1616,6 +1629,9 @@ if (selectedProductKeys.length > 0 && finalStateDelta.selected_product_keys.leng
 const allowedUrls = [];
 if (['brand_catalog', 'generic_sales', 'store_info'].includes(router.route_key) && canAppendStoreUrl) {
   allowedUrls.push(website);
+}
+if (router.route_key === 'brand_catalog') {
+  allowedUrls.push(...selectedCatalogProductUrls);
 }
 if (router.route_key === 'storefront_order' && storefrontPaymentUrl) {
   allowedUrls.push(storefrontPaymentUrl);
