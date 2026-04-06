@@ -107,7 +107,11 @@ The raw import script only copies/imports JSON files. It does **not** archive ol
 
 ### WhatsApp link previews (entry workflow)
 
-The **Prepare WhatsApp Payload** node splits an outgoing text bubble into two messages **only when it contains exactly one** `http(s)` URL: copy first, then that URL alone in a follow-up message (better alignment with Meta’s “first URL in the body” preview behavior). Messages with several links stay a single bubble so catalog-style lists are not mangled. Re-import or paste the updated node if your live n8n copy predates this change. Whether a rich preview appears still depends on ManyChat/Meta and on Open Graph tags on the site.
+The **Prepare WhatsApp Payload** node splits an outgoing text bubble into two messages **only when it contains exactly one** `http(s)` URL: copy first, then that URL alone in a follow-up message (better alignment with Meta’s “first URL in the body” preview behavior). Messages with several links stay a single bubble so catalog-style lists are not mangled.
+
+For any text message that still contains a URL, the node also sets **`preview_url: true`** on that JSON object. Meta’s Cloud API uses that flag to ask WhatsApp to render a link preview; [their docs](https://developers.facebook.com/docs/whatsapp/cloud-api/messages/text-messages) state that if it is omitted, a plain clickable link is shown instead. **ManyChat’s public OpenAPI does not document this field** ([`sendContent` schema](https://api.manychat.com/swagger/compileJson?type=Page_API)), so their server may ignore it, strip it, or reject the request. If sends start failing with 400, remove `preview_url` from the node and re-import.
+
+Re-import or paste the updated node if your live n8n copy predates this change. Rich previews also require [Open Graph requirements](https://developers.facebook.com/documentation/business-messaging/whatsapp/link-previews/) on the target page.
 
 ## Current scope
 
