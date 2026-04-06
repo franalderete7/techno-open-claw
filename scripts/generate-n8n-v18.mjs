@@ -977,7 +977,7 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
 
   updateNodeOptions(workflow, "AI Agent (Sales)", {
     systemMessage:
-      "Sos el vendedor de WhatsApp de TechnoStore Salta. Respondé en español natural, humano, breve y profesional. Sin markdown, sin asteriscos y sin inventar. Usá únicamente los hechos provistos en recent_thread, store y candidate_products. No inventes stock, disponibilidad, colores, precios, cuotas, links, marcas, categorías ni modelos. Si algo no aparece en candidate_products, no lo ofrezcas como si existiera: pedí una aclaración breve o derivá al catálogo general. Los productos pueden ser celulares, tablets o parlantes; no asumas que todo es iPhone o teléfono. Si el usuario pidió un modelo exacto, respondé primero sobre ese modelo y no pivotees a otro salvo que pida alternativas o comparación. Solo mencioná URLs reales que ya vengan en el contexto; no adivines rutas. No aceptamos compras con DNI; si preguntan por medios de pago o cómo comprar, nunca ofrezcas DNI como opción. El sitio es secundario y no se comparte por inercia. No cierres todas las respuestas con pago, envío o una pregunta; solo cuando ayuda de verdad. Devolvé SOLO JSON válido con las claves: reply_text, selected_product_keys, actions, state_delta. No agregues explicaciones fuera del JSON.",
+      "Sos el vendedor de WhatsApp de TechnoStore Salta. Respondé en español natural, humano, breve y profesional. Sin markdown, sin asteriscos y sin inventar. Usá únicamente los hechos provistos en recent_thread, store y candidate_products. No inventes stock, disponibilidad, colores, precios, cuotas, links, marcas, categorías ni modelos. Si algo no aparece en candidate_products, no lo ofrezcas como si existiera: pedí una aclaración breve o derivá al catálogo general. Los productos pueden ser celulares, tablets o parlantes; no asumas que todo es iPhone o teléfono. Si el usuario pidió un modelo exacto, respondé primero sobre ese modelo y no pivotees a otro salvo que pida alternativas o comparación. Si listás varios modelos, separalos con una línea en blanco y respetá el orden de candidate_products. Solo mencioná URLs reales que ya vengan en el contexto; no adivines rutas. No aceptamos compras con DNI; si preguntan por medios de pago o cómo comprar, nunca ofrezcas DNI como opción. El sitio es secundario y no se comparte por inercia. No cierres todas las respuestas con pago, envío o una pregunta; solo cuando ayuda de verdad. Devolvé SOLO JSON válido con las claves: reply_text, selected_product_keys, actions, state_delta. No agregues explicaciones fuera del JSON.",
   });
 
   updateNodeJsCode(
@@ -1058,9 +1058,9 @@ const prompt = [
   'Si el usuario hace referencia a "ese", "el anterior", "y en cuotas?", "y la entrega?" o similares, continuá sobre el último producto relevante del hilo.',
   'Formateá todos los precios en ARS con separadores argentinos, por ejemplo ARS 1.165.080.',
   'No inventes disponibilidad, colores ni stock. Si el dato no está respaldado por candidate_products, decí que te lo consulten por catálogo o pedí una aclaración breve.',
-  'Si listás productos, hacelo con un producto por línea y texto plano, sin markdown ni **.',
+  'Si listás productos, hacelo con un producto por línea y texto plano, sin markdown ni **. Cuando compartas varios modelos, dejá una línea en blanco entre uno y otro.',
   'candidate_products es la única fuente de verdad para productos. No menciones marcas, categorías, modelos o precios que no estén ahí.',
-  'Si la consulta es amplia como "catálogo", "lista de precios" o "modelos", primero intentá acotarla por marca o categoría. Si candidate_products ya viene claramente filtrado, podés listar esos resultados sin inventar otros.',
+  'Si la consulta es amplia como "catálogo", "lista de precios" o "modelos", primero intentá acotarla por marca o categoría. Si candidate_products ya viene claramente filtrado, podés listar esos resultados sin inventar otros. Si candidate_products trae iPhone priorizados, respetá ese orden exacto.',
   'Los productos pueden incluir celulares, tablets y parlantes JBL.',
   'Solo usá product_url si ya viene en candidate_products. No inventes links. En este negocio los iPhone usan /iphone/{sku} y el resto usa /{sku}, pero preferí siempre el product_url provisto.',
   'No prometas ni ofrezcas un link de pago directo en una consulta normal de producto. Solo mencioná un link real si ya existe en el contexto del pedido web. Si no, explicá el proceso para avanzar con la compra.',
@@ -1132,13 +1132,132 @@ const formatArs = (value) => {
   if (!Number.isFinite(amount)) return null;
   return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(amount);
 };
-const normalizeReplySpacing = (value) =>
+const stripMarkdownArtifacts = (value) =>
   String(value || '')
+    .replace(/\\*\\*([^*]+)\\*\\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\`([^\`]+)\`/g, '$1')
+    .replace(/\\*([^*\\n]+)\\*/g, '$1')
+    .replace(/_([^_\\n]+)_/g, '$1');
+const normalizeReplySpacing = (value) =>
+  stripMarkdownArtifacts(String(value || ''))
     .replace(/\\r\\n/g, '\\n')
     .replace(/[ \\t]+\\n/g, '\\n')
     .replace(/\\n{3,}/g, '\\n\\n')
     .replace(/[ \\t]{2,}/g, ' ')
     .trim();
+const inferCatalogFamilyNumber = (product) => {
+  const haystack = String([
+    product?.brand_key || '',
+    product?.category || '',
+    product?.product_name || '',
+    product?.product_key || '',
+  ].join(' '))
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\\u0300-\\u036f]/g, '')
+    .replace(/[^a-z0-9\\s]/g, ' ')
+    .replace(/\\s+/g, ' ')
+    .trim();
+
+  const familyMatch = haystack.match(/(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\\s+([0-9]{1,3})/i);
+  if (familyMatch) {
+    return Number(familyMatch[1]);
+  }
+
+  const standaloneAppleMatch = haystack.match(/\\b(13|15|16|17)\\b/);
+  return standaloneAppleMatch ? Number(standaloneAppleMatch[1]) : null;
+};
+const productPublicPrice = (product) => {
+  const promoPrice = Number(product?.promo_price_ars);
+  if (Number.isFinite(promoPrice) && promoPrice > 0) {
+    return promoPrice;
+  }
+
+  const price = Number(product?.price_ars);
+  if (Number.isFinite(price) && price > 0) {
+    return price;
+  }
+
+  return Number.POSITIVE_INFINITY;
+};
+const compareCatalogCandidates = (left, right) => {
+  if (Number(right?.in_stock) !== Number(left?.in_stock)) {
+    return Number(right?.in_stock) - Number(left?.in_stock);
+  }
+
+  const leftPrice = productPublicPrice(left);
+  const rightPrice = productPublicPrice(right);
+  if (leftPrice !== rightPrice) {
+    return leftPrice - rightPrice;
+  }
+
+  return String(left?.product_name || '').localeCompare(String(right?.product_name || ''), 'es');
+};
+const formatCatalogPrice = (product) => {
+  const formatted = formatArs(product?.promo_price_ars ?? product?.price_ars);
+  return formatted ? 'ARS ' + formatted : 'Consultar precio';
+};
+const formatCatalogAvailability = (product) => {
+  if (product?.in_stock) {
+    return 'Disponible';
+  }
+  if (Number(product?.delivery_days) > 0) {
+    return 'Entrega estimada en ' + Number(product.delivery_days) + ' días';
+  }
+  return 'Consultar disponibilidad';
+};
+const buildAggressiveIphoneReply = (products) => {
+  const appleProducts = products
+    .filter((product) => String(product?.brand_key || '').trim().toLowerCase() === 'apple')
+    .sort(compareCatalogCandidates);
+  if (appleProducts.length === 0) {
+    return null;
+  }
+
+  const preferredFamilies = [13, 15, 16, 17];
+  const selectedByFamily = [];
+  const selectedKeys = new Set();
+
+  for (const family of preferredFamilies) {
+    const familyCandidate = appleProducts.find(
+      (product) => !selectedKeys.has(String(product?.product_key || '')) && inferCatalogFamilyNumber(product) === family
+    );
+    if (!familyCandidate) {
+      continue;
+    }
+
+    selectedByFamily.push(familyCandidate);
+    selectedKeys.add(String(familyCandidate.product_key || ''));
+  }
+
+  const selectedProducts = selectedByFamily.length > 0 ? selectedByFamily : appleProducts.slice(0, 4);
+  if (selectedProducts.length === 0) {
+    return null;
+  }
+
+  const lines = ['Te paso los iPhone más convenientes que estamos moviendo hoy:', ''];
+  selectedProducts.forEach((product, index) => {
+    lines.push(String(index + 1) + '. ' + String(product.product_name || 'iPhone'));
+    lines.push('Precio: ' + formatCatalogPrice(product));
+    lines.push('Estado: ' + formatCatalogAvailability(product));
+    if (product?.product_url) {
+      lines.push('Link: ' + String(product.product_url).trim());
+    }
+    lines.push('');
+  });
+  lines.push('Si querés, te lo filtro por Pro, Pro Max, memoria o presupuesto.');
+
+  return {
+    replyText: normalizeReplySpacing(lines.join('\\n')),
+    selectedProductKeys: selectedProducts.map((product) => String(product.product_key || '')).filter(Boolean),
+  };
+};
+const hasSpecificModelSignal = /(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\\s+[0-9]{1,3}|\\b(64|128|256|512|1024)\\b(?:\\s*gb)?|\\bpro max\\b|\\bpromax\\b|\\bultra\\b|\\bpro\\b|\\bplus\\b|\\b(?:a\\d{1,3}|s\\d{1,3}|g\\d{1,3}|x\\d{1,3}|z\\s?flip\\s?\\d|z\\s?fold\\s?\\d|edge\\s?\\d{1,3}|note\\s?\\d{1,3}|reno\\s?\\d{1,3}|find\\s?x\\d{1,2})\\b/i.test(normalizedUserMessage);
+const asksBroadIphoneCatalog =
+  base.router_output?.route_key === 'brand_catalog' &&
+  /\\b(iphone|apple)\\b/.test(normalizedUserMessage) &&
+  !hasSpecificModelSignal;
 
 const fallbackReply = (() => {
   if (base.router_output?.route_key === 'exact_product_quote' && fallbackExactCandidate) {
@@ -1148,8 +1267,8 @@ const fallbackReply = (() => {
   return 'Sí, te ayudo por acá. Si querés también podés mirar todo el catálogo en https://technostoresalta.com. ¿Qué modelo o presupuesto tenés en mente?';
 })();
 
-const selected = Array.isArray(parsed?.selected_product_keys) ? parsed.selected_product_keys : [];
-const actions = Array.isArray(parsed?.actions) ? parsed.actions : [];
+let selectedProductKeys = Array.isArray(parsed?.selected_product_keys) ? parsed.selected_product_keys : [];
+let actions = Array.isArray(parsed?.actions) ? parsed.actions : [];
 const stateDelta = parsed?.state_delta && typeof parsed.state_delta === 'object' ? parsed.state_delta : {};
 let replyText = normalizeReplySpacing(parsed?.reply_text || fallbackReply);
 
@@ -1164,6 +1283,17 @@ for (const product of priceCandidates) {
       .replace(new RegExp(\`ARS\\\\s*\${rawString}(?!\\\\d)\`, 'g'), \`ARS \${formattedPrice}\`)
       .replace(new RegExp(\`\\\\$\\\\s*\${rawString}(?!\\\\d)\`, 'g'), \`ARS \${formattedPrice}\`)
       .replace(new RegExp(\`(?<!\\\\d)\${rawString}(?!\\\\d)\`, 'g'), formattedPrice);
+  }
+}
+
+if (asksBroadIphoneCatalog) {
+  const iphoneCatalogReply = buildAggressiveIphoneReply(priceCandidates);
+  if (iphoneCatalogReply) {
+    replyText = iphoneCatalogReply.replyText;
+    selectedProductKeys = iphoneCatalogReply.selectedProductKeys;
+    if (selectedProductKeys.length > 0 && !Array.isArray(stateDelta.selected_product_keys)) {
+      stateDelta.selected_product_keys = selectedProductKeys;
+    }
   }
 }
 
@@ -1188,7 +1318,7 @@ return [{
     responder_output: {
       route_key: base.router_output?.route_key || 'generic_sales',
       reply_text: replyText,
-      selected_product_keys: selected,
+      selected_product_keys: selectedProductKeys,
       actions,
       state_delta: stateDelta,
     },
@@ -1382,9 +1512,16 @@ const normalizeReplySpacing = (value) =>
     .replace(/\\n{3,}/g, '\\n\\n')
     .replace(/[ \\t]{2,}/g, ' ')
     .trim();
+const stripMarkdownArtifacts = (value) =>
+  String(value || '')
+    .replace(/\\*\\*([^*]+)\\*\\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\`([^\`]+)\`/g, '$1')
+    .replace(/\\*([^*\\n]+)\\*/g, '$1')
+    .replace(/_([^_\\n]+)_/g, '$1');
 
 const stripUnexpectedUrls = (text, allowedUrls = []) =>
-  normalizeReplySpacing(text)
+  normalizeReplySpacing(stripMarkdownArtifacts(text))
     .replace(/https?:\\/\\/\\S+/gi, (url) => {
       if (!allowedUrls.length) return '';
       return allowedUrls.some((allowedUrl) => url.includes(String(allowedUrl).replace(/^https?:\\/\\//, ''))) ? url : '';
@@ -1487,7 +1624,7 @@ if (router.route_key === 'exact_product_quote' && shouldAppendExactProductUrl) {
   allowedUrls.push(...exactProductUrls);
 }
 
-let replyText = stripDanglingUrlPrompts(stripUnexpectedUrls(responder.reply_text || '', allowedUrls));
+let replyText = stripMarkdownArtifacts(stripDanglingUrlPrompts(stripUnexpectedUrls(responder.reply_text || '', allowedUrls)));
 const validationErrors = [];
 const validationWarnings = [];
 
@@ -1555,7 +1692,7 @@ if (router.route_key === 'exact_product_quote') {
   }
 }
 
-replyText = normalizeReplySpacing(stripDanglingUrlPrompts(replyText)).slice(0, 1100).trim();
+replyText = normalizeReplySpacing(stripMarkdownArtifacts(stripDanglingUrlPrompts(replyText))).slice(0, 1100).trim();
 
 const replyMessages = [{ type: 'text', text: replyText }];
 const shouldSend = !actionList.includes('no_reply');
@@ -1583,14 +1720,21 @@ return [{
 
 mkdirSync(outputDir, { recursive: true });
 
-const files = readdirSync(sourceDir)
+const legacySourceFiles = readdirSync(sourceDir)
   .filter((file) => /^TechnoStore_v17_.*\.json$/.test(file))
   .sort();
+
+const currentSourceFiles = readdirSync(outputDir)
+  .filter((file) => /^TechnoStore_v18_.*\.json$/.test(file))
+  .sort();
+
+const files = legacySourceFiles.length > 0 ? legacySourceFiles : currentSourceFiles;
+const activeSourceDir = legacySourceFiles.length > 0 ? sourceDir : outputDir;
 
 const generated = [];
 
 for (const file of files) {
-  const inputPath = resolve(sourceDir, file);
+  const inputPath = resolve(activeSourceDir, file);
   const raw = JSON.parse(readFileSync(inputPath, "utf8"));
   const transformed = transform(raw);
 
@@ -1612,4 +1756,4 @@ for (const file of files) {
   generated.push(outputPath);
 }
 
-console.log(JSON.stringify({ outputDir, generated }, null, 2));
+console.log(JSON.stringify({ activeSourceDir, outputDir, generated }, null, 2));

@@ -9,6 +9,28 @@ import { StorefrontPageViewTracker } from "./components/storefront-page-view-tra
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://technostoresalta.com"),
+  title: "TechnoStore Salta",
+  description: "Smartphones, iPhone y catálogo con precio final, WhatsApp y atención directa en Salta.",
+  openGraph: {
+    type: "website",
+    url: "https://technostoresalta.com",
+    title: "TechnoStore Salta",
+    description: "Smartphones, iPhone y catálogo con precio final, WhatsApp y atención directa en Salta.",
+    siteName: "TechnoStore Salta",
+    images: [
+      {
+        url: "/brand/logo-negro-salta.png",
+        alt: "TechnoStore Salta",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "TechnoStore Salta",
+    description: "Smartphones, iPhone y catálogo con precio final, WhatsApp y atención directa en Salta.",
+    images: ["/brand/logo-negro-salta.png"],
+  },
   icons: {
     icon: "/icon.png",
     shortcut: "/icon.png",

@@ -1,8 +1,19 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getProducts, getSettings } from "../../lib/api";
 import { getSiteMode } from "../../lib/site-mode";
+import { buildStorefrontPageMetadata } from "../../lib/storefront-metadata";
 import { buildStorefrontProducts, buildStorefrontProfile } from "../../lib/storefront";
 import { AppleStorefrontCatalog } from "../components/apple-storefront-catalog";
+
+export const metadata: Metadata = buildStorefrontPageMetadata({
+  title: "iPhone | TechnoStore Apple",
+  description: "Catálogo de iPhone nuevos con precio final, pago coordinado y atención directa por WhatsApp.",
+  path: "/iphone",
+  storefrontUrl: "https://technostoresalta.com",
+  siteName: "TechnoStore Apple",
+  imageUrl: "/brand/logo-blanco-salta.png",
+});
 
 export default async function AppleStorefrontPage() {
   if ((await getSiteMode()) !== "storefront") {

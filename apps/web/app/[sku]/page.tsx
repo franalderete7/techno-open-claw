@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { getProducts, getSettings } from "../../lib/api";
 import { getSiteMode } from "../../lib/site-mode";
+import { buildStorefrontPageMetadata, buildStorefrontProductMetadata } from "../../lib/storefront-metadata";
 import {
   buildStorefrontProductPath,
   buildStorefrontProductUrl,
@@ -40,6 +43,61 @@ function buildSpecSummary(product: StorefrontProduct) {
 
 function normalizeSku(value: string) {
   return decodeURIComponent(value).trim().toLowerCase();
+}
+
+const loadStorefrontProductPageData = cache(async (requestedSku: string) => {
+  let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
+  let settings = [] as Awaited<ReturnType<typeof getSettings>>["items"];
+  let error: string | null = null;
+
+  try {
+    const [productResponse, settingsResponse] = await Promise.all([getProducts(120, { active: true }), getSettings()]);
+    products = productResponse.items;
+    settings = settingsResponse.items;
+  } catch (caught) {
+    error = caught instanceof Error ? caught.message : "Failed to load storefront";
+  }
+
+  const store = buildStorefrontProfile(settings);
+  const storefrontProducts = buildStorefrontProducts(products);
+  const product = storefrontProducts.find((item) => item.sku.trim().toLowerCase() === requestedSku) ?? null;
+
+  return {
+    error,
+    store,
+    product,
+  };
+});
+
+export async function generateMetadata({ params }: StorefrontProductPageProps): Promise<Metadata> {
+  if ((await getSiteMode()) !== "storefront") {
+    return {};
+  }
+
+  const { sku: rawSku } = await params;
+  const requestedSku = normalizeSku(rawSku);
+  if (!requestedSku) {
+    return {};
+  }
+
+  const { store, product } = await loadStorefrontProductPageData(requestedSku);
+  if (!product) {
+    return buildStorefrontPageMetadata({
+      title: "TechnoStore Salta",
+      description: "Catálogo de smartphones con precio final, WhatsApp y atención directa en Salta.",
+      path: "/",
+      storefrontUrl: store.storefront_url,
+      siteName: store.name,
+      imageUrl: "/brand/logo-negro-salta.png",
+    });
+  }
+
+  return buildStorefrontProductMetadata({
+    product,
+    path: buildStorefrontProductPath(product.sku),
+    storefrontUrl: store.storefront_url,
+    storeName: store.name,
+  });
 }
 
 function ProductMedia({ product }: { product: StorefrontProduct }) {
@@ -89,21 +147,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
     notFound();
   }
 
-  let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
-  let settings = [] as Awaited<ReturnType<typeof getSettings>>["items"];
-  let error: string | null = null;
-
-  try {
-    const [productResponse, settingsResponse] = await Promise.all([getProducts(120, { active: true }), getSettings()]);
-    products = productResponse.items;
-    settings = settingsResponse.items;
-  } catch (caught) {
-    error = caught instanceof Error ? caught.message : "Failed to load storefront";
-  }
-
-  const store = buildStorefrontProfile(settings);
-  const storefrontProducts = buildStorefrontProducts(products);
-  const product = storefrontProducts.find((item) => item.sku.trim().toLowerCase() === requestedSku) ?? null;
+  const { error, store, product } = await loadStorefrontProductPageData(requestedSku);
 
   if (!product && !error) {
     notFound();

@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { getProducts, getSettings } from "../../../lib/api";
 import { getSiteMode } from "../../../lib/site-mode";
+import { buildStorefrontPageMetadata, buildStorefrontProductMetadata } from "../../../lib/storefront-metadata";
 import { buildStorefrontProducts, buildStorefrontProfile, type StorefrontProduct } from "../../../lib/storefront";
 import { MetaProductViewTracker } from "../../components/meta-product-view-tracker";
 import { StorefrontProductActions } from "../../components/storefront-product-actions";
@@ -34,6 +37,63 @@ function buildAppleProductPath(sku: string) {
 
 function buildAppleSpecLine(product: StorefrontProduct) {
   return [product.color, product.storage_gb ? `${product.storage_gb}GB` : null].filter(Boolean).join(" · ");
+}
+
+const loadAppleProductPageData = cache(async (requestedSku: string) => {
+  let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
+  let settings = [] as Awaited<ReturnType<typeof getSettings>>["items"];
+  let error: string | null = null;
+
+  try {
+    const [productResponse, settingsResponse] = await Promise.all([getProducts(200, { active: true }), getSettings()]);
+    products = productResponse.items;
+    settings = settingsResponse.items;
+  } catch (caught) {
+    error = caught instanceof Error ? caught.message : "Failed to load Apple storefront";
+  }
+
+  const store = { ...buildStorefrontProfile(settings), name: "TechnoStore Apple" };
+  const appleProducts = buildStorefrontProducts(products).filter(
+    (product) => product.brand.trim().toLowerCase() === "apple" && product.condition.toLowerCase() === "new"
+  );
+  const product = appleProducts.find((item) => item.sku.trim().toLowerCase() === requestedSku) ?? null;
+
+  return {
+    error,
+    store,
+    product,
+  };
+});
+
+export async function generateMetadata({ params }: AppleProductPageProps): Promise<Metadata> {
+  if ((await getSiteMode()) !== "storefront") {
+    return {};
+  }
+
+  const { sku: rawSku } = await params;
+  const requestedSku = normalizeSku(rawSku);
+  if (!requestedSku) {
+    return {};
+  }
+
+  const { store, product } = await loadAppleProductPageData(requestedSku);
+  if (!product) {
+    return buildStorefrontPageMetadata({
+      title: "iPhone | TechnoStore Apple",
+      description: "Catálogo de iPhone nuevos con precio final, WhatsApp y atención directa en Salta.",
+      path: "/iphone",
+      storefrontUrl: store.storefront_url,
+      siteName: "TechnoStore Apple",
+      imageUrl: "/brand/logo-blanco-salta.png",
+    });
+  }
+
+  return buildStorefrontProductMetadata({
+    product,
+    path: buildAppleProductPath(product.sku),
+    storefrontUrl: store.storefront_url,
+    storeName: store.name,
+  });
 }
 
 function ProductMedia({ product }: { product: StorefrontProduct }) {
@@ -72,23 +132,7 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
     notFound();
   }
 
-  let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
-  let settings = [] as Awaited<ReturnType<typeof getSettings>>["items"];
-  let error: string | null = null;
-
-  try {
-    const [productResponse, settingsResponse] = await Promise.all([getProducts(200, { active: true }), getSettings()]);
-    products = productResponse.items;
-    settings = settingsResponse.items;
-  } catch (caught) {
-    error = caught instanceof Error ? caught.message : "Failed to load Apple storefront";
-  }
-
-  const store = { ...buildStorefrontProfile(settings), name: "TechnoStore Apple" };
-  const appleProducts = buildStorefrontProducts(products).filter(
-    (product) => product.brand.trim().toLowerCase() === "apple" && product.condition.toLowerCase() === "new"
-  );
-  const product = appleProducts.find((item) => item.sku.trim().toLowerCase() === requestedSku) ?? null;
+  const { error, store, product } = await loadAppleProductPageData(requestedSku);
 
   if (!product && !error) {
     notFound();

@@ -232,6 +232,116 @@ function buildProductUrl(storeWebsiteUrl: string | null | undefined, productKey:
   return `${storeWebsiteUrl.replace(/\/$/, "")}${path}`;
 }
 
+function extractCatalogFamilyNumberFromText(value: string) {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const familyMatch = normalized.match(
+    /(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\s+([0-9]{1,3})/i
+  );
+  if (familyMatch) {
+    return Number(familyMatch[1]);
+  }
+
+  const standaloneAppleMatch = normalized.match(/\b(13|15|16|17)\b/);
+  return standaloneAppleMatch ? Number(standaloneAppleMatch[1]) : null;
+}
+
+function inferCandidateFamilyNumber(candidate: {
+  brand_key: string;
+  product_name: string;
+  product_key: string;
+  category: string | null;
+}) {
+  const composite = [candidate.brand_key, candidate.category ?? "", candidate.product_name, candidate.product_key].join(" ");
+  const familyNumber = extractCatalogFamilyNumberFromText(composite);
+  return Number.isFinite(familyNumber) ? familyNumber : null;
+}
+
+function candidatePublicPrice(candidate: { promo_price_ars: number | null; price_ars: number | null }) {
+  const promoPrice = Number(candidate.promo_price_ars);
+  if (Number.isFinite(promoPrice) && promoPrice > 0) {
+    return promoPrice;
+  }
+
+  const price = Number(candidate.price_ars);
+  if (Number.isFinite(price) && price > 0) {
+    return price;
+  }
+
+  return Number.POSITIVE_INFINITY;
+}
+
+function compareCatalogBrowseCandidates<
+  T extends {
+    in_stock: boolean;
+    promo_price_ars: number | null;
+    price_ars: number | null;
+    score: number;
+    product_name: string;
+  },
+>(left: T, right: T) {
+  if (Number(right.in_stock) !== Number(left.in_stock)) {
+    return Number(right.in_stock) - Number(left.in_stock);
+  }
+
+  const leftPrice = candidatePublicPrice(left);
+  const rightPrice = candidatePublicPrice(right);
+  if (leftPrice !== rightPrice) {
+    return leftPrice - rightPrice;
+  }
+
+  if (right.score !== left.score) {
+    return right.score - left.score;
+  }
+
+  return left.product_name.localeCompare(right.product_name, "es");
+}
+
+function prioritizeBrandBrowseCandidates<
+  T extends {
+    brand_key: string;
+    product_name: string;
+    product_key: string;
+    category: string | null;
+    in_stock: boolean;
+    promo_price_ars: number | null;
+    price_ars: number | null;
+    score: number;
+  },
+>(products: T[], brandKey: string, limit: number) {
+  const matchingProducts = products.filter((product) => product.brand_key === brandKey);
+  if (matchingProducts.length === 0) {
+    return products.slice(0, limit);
+  }
+
+  const sortedMatchingProducts = [...matchingProducts].sort(compareCatalogBrowseCandidates);
+  if (brandKey !== "apple") {
+    return sortedMatchingProducts.slice(0, limit);
+  }
+
+  const preferredFamilies = [13, 15, 16, 17];
+  const prioritizedProducts: T[] = [];
+  const selectedKeys = new Set<string>();
+
+  for (const family of preferredFamilies) {
+    const familyCandidate = sortedMatchingProducts.find(
+      (product) => !selectedKeys.has(product.product_key) && inferCandidateFamilyNumber(product) === family
+    );
+    if (!familyCandidate) {
+      continue;
+    }
+
+    prioritizedProducts.push(familyCandidate);
+    selectedKeys.add(familyCandidate.product_key);
+  }
+
+  const remainder = sortedMatchingProducts.filter((product) => !selectedKeys.has(product.product_key));
+  return [...prioritizedProducts, ...remainder].slice(0, limit);
+}
+
 function messageRequestsPaymentLink(userMessage: string) {
   const normalized = normalizeText(userMessage);
 
@@ -492,6 +602,20 @@ function brandKeyMatchesText(brandKey: string, text: string) {
   };
 
   return (tokensByBrand[brandKey] ?? [brandKey]).some((token) => text.includes(token));
+}
+
+function productMatchesRequestedBrands(
+  product: Pick<ProductRow, "brand" | "category" | "model" | "title" | "description">,
+  brandKeys: string[]
+) {
+  if (brandKeys.length === 0) {
+    return true;
+  }
+
+  const haystack = normalizeText(
+    `${product.brand} ${product.category ?? ""} ${product.model} ${product.title} ${product.description ?? ""}`
+  );
+  return brandKeys.some((brandKey) => brandKeyMatchesText(brandKey, haystack));
 }
 
 function computeCurrentIntentAdjustment(product: ProductRow, signals: MessageProductSignals) {
@@ -1052,13 +1176,14 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
       limit: Math.min(6, candidateLimit),
     });
 
-    const rawCandidateProducts = productRows
+    const rankedCandidateProducts = productRows
       .filter((product) => !isDisallowedWorkflowProduct(product))
       .map((product) => {
         const productKey = product.sku.trim().toLowerCase();
         const currentIntentAdjustment = computeCurrentIntentAdjustment(product, currentProductSignals);
+        const isBrandCompatible = productMatchesRequestedBrands(product, currentProductSignals.brandKeys);
         const interestedProductBoost =
-          interestedProductKey && productKey === interestedProductKey
+          interestedProductKey && productKey === interestedProductKey && isBrandCompatible
             ? currentProductSignals.hasSpecificIntent
               ? Math.max(0, 12 + currentIntentAdjustment)
               : 14
@@ -1088,8 +1213,17 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         if (right.score !== left.score) return right.score - left.score;
         if (Number(right.in_stock) !== Number(left.in_stock)) return Number(right.in_stock) - Number(left.in_stock);
         return 0;
-      })
-      .slice(0, candidateLimit);
+      });
+
+    const shouldPrioritizeBroadBrandCatalog =
+      currentProductSignals.brandKeys.length === 1 && !currentProductSignals.hasSpecificIntent;
+    const shortlistedCandidateProducts = shouldPrioritizeBroadBrandCatalog
+      ? prioritizeBrandBrowseCandidates(
+          rankedCandidateProducts,
+          currentProductSignals.brandKeys[0],
+          candidateLimit
+        )
+      : rankedCandidateProducts.slice(0, candidateLimit);
 
     const settingsRows = await query<{ key: string; value: unknown }>(
       `
@@ -1132,7 +1266,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         "https://technostoresalta.com",
     };
 
-    const candidateProducts: CandidateProduct[] = rawCandidateProducts.map((product) => ({
+    const candidateProducts: CandidateProduct[] = shortlistedCandidateProducts.map((product) => ({
       ...product,
       product_url: buildProductUrl(store.store_website_url, product.product_key),
     }));
