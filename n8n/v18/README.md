@@ -105,6 +105,10 @@ N8N_CONTAINER_NAME=n8n-n8n-1 ./scripts/import-n8n-v18.sh
 
 The raw import script only copies/imports JSON files. It does **not** archive old workflows, relink child workflow IDs, or publish the set.
 
+### WhatsApp link previews (entry workflow)
+
+The **Prepare WhatsApp Payload** node splits an outgoing text bubble into two messages **only when it contains exactly one** `http(s)` URL: copy first, then that URL alone in a follow-up message (better alignment with Meta’s “first URL in the body” preview behavior). Messages with several links stay a single bubble so catalog-style lists are not mangled. Re-import or paste the updated node if your live n8n copy predates this change. Whether a rich preview appears still depends on ManyChat/Meta and on Open Graph tags on the site.
+
 ## Current scope
 
 - ManyChat / WhatsApp entry flow: included
