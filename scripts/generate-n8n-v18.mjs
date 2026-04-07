@@ -763,7 +763,16 @@ const asksPriceDirectly = /(precio|cuanto sale|cu[aá]nto sale|valor|costo|cotiz
 const asksCatalogLink = /(catalogo|cat[aá]logo|pagina|p[aá]gina|sitio|web|pasame el link|mandame el link|pasame la pagina|pasame la web|ver modelos|ver equipos|verlo aca|verlo ac[aá]|mostrame el link)/.test(normalized);
 const asksComparison = /(cual de los dos|cu[aá]l de los dos|compar|versus|\\bvs\\b|mejor)/.test(normalized);
 const wantsHoursInfo = /(horario|horarios|abren|cierran|hora|abierto|abierta|abiertos|abiertas|atienden|atencion|atención|abren hoy|hoy esta abierto|hoy esta abierta|hoy estan abiertos|hoy estan abiertas|feriado|feriados)/.test(normalized);
-const wantsStoreInfo = wantsHoursInfo || /(ubicacion|direccion|sucursal|medios de pago|medio de pago|envio|envios|warranty|garantia|como llego|donde estan|donde quedan|retiro|mapa)/.test(normalized);
+const wantsPaymentAcceptance =
+  /(reciben|aceptan|toman|aceptas|recibis)/.test(normalized) &&
+  /(tarjeta|naranja|macro|visa|credito|credit)/.test(normalized);
+const wantsNonProductStoreAsk =
+  /(plan canje|parte de pago|permuta|\bcanje\b|mayorista|imagenes rot|sidebar)/.test(normalized);
+const wantsStoreInfo =
+  wantsHoursInfo ||
+  wantsPaymentAcceptance ||
+  wantsNonProductStoreAsk ||
+  /(ubicacion|direccion|sucursal|medios de pago|medio de pago|envio|envios|warranty|garantia|como llego|donde estan|donde quedan|retiro|mapa)/.test(normalized);
 const hasConversationProductContext = Boolean(interestedProductKey || candidateProducts[0]?.product_key);
 const asksProductFollowUp = /(cuotas|cuota|tarjeta|transferencia|efectivo|link de pago|pagar|pagarlo|entrega|envio|retiro|garantia|stock|disponible|color|colores|memoria|almacenamiento|ram|usd|dolar|promo|precio)/.test(normalized);
 const usesRelativeReference = /(\\b(ese|esa|este|esta|mismo|misma|anterior|quiero ese|quiero esa|dame ese|dame esa)\\b|^y\\b)/.test(normalized);
@@ -977,7 +986,7 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
 
   updateNodeOptions(workflow, "AI Agent (Sales)", {
     systemMessage:
-      "Sos el vendedor de WhatsApp de TechnoStore Salta. Respondé en español natural, humano, breve y profesional. Sin markdown, sin asteriscos y sin inventar. Usá únicamente los hechos provistos en recent_thread, store y candidate_products. No inventes stock, disponibilidad, colores, precios, cuotas, links, marcas, categorías ni modelos. Si algo no aparece en candidate_products, no lo ofrezcas como si existiera: pedí una aclaración breve o derivá al catálogo general. Los productos pueden ser celulares, tablets o parlantes; no asumas que todo es iPhone o teléfono. Si el usuario pidió un modelo exacto, respondé primero sobre ese modelo y no pivotees a otro salvo que pida alternativas o comparación. Si listás varios modelos, separalos con una línea en blanco y respetá el orden de candidate_products. Solo mencioná URLs reales que ya vengan en el contexto; no adivines rutas. No aceptamos compras con DNI; si preguntan por medios de pago o cómo comprar, nunca ofrezcas DNI como opción. El sitio es secundario y no se comparte por inercia. No cierres todas las respuestas con pago, envío o una pregunta; solo cuando ayuda de verdad. Los precios del catálogo son de contado; no inventes cuotas ni montos sin interés. Si preguntan cuotas, usá solo store_payment_methods del contexto, sin armar cifras a partir del precio. Devolvé SOLO JSON válido con las claves: reply_text, selected_product_keys, actions, state_delta. No agregues explicaciones fuera del JSON.",
+      "Sos el vendedor de WhatsApp de TechnoStore Salta: cercano, claro y profesional. Sin markdown, sin asteriscos. Prohibido inventar: stock, colores, precios, cuotas, montos sin interés, links, modelos o datos que no estén en el contexto (recent_thread, store, candidate_products). Si el usuario pide un equipo que no figura en candidate_products, decilo en una frase y ofrecé alternativas reales del mismo listado (misma marca y rango cercano si podés), tono consultivo. Si falta un dato, pedí una aclaración corta o derivá al catálogo. Si pidieron un modelo puntual que sí está, respondé primero sobre ese modelo. Listados: un producto por bloque, línea en blanco entre modelos, orden de candidate_products. URLs solo si vienen en product_url o en el contexto del pedido. No aceptamos compras con DNI. Precios de catálogo = contado; cuotas solo según store_payment_methods, sin dividir el precio. Cuando la conversación lo permita, cerrá con UNA pregunta concreta que avance (presupuesto, prioridad cámara/pantalla, memoria); no fuerces pregunta si el usuario cerró el tema ni repitas siempre pago o envío. Si el prompt incluye guías por marca (iPhone escalera 13/15/16/17, Samsung, Redmi/Xiaomi), seguilas siempre ancladas a candidate_products. Devolvé SOLO JSON con reply_text, selected_product_keys, actions, state_delta.",
   });
 
   updateNodeJsCode(
@@ -1052,10 +1061,232 @@ const promptPayload = {
   candidate_products: curatedCandidates,
 };
 
-const prompt = [
+const userNorm = String(data.user_message || '')
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\\u0300-\\u036f]/g, '')
+  .replace(/[^a-z0-9\\s]/g, ' ')
+  .replace(/\\s+/g, ' ')
+  .trim();
+
+const nameHay = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\\u0300-\\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+const mentionsIphoneBrand = /(^| )(iphone|apple)( |$)/.test(userNorm) || /iphone/.test(userNorm);
+const hasIphoneFamilyDigit = /\\b(1[1-7])\\b/.test(userNorm);
+const asksIphoneCheapest = /(mas barato|más barato|barato|economico|económico|accesible|mas accesible|más accesible)/.test(userNorm);
+const asksIphoneCompare1516 = /(15|16)/.test(userNorm) && /(vs|versus|entre|compar|diferencia|convine|conviene)/.test(userNorm);
+const mentionsIphoneSe = /\\biphone\\s*se\\b|\\bse\\s*3\\b|\\bse\\s*2022\\b/.test(userNorm);
+
+const appleCandidates = curatedCandidates.filter(
+  (p) =>
+    String(p.brand_key || '').toLowerCase() === 'apple' ||
+    /iphone/.test(String(p.product_name || '').toLowerCase()),
+);
+
+const iphoneGenMatch = userNorm.match(/\\b(1[1-7])\\b/);
+const iphoneGen = iphoneGenMatch ? iphoneGenMatch[1] : null;
+
+const appleProductMatchesIphoneGen = (product, gen) => {
+  if (!gen) return false;
+  const h = nameHay(product.product_name);
+  const g = String(gen);
+  if (!h.includes(g)) return false;
+  return /iphone|apple/.test(String(product.product_name || '').toLowerCase());
+};
+
+const iphoneRequestedMissingFromList =
+  mentionsIphoneBrand &&
+  !mentionsIphoneSe &&
+  iphoneGen &&
+  appleCandidates.length > 0 &&
+  !appleCandidates.some((p) => appleProductMatchesIphoneGen(p, iphoneGen));
+
+const iphoneAskedButNoAppleInList =
+  mentionsIphoneBrand && !mentionsIphoneSe && appleCandidates.length === 0;
+
+const iphoneLadderCase =
+  router.route_key === 'brand_catalog' &&
+  mentionsIphoneBrand &&
+  !hasIphoneFamilyDigit &&
+  !mentionsIphoneSe;
+
+const wantsSamsung =
+  /(^| )(samsung|galaxy)( |$)/.test(userNorm) ||
+  /\\bs\\s*(2[0-9]|1[0-9])\\b/.test(userNorm) ||
+  /\\bs(2[0-9]|1[0-9])\\b/.test(userNorm) ||
+  /\\ba\\s*(0?[1-9]|1[0-9]|2[0-9])\\b/.test(userNorm);
+
+const samsungCandidates = curatedCandidates.filter(
+  (p) => String(p.brand_key || '').toLowerCase() === 'samsung',
+);
+
+const samsungSNask = (() => {
+  const m = userNorm.match(/\\bs\\s*(2[0-9]|1[0-9])\\b/) || userNorm.match(/\\bs(2[0-9]|1[0-9])\\b/);
+  return m ? m[1] : null;
+})();
+
+const samsungAask = (() => {
+  const m = userNorm.match(/\\ba\\s*(0?[1-9]|1[0-9]|2[0-9])\\b/);
+  return m ? m[1].replace(/^0+/, '') || m[1] : null;
+})();
+
+const samsungProductMatchesAsk = (p) => {
+  const h = nameHay(p.product_name);
+  if (samsungSNask && h.includes('s' + samsungSNask)) return true;
+  if (samsungAask && h.includes('a' + samsungAask)) return true;
+  return false;
+};
+
+const samsungRequestedMissingFromList =
+  wantsSamsung &&
+  samsungCandidates.length > 0 &&
+  (samsungSNask || samsungAask) &&
+  !samsungCandidates.some(samsungProductMatchesAsk);
+
+const wantsXiaomiFamily =
+  /(redmi|xiaomi|poco|\\bnote\\s*[0-9]{1,2}\\b|mi\\s*[0-9]{1,2}\\b)/.test(userNorm);
+
+const xiaomiCandidates = curatedCandidates.filter((p) => {
+  const b = String(p.brand_key || '').toLowerCase();
+  return b === 'xiaomi' || b === 'redmi';
+});
+
+const noteGenMatch = userNorm.match(/\\bnote\\s*(1[0-9]|[0-9])\\b/);
+const noteGen = noteGenMatch ? noteGenMatch[1].replace(/^0+/, '') || noteGenMatch[1] : null;
+
+const xiaomiProductMatchesNoteAsk = (p) => {
+  if (!noteGen) return false;
+  const h = nameHay(p.product_name);
+  return h.includes('note') && h.includes(noteGen);
+};
+
+const xiaomiNoteRequestedMissing =
+  wantsXiaomiFamily &&
+  xiaomiCandidates.length > 0 &&
+  noteGen &&
+  !xiaomiCandidates.some(xiaomiProductMatchesNoteAsk);
+
+const wantsMotorola = /(motorola|\\bmoto\\b|moto\\s*g)/.test(userNorm);
+const motorolaCandidates = curatedCandidates.filter(
+  (p) => String(p.brand_key || '').toLowerCase() === 'motorola',
+);
+
+const motoGask = (() => {
+  const m = userNorm.match(/\\bg\\s*([0-9]{1,3})\\b/);
+  return m ? m[1] : null;
+})();
+
+const motorolaRequestedMissing =
+  wantsMotorola &&
+  motorolaCandidates.length > 0 &&
+  motoGask &&
+  !motorolaCandidates.some((p) => nameHay(p.product_name).includes('g' + motoGask));
+
+const samsungBroadCase =
+  router.route_key === 'brand_catalog' &&
+  wantsSamsung &&
+  samsungCandidates.length > 0 &&
+  !samsungSNask &&
+  !samsungAask;
+
+const xiaomiBroadCase =
+  router.route_key === 'brand_catalog' &&
+  wantsXiaomiFamily &&
+  xiaomiCandidates.length > 0 &&
+  !noteGen;
+
+let iphonePlaybook = '';
+if (iphoneLadderCase && !iphoneAskedButNoAppleInList) {
+  iphonePlaybook = [
+    '--- iPhone: consulta amplia (sin número de línea 11–17 en el mensaje) ---',
+    'Armá la respuesta en español rioplatense, texto plano. Sustituí [Modelo], montos y URLs solo con datos de candidate_products (promo_price_ars si existe, si no price_ars; product_url obligatorio si lo listás).',
+    'Escalera de referencia 13 → 15 → 16 → 17: incluí solo modelos que existan en candidate_products, en ese orden. Por cada uno: una línea de pitch corto + "Queda en ARS …" + línea "Link: …" con product_url. Dejá una línea en blanco entre modelos.',
+    'Pitchs orientativos (adaptá si el product_name no coincide; no inventes specs que contradigan la ficha):',
+    'iPhone 13 — el más económico que manejamos en esa escalera; iPhone serio sin gastar de más.',
+    'iPhone 15 — USB-C y cámara muy sólida; punto dulce para mucha gente.',
+    'iPhone 16 — línea nueva, mejor en foto y pantalla.',
+    'iPhone 17 — lo más nuevo de Apple en esa línea.',
+    'Al final, UNA pregunta de cierre: prioridad precio, cámara o tamaño de pantalla (o presupuesto aproximado).',
+    'Si el tono del usuario encaja, mapeá a estas plantillas (siempre ancladas a candidate_products):',
+    '(A) "Más información" / "qué iPhones tienen": saludo breve + bloques 13/15/16/17 presentes + cierre con una pregunta.',
+    '(B) "Cuánto sale el iPhone" sin modelo: depende de modelo y memoria; los que más suelen convenir si están en catálogo son 13, 15, 16 y 17 — pasá valores y links solo de los que figuren; ofrecé rango de presupuesto si falta.',
+    '(C) "El más barato" / económico: el más accesible entre los de la escalera que vengan (suele ser 13); si también está el 15, mencioná el salto natural por USB-C y cámara.',
+    '(D) Comparar 15 vs 16: si ambos están en candidate_products, contraste breve (precio vs novedad foto/pantalla) + precios + link cada uno + una pregunta cámara vs ahorro.',
+    '(E) Color / memoria: solo lo que diga candidate_products; si no está, no inventes: ofrecé la variante más cercana listada o catálogo.',
+    '(F) Nuevo / garantía: usá condition de candidate_products y store.store_warranty_new si existe; sin inventar políticas.',
+    '(G) Catálogo / links: store.store_website_url + links directos product_url de los candidatos que menciones.',
+    '(H) Cómo comprar / medios: web + link de pago por WhatsApp + transferencia al alias del link; complementá con store.store_payment_methods.',
+    '(I) Cuotas: precio es contado; cuotas y bancos solo según store.store_payment_methods, sin cifras inventadas.',
+    'Si el usuario nombró un número de línea (11–17) que NO está en candidate_products, aclaralo al inicio y ofrecé igual la escalera 13→15→16→17 con lo que SÍ figure, explicando en una frase por qué son alternativas razonables (precio, generación cercana, stock real).',
+  ].join('\\n');
+}
+
+if (iphoneLadderCase && asksIphoneCheapest) {
+  iphonePlaybook += '\\n\\n--- Refuerzo: piden lo más barato ---\\nPriorizá el iPhone 13 si está en candidate_products; si no, el más bajo precio real de la escalera presente. Mencioná salto al 15 si ambos están.';
+}
+
+if (iphoneLadderCase && asksIphoneCompare1516) {
+  iphonePlaybook += '\\n\\n--- Refuerzo: comparación 15 vs 16 ---\\nUsá plantilla (D) solo si ambos modelos están en candidate_products; si falta uno, listá el disponible y ofrecé alternativa sin inventar el faltante.';
+}
+
+let iphoneSubstitutePlaybook = '';
+if (iphoneRequestedMissingFromList || iphoneAskedButNoAppleInList) {
+  iphoneSubstitutePlaybook = [
+    '--- iPhone: pidieron un modelo que no figura en candidate_products (o no hay iPhones en esta lista) ---',
+    'Primero una frase honesta: el equipo pedido no está en la lista de este turno (no inventes llegadas ni reservas).',
+    'Si hay otros iPhone en candidate_products: armá la escalera 13 → 15 → 16 → 17 solo con los que existan; por cada uno pitch breve + ARS + Link. Explicá en una o dos frases por qué son buen plan B (misma experiencia Apple, otro precio, generación cercana).',
+    'Si no hay ningún iPhone en candidate_products: dirigí a store.store_website_url para ver Apple; si en candidate_products hay Android de gama similar, podés mencionar hasta 2 como opción alternativa, sin menospreciar iPhone.',
+    'Cerrá con UNA pregunta (presupuesto, prioridad foto/pantalla, o memoria).',
+  ].join('\\n');
+}
+
+let samsungPlaybook = '';
+if (samsungRequestedMissingFromList || samsungBroadCase) {
+  samsungPlaybook = [
+    '--- Samsung (consultas frecuentes tipo Galaxy S / Ultra / FE / A) ---',
+    'Solo usá modelos que estén en candidate_products. Texto plano, un bloque por equipo, línea en blanco entre modelos, ARS + Link cuando listés.',
+    samsungRequestedMissingFromList
+      ? 'El usuario pidió una referencia (S o A con número) que no aparece en candidate_products: decilo sin dramatismo y ofrecé hasta 4 alternativas Samsung del listado (priorizá misma familia: si buscaban Ultra y hay otro Ultra; si buscaban A y hay otro A; si no, el S más cercano en precio o el tope de lista).'
+      : 'Consulta amplia Samsung: orden sugerido si hay varios en lista — tope de gama (S Ultra o similar) primero si está, luego S “equilibrio” / FE si hay, luego línea A para precio; solo mencioná lo que exista.',
+    'Pitchs orientativos (adaptá al product_name real): Ultra — tope de cámara y pantalla; FE — buen equilibrio precio/rendimiento; A — entrada fuerte al ecosistema Samsung.',
+    'Si solo hay un candidato Samsung, desarrollalo bien y ofrecé comparar con otro rango si el usuario da presupuesto.',
+    'Cerrá con una pregunta: presupuesto, prioridad foto, o tamaño.',
+  ].join('\\n');
+}
+
+let xiaomiPlaybook = '';
+if (xiaomiNoteRequestedMissing || xiaomiBroadCase) {
+  xiaomiPlaybook = [
+    '--- Redmi / Xiaomi / Note (consultas frecuentes en chat) ---',
+    'Solo candidate_products. Si pidieron un Note o Redmi numerado que no está en la lista, decilo y ofrecé hasta 4 alternativas Xiaomi/Redmi del listado ordenadas por precio (o por “más nuevo” si el nombre lo muestra).',
+    'Consulta amplia sin número: resumí la gama que SÍ viene en candidate_products — por ejemplo Note vs número, o Xiaomi número — sin inventar modelos.',
+    'Tono: accesibilidad y buena relación precio; una pregunta de cierre (presupuesto o uso: juego, foto, batería).',
+  ].join('\\n');
+}
+
+let motorolaPlaybook = '';
+if (
+  wantsMotorola &&
+  (motorolaRequestedMissing || (router.route_key === 'brand_catalog' && motorolaCandidates.length > 0))
+) {
+  motorolaPlaybook = [
+    '--- Motorola / Moto G ---',
+    motorolaRequestedMissing
+      ? 'El Moto G o referencia pedida no figura en candidate_products: decilo y ofrecé hasta 3 Motorola del listado con ARS y link, explicando brevemente diferencia de gama.'
+      : 'Listá los Motorola presentes en candidate_products con pitch breve de batería/software limpio si encaja; ARS + link; una pregunta de cierre.',
+  ].join('\\n');
+}
+
+const promptParts = [
   'Respondé al siguiente turno comercial usando SOLO los datos provistos.',
   'Usá recent_thread y focused_product_key para sostener el contexto del hilo.',
   'Si el usuario hace referencia a "ese", "el anterior", "y en cuotas?", "y la entrega?" o similares, continuá sobre el último producto relevante del hilo.',
+  'Si el usuario nombra un modelo concreto y ese equipo (o esa variante memoria/color) no está en candidate_products, decilo en una frase y ofrecé de inmediato alternativas reales del mismo listado: priorizá misma marca y precio cercano; si no hay de la marca, explicá brevemente por qué otra opción del listado podría servir. Tono consultivo, sin presión. Si candidate_products está vacío, usá store.store_website_url sin inventar SKUs.',
   'Formateá todos los precios en ARS con separadores argentinos, por ejemplo ARS 1.165.080.',
   'Los precios en candidate_products son de contado o promo final; esos datos no incluyen cuota mensual, cantidad de cuotas ni tasa de interés.',
   'No calcules ni menciones montos por cuota dividiendo el precio. No digas sin interés ni promos bancarias inventadas.',
@@ -1065,9 +1296,35 @@ const prompt = [
   'candidate_products es la única fuente de verdad para productos. No menciones marcas, categorías, modelos o precios que no estén ahí.',
   'Si la consulta es amplia como "catálogo", "lista de precios" o "modelos", primero intentá acotarla por marca o categoría. Si candidate_products ya viene claramente filtrado, podés listar esos resultados sin inventar otros. Si candidate_products trae iPhone priorizados, respetá ese orden exacto.',
   'Los productos pueden incluir celulares, tablets y parlantes JBL.',
+  'Plan canje, parte de pago, permuta, crédito personal o compra mayorista: no inventes condiciones, tasas ni valores de usado. Si no hay política explícita en los textos de store, decí que lo confirman en el local o con un asesor por este chat.',
+  'Consolas, notebooks u otros rubros que no estén en candidate_products: no inventes stock ni precios; decí que en el catálogo de este turno no figuran y ofrecé ver la web o consultar otro modelo que sí aparezca.',
+  'Comparaciones técnicas (cámara, batería, rendimiento): no inventes benchmarks ni specs; solo contrastá si el contexto trae datos; si no, orientá a la ficha del producto en el link.',
   'Solo usá product_url si ya viene en candidate_products. No inventes links. En este negocio los iPhone usan /iphone/{sku} y el resto usa /{sku}, pero preferí siempre el product_url provisto.',
   'No prometas ni ofrezcas un link de pago directo en una consulta normal de producto. Solo mencioná un link real si ya existe en el contexto del pedido web. Si no, explicá el proceso para avanzar con la compra.',
   'Si preguntan por pago, link de pago, transferencia o cómo comprar, explicá que en technostoresalta.com avanzan en pocos clics, reciben el link de pago por WhatsApp y pagan transfiriendo al alias que figura en ese link. La entrega o el retiro se coordinan por este mismo chat. No aceptamos compras con DNI.',
+];
+
+if (iphonePlaybook) {
+  promptParts.push(iphonePlaybook);
+}
+
+if (iphoneSubstitutePlaybook) {
+  promptParts.push(iphoneSubstitutePlaybook);
+}
+
+if (samsungPlaybook) {
+  promptParts.push(samsungPlaybook);
+}
+
+if (xiaomiPlaybook) {
+  promptParts.push(xiaomiPlaybook);
+}
+
+if (motorolaPlaybook) {
+  promptParts.push(motorolaPlaybook);
+}
+
+promptParts.push(
   'Devolvé SOLO JSON válido.',
   'Esquema esperado:',
   JSON.stringify({
@@ -1088,7 +1345,9 @@ const prompt = [
   }),
   'Datos del turno:',
   JSON.stringify(promptPayload, null, 2),
-].join('\\n\\n');
+);
+
+const prompt = promptParts.join('\\n\\n');
 
 return [{
   json: {
@@ -1382,9 +1641,14 @@ const message = String(data.user_message || '')
 const wantsLocation = /(ubicacion|direccion|sucursal|como llego|donde estan|donde quedan|mapa)/.test(message);
 const wantsHours = /(horario|horarios|abren|cierran|hora|abierto|abierta|abiertos|abiertas|atienden|atencion|atención|abren hoy|hoy esta abierto|hoy esta abierta|hoy estan abiertos|hoy estan abiertas|feriado|feriados)/.test(message);
 const asksHolidayHours = /(feriado|feriados)/.test(message);
-const wantsPayments = /(pago|pagos|cuotas|tarjeta|transferencia|efectivo|crypto|mercado pago|link de pago)/.test(message);
+const wantsPayments =
+  /(pago|pagos|cuotas|tarjeta|transferencia|efectivo|crypto|mercado pago|link de pago|naranja|macro|credito personal|credito con dni)/.test(message);
 const wantsShipping = /(envio|envios|despacho|retiro)/.test(message);
 const wantsWarranty = /(garantia|warranty)/.test(message);
+const wantsTradeHelp = /(plan canje|parte de pago|permuta|\bcanje\b)/.test(message);
+const wantsWholesale = /mayorista/.test(message);
+const wantsWebsiteIssue =
+  /(imagen rota|imagenes rotas|imagenes rot|sidebar|web rota|sitio roto|error en la web|no carga la web)/.test(message);
 const asksCatalogLink = /(catalogo|cat[aá]logo|pagina|p[aá]gina|sitio|web|ver modelos|ver equipos)/.test(message);
 
 const formatArs = (value) => {
@@ -1454,6 +1718,21 @@ switch (router.route_key) {
     if (wantsWarranty) {
       if (store.store_warranty_new) parts.push('Nuevos: ' + store.store_warranty_new);
       if (store.store_warranty_used) parts.push('Usados: ' + store.store_warranty_used);
+    }
+    if (wantsTradeHelp) {
+      parts.push(
+        'Plan canje, toma de usado o permuta se evalúa caso a caso en el local; en este canal automático no puedo cerrar condiciones ni cotizar el usado.',
+      );
+    }
+    if (wantsWholesale) {
+      parts.push(
+        'Consultas mayoristas o por volumen las confirma el equipo comercial; decinos cantidad y modelos y lo vemos.',
+      );
+    }
+    if (wantsWebsiteIssue) {
+      parts.push(
+        'Gracias por el aviso sobre la web: lo pasamos para revisión. Mientras tanto podés consultar modelos y precios por acá.',
+      );
     }
     if (router.should_offer_store_url && asksCatalogLink) {
       parts.push('El catálogo está en ' + website + '.');
