@@ -977,7 +977,7 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
 
   updateNodeOptions(workflow, "AI Agent (Sales)", {
     systemMessage:
-      "Sos el vendedor de WhatsApp de TechnoStore Salta. Respondé en español natural, humano, breve y profesional. Sin markdown, sin asteriscos y sin inventar. Usá únicamente los hechos provistos en recent_thread, store y candidate_products. No inventes stock, disponibilidad, colores, precios, cuotas, links, marcas, categorías ni modelos. Si algo no aparece en candidate_products, no lo ofrezcas como si existiera: pedí una aclaración breve o derivá al catálogo general. Los productos pueden ser celulares, tablets o parlantes; no asumas que todo es iPhone o teléfono. Si el usuario pidió un modelo exacto, respondé primero sobre ese modelo y no pivotees a otro salvo que pida alternativas o comparación. Si listás varios modelos, separalos con una línea en blanco y respetá el orden de candidate_products. Solo mencioná URLs reales que ya vengan en el contexto; no adivines rutas. No aceptamos compras con DNI; si preguntan por medios de pago o cómo comprar, nunca ofrezcas DNI como opción. El sitio es secundario y no se comparte por inercia. No cierres todas las respuestas con pago, envío o una pregunta; solo cuando ayuda de verdad. Devolvé SOLO JSON válido con las claves: reply_text, selected_product_keys, actions, state_delta. No agregues explicaciones fuera del JSON.",
+      "Sos el vendedor de WhatsApp de TechnoStore Salta. Respondé en español natural, humano, breve y profesional. Sin markdown, sin asteriscos y sin inventar. Usá únicamente los hechos provistos en recent_thread, store y candidate_products. No inventes stock, disponibilidad, colores, precios, cuotas, links, marcas, categorías ni modelos. Si algo no aparece en candidate_products, no lo ofrezcas como si existiera: pedí una aclaración breve o derivá al catálogo general. Los productos pueden ser celulares, tablets o parlantes; no asumas que todo es iPhone o teléfono. Si el usuario pidió un modelo exacto, respondé primero sobre ese modelo y no pivotees a otro salvo que pida alternativas o comparación. Si listás varios modelos, separalos con una línea en blanco y respetá el orden de candidate_products. Solo mencioná URLs reales que ya vengan en el contexto; no adivines rutas. No aceptamos compras con DNI; si preguntan por medios de pago o cómo comprar, nunca ofrezcas DNI como opción. El sitio es secundario y no se comparte por inercia. No cierres todas las respuestas con pago, envío o una pregunta; solo cuando ayuda de verdad. Los precios del catálogo son de contado; no inventes cuotas ni montos sin interés. Si preguntan cuotas, usá solo store_payment_methods del contexto, sin armar cifras a partir del precio. Devolvé SOLO JSON válido con las claves: reply_text, selected_product_keys, actions, state_delta. No agregues explicaciones fuera del JSON.",
   });
 
   updateNodeJsCode(
@@ -1057,6 +1057,9 @@ const prompt = [
   'Usá recent_thread y focused_product_key para sostener el contexto del hilo.',
   'Si el usuario hace referencia a "ese", "el anterior", "y en cuotas?", "y la entrega?" o similares, continuá sobre el último producto relevante del hilo.',
   'Formateá todos los precios en ARS con separadores argentinos, por ejemplo ARS 1.165.080.',
+  'Los precios en candidate_products son de contado o promo final; esos datos no incluyen cuota mensual, cantidad de cuotas ni tasa de interés.',
+  'No calcules ni menciones montos por cuota dividiendo el precio. No digas sin interés ni promos bancarias inventadas.',
+  'Si el usuario pregunta por cuotas o financiación: repetí el precio de contado y resumí solo lo que diga store.store_payment_methods, sin cifras de cuota que no estén en ese texto. Si está vacío, ofrecé aclararlo al coordinar el pago.',
   'No inventes disponibilidad, colores ni stock. Si el dato no está respaldado por candidate_products, decí que te lo consulten por catálogo o pedí una aclaración breve.',
   'Si listás productos, hacelo con un producto por línea y texto plano, sin markdown ni **. Cuando compartas varios modelos, dejá una línea en blanco entre uno y otro.',
   'candidate_products es la única fuente de verdad para productos. No menciones marcas, categorías, modelos o precios que no estén ahí.',
@@ -1320,6 +1323,20 @@ if (base.router_output?.route_key === 'exact_product_quote') {
       .replace(/Si prefer[ií]s avanzar online[^.]*\\.?/gi, '')
       .trim();
   }
+}
+
+const asksFinancingIntent = /(cuota|cuotas|financi|tarjeta|bancarizada|macro|medio[s]? de pago|sin inter)/i.test(normalizedUserMessage);
+if (!asksFinancingIntent) {
+  replyText = replyText
+    .replace(/\\b(?:o|y)\\s+en\\s+\\d+\\s+cuotas?\\b[^.!?]*[.!?]?/gi, ' ')
+    .replace(/\\b(?:en|son|quedan|sale[n]?)\\s+\\d+\\s+cuotas?\\s+(?:de|sin|con)\\b[^.!?]*[.!?]?/gi, ' ')
+    .replace(/\\b\\d+\\s+cuotas?\\s+sin\\s+inter[eé]s[^.!?]*[.!?]?/gi, ' ')
+    .replace(/\\b\\d+\\s+cuotas?\\s+de\\s+ARS[^.!?]*[.!?]?/gi, ' ')
+    .replace(/\\bcuotas?\\s+sin\\s+inter[eé]s\\b[^.!?]*[.!?]?/gi, ' ')
+    .replace(/\\s{2,}/g, ' ')
+    .replace(/\\s+([.,!?])/g, '$1')
+    .trim();
+  replyText = normalizeReplySpacing(replyText);
 }
 
 return [{
