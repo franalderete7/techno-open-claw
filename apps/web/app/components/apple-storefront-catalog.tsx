@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { trackStorefrontEvent, trackStorefrontSearch } from "../../lib/storefront-analytics";
-import { type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
+import { buildStorefrontInstallmentOffer, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
 import { StorefrontProductActions } from "./storefront-product-actions";
 
 type AppleStorefrontCatalogProps = {
@@ -13,8 +13,6 @@ type AppleStorefrontCatalogProps = {
 };
 
 const PAGE_SIZE = 9;
-const APPLE_SUPPORT_COPY = "Garantía de 1 año · Envío nacional · 6 cuotas";
-
 function formatMoney(amount: number | null) {
   if (amount == null) return "Consultar";
   return new Intl.NumberFormat("es-AR", {
@@ -39,6 +37,16 @@ function buildAppleProductUrl(storefrontUrl: string | null, sku: string) {
 
 function buildAppleSpecLine(product: StorefrontProduct) {
   return [product.color, product.storage_gb ? `${product.storage_gb}GB` : null].filter(Boolean).join(" · ");
+}
+
+function buildAppleSupportCopy(product: StorefrontProduct) {
+  const installmentOffer = buildStorefrontInstallmentOffer(product);
+  const parts = ["Garantía de 1 año", "Envío nacional"];
+  if (installmentOffer) {
+    parts.push(`${installmentOffer.installments} cuotas`);
+  }
+
+  return parts.join(" · ");
 }
 
 function ProductImage({ product, eager = false }: { product: StorefrontProduct; eager?: boolean }) {
@@ -240,6 +248,7 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
               const titleLine = (product.model || product.title).trim();
               const specLine = buildAppleSpecLine(product);
               const detailHref = buildAppleProductPath(product.sku);
+              const installmentOffer = buildStorefrontInstallmentOffer(product);
 
               return (
                 <article key={product.id} className="apple-product-card">
@@ -256,10 +265,15 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                   </Link>
 
                   <div className="apple-card-bottom">
-                    <span className="apple-support-pill apple-card-support">{APPLE_SUPPORT_COPY}</span>
+                    <span className="apple-support-pill apple-card-support">{buildAppleSupportCopy(product)}</span>
                     <div className="apple-card-price">
                       <span>Precio</span>
                       <strong>{formatMoney(product.public_price_ars)}</strong>
+                      {installmentOffer ? (
+                        <small className="apple-installment-copy">
+                          o en {installmentOffer.installments} cuotas de {formatMoney(installmentOffer.installmentAmount)}
+                        </small>
+                      ) : null}
                     </div>
                     <StorefrontProductActions
                       product={product}

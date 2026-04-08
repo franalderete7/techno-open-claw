@@ -4,7 +4,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { trackStorefrontEvent, trackStorefrontSearch } from "../../lib/storefront-analytics";
-import { buildStorefrontProductPath, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
+import {
+  buildStorefrontInstallmentOffer,
+  buildStorefrontProductPath,
+  type StorefrontProduct,
+  type StorefrontProfile,
+} from "../../lib/storefront";
 import { StorefrontProductActions } from "./storefront-product-actions";
 
 type StorefrontCatalogProps = {
@@ -417,6 +422,7 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
               const detailHref = buildStorefrontProductPath(product.sku);
               const specSummary = buildSpecSummary(product);
               const shouldShowDescription = shouldRenderCardDescription(product, specSummary);
+              const installmentOffer = buildStorefrontInstallmentOffer(product);
 
               return (
                 <article key={product.id} className="storefront-card storefront-card-clickable">
@@ -457,6 +463,12 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
                         <div className="storefront-price-stack">
                           <p className="storefront-price-label">Precio final</p>
                           <strong className="storefront-price">{formatMoney(product.public_price_ars)}</strong>
+                          {installmentOffer ? (
+                            <p className="storefront-installment-copy">
+                              o en {installmentOffer.installments} cuotas de{" "}
+                              <strong>{formatMoney(installmentOffer.installmentAmount)}</strong>
+                            </p>
+                          ) : null}
                           <p className="storefront-price-note">
                             {product.delivery_days
                               ? `Entrega estimada en ${product.delivery_days} días`

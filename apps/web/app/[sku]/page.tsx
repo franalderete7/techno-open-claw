@@ -7,6 +7,7 @@ import { getProducts, getSettings } from "../../lib/api";
 import { getSiteMode } from "../../lib/site-mode";
 import { buildStorefrontPageMetadata, buildStorefrontProductMetadata } from "../../lib/storefront-metadata";
 import {
+  buildStorefrontInstallmentOffer,
   buildStorefrontProductPath,
   buildStorefrontProductUrl,
   buildStorefrontProducts,
@@ -156,6 +157,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
   const specSummary = product ? buildSpecSummary(product) : [];
   const detailHref = product ? buildStorefrontProductPath(product.sku) : "/";
   const productUrl = product ? buildStorefrontProductUrl(store.storefront_url, product.sku) : store.storefront_url || "/";
+  const installmentOffer = product ? buildStorefrontInstallmentOffer(product) : null;
 
   return (
     <div className="storefront-stack">
@@ -230,6 +232,12 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
               <div className="storefront-product-price-card">
                 <p className="storefront-price-label">Precio final</p>
                 <strong className="storefront-price">{formatMoney(product.public_price_ars)}</strong>
+                {installmentOffer ? (
+                  <p className="storefront-installment-copy">
+                    o en {installmentOffer.installments} cuotas de{" "}
+                    <strong>{formatMoney(installmentOffer.installmentAmount)}</strong>
+                  </p>
+                ) : null}
                 <p className="storefront-price-note">
                   {product.delivery_days
                     ? `Entrega estimada en ${product.delivery_days} días`

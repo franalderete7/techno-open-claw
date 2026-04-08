@@ -18,6 +18,20 @@ export type StorefrontProduct = {
   color: string | null;
   battery_health: number | null;
   in_stock: boolean;
+  bancarizada_total: number | null;
+  bancarizada_cuota: number | null;
+  bancarizada_interest: number | null;
+  macro_total: number | null;
+  macro_cuota: number | null;
+  macro_interest: number | null;
+  cuotas_qty: number | null;
+};
+
+export type StorefrontInstallmentOffer = {
+  provider: "bancarizada" | "macro";
+  installments: number;
+  installmentAmount: number;
+  totalAmount: number | null;
 };
 
 export type StorefrontProfile = {
@@ -45,6 +59,14 @@ function toText(value: unknown) {
   if (typeof value === "string") return value.trim() || null;
   if (typeof value === "number") return String(value);
   return null;
+}
+
+function asPositiveNumber(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  return value;
 }
 
 function normalizePhone(value: string | null) {
@@ -164,7 +186,54 @@ export function buildStorefrontProducts(items: ProductRecord[]): StorefrontProdu
       color: item.color,
       battery_health: item.battery_health,
       in_stock: item.in_stock,
+      bancarizada_total: item.bancarizada_total ?? null,
+      bancarizada_cuota: item.bancarizada_cuota ?? null,
+      bancarizada_interest: item.bancarizada_interest ?? null,
+      macro_total: item.macro_total ?? null,
+      macro_cuota: item.macro_cuota ?? null,
+      macro_interest: item.macro_interest ?? null,
+      cuotas_qty: item.cuotas_qty ?? null,
     }));
+}
+
+export function buildStorefrontInstallmentOffer(
+  product: Pick<
+    StorefrontProduct,
+    "cuotas_qty" | "bancarizada_cuota" | "bancarizada_total" | "macro_cuota" | "macro_total"
+  >
+): StorefrontInstallmentOffer | null {
+  const installments = Math.round(asPositiveNumber(product.cuotas_qty) ?? 0);
+  if (!Number.isFinite(installments) || installments < 2) {
+    return null;
+  }
+
+  const offers: StorefrontInstallmentOffer[] = [];
+  const bancarizadaCuota = asPositiveNumber(product.bancarizada_cuota);
+  if (bancarizadaCuota != null) {
+    offers.push({
+      provider: "bancarizada",
+      installments,
+      installmentAmount: bancarizadaCuota,
+      totalAmount: asPositiveNumber(product.bancarizada_total),
+    });
+  }
+
+  const macroCuota = asPositiveNumber(product.macro_cuota);
+  if (macroCuota != null) {
+    offers.push({
+      provider: "macro",
+      installments,
+      installmentAmount: macroCuota,
+      totalAmount: asPositiveNumber(product.macro_total),
+    });
+  }
+
+  if (offers.length === 0) {
+    return null;
+  }
+
+  offers.sort((left, right) => left.installmentAmount - right.installmentAmount);
+  return offers[0];
 }
 
 /** Apple / iPhone lives on `/iphone` only; keep the main storefront grid to other brands. */

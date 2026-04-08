@@ -6,11 +6,14 @@ import { cache } from "react";
 import { getProducts, getSettings } from "../../../lib/api";
 import { getSiteMode } from "../../../lib/site-mode";
 import { buildStorefrontPageMetadata, buildStorefrontProductMetadata } from "../../../lib/storefront-metadata";
-import { buildStorefrontProducts, buildStorefrontProfile, type StorefrontProduct } from "../../../lib/storefront";
+import {
+  buildStorefrontInstallmentOffer,
+  buildStorefrontProducts,
+  buildStorefrontProfile,
+  type StorefrontProduct,
+} from "../../../lib/storefront";
 import { MetaProductViewTracker } from "../../components/meta-product-view-tracker";
 import { StorefrontProductActions } from "../../components/storefront-product-actions";
-
-const APPLE_SUPPORT_COPY = "Garantía de 1 año · Envío nacional · 6 cuotas";
 
 type AppleProductPageProps = {
   params: Promise<{
@@ -37,6 +40,16 @@ function buildAppleProductPath(sku: string) {
 
 function buildAppleSpecLine(product: StorefrontProduct) {
   return [product.color, product.storage_gb ? `${product.storage_gb}GB` : null].filter(Boolean).join(" · ");
+}
+
+function buildAppleSupportCopy(product: StorefrontProduct) {
+  const installmentOffer = buildStorefrontInstallmentOffer(product);
+  const parts = ["Garantía de 1 año", "Envío nacional"];
+  if (installmentOffer) {
+    parts.push(`${installmentOffer.installments} cuotas`);
+  }
+
+  return parts.join(" · ");
 }
 
 const loadAppleProductPageData = cache(async (requestedSku: string) => {
@@ -141,6 +154,7 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
   const titleLine = product ? (product.model || product.title).trim() : "";
   const specLine = product ? buildAppleSpecLine(product) : "";
   const detailHref = product ? buildAppleProductPath(product.sku) : "/iphone";
+  const installmentOffer = product ? buildStorefrontInstallmentOffer(product) : null;
   const specChips = product
     ? [product.ram_gb ? `${product.ram_gb}GB RAM` : null, product.storage_gb ? `${product.storage_gb}GB` : null, product.network, product.color]
         .filter(Boolean)
@@ -226,12 +240,17 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
 
               <div className="apple-detail-footer">
                 <div className="apple-detail-support">
-                  <span className="apple-support-pill">{APPLE_SUPPORT_COPY}</span>
+                  <span className="apple-support-pill">{buildAppleSupportCopy(product)}</span>
                 </div>
 
                 <div className="apple-detail-price-block">
                   <span>Precio</span>
                   <strong>{formatMoney(product.public_price_ars)}</strong>
+                  {installmentOffer ? (
+                    <small className="apple-installment-copy">
+                      o en {installmentOffer.installments} cuotas de {formatMoney(installmentOffer.installmentAmount)}
+                    </small>
+                  ) : null}
                   <small>
                     {product.delivery_days ? `Entrega estimada en ${product.delivery_days} días` : "Retiro o entrega coordinada"}
                   </small>
