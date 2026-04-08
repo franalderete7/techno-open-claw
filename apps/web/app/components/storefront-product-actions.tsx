@@ -4,7 +4,12 @@ import Link from "next/link";
 import { useState } from "react";
 import { trackMetaContact, trackMetaInitiateCheckout } from "../../lib/meta-pixel";
 import { getStorefrontAnalyticsContext, trackStorefrontEvent } from "../../lib/storefront-analytics";
-import { buildStorefrontConsultUrl, buildStorefrontPaymentFallbackUrl, type StorefrontProduct } from "../../lib/storefront";
+import {
+  buildStorefrontConsultUrl,
+  buildStorefrontPaymentFallbackUrl,
+  type StorefrontBuyerIntent,
+  type StorefrontProduct,
+} from "../../lib/storefront";
 
 type StorefrontProductActionsProps = {
   product: Pick<StorefrontProduct, "id" | "sku" | "title" | "brand" | "public_price_ars">;
@@ -14,7 +19,15 @@ type StorefrontProductActionsProps = {
   className?: string;
   detailHref?: string | null;
   detailLabel?: string;
+  intentCaptureMode?: "none" | "compact" | "full";
+  sourcePlacement?: string | null;
+  initialIntent?: StorefrontBuyerIntent | null;
 };
+
+function trimIntentText(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
 
 function WhatsAppIcon() {
   return (
@@ -35,11 +48,53 @@ export function StorefrontProductActions({
   className,
   detailHref,
   detailLabel = "Ver equipo",
+  intentCaptureMode = "none",
+  sourcePlacement = null,
+  initialIntent = null,
 }: StorefrontProductActionsProps) {
   const [pending, setPending] = useState(false);
-  const consultUrl = buildStorefrontConsultUrl(whatsappUrl, product);
-  const fallbackUrl = buildStorefrontPaymentFallbackUrl(whatsappUrl, product);
+  const [deliveryMode, setDeliveryMode] = useState<StorefrontBuyerIntent["delivery_mode"]>(initialIntent?.delivery_mode ?? null);
+  const [availabilityPreference, setAvailabilityPreference] = useState<StorefrontBuyerIntent["availability_preference"]>(
+    initialIntent?.availability_preference ?? null
+  );
+  const [paymentPreference, setPaymentPreference] = useState<StorefrontBuyerIntent["payment_preference"]>(
+    initialIntent?.payment_preference ?? null
+  );
+  const [customerCity, setCustomerCity] = useState(initialIntent?.customer_city ?? "");
+  const [customerProvince, setCustomerProvince] = useState(initialIntent?.customer_province ?? "");
   const payEnabled = product.public_price_ars != null;
+
+  const baseIntent: StorefrontBuyerIntent = {
+    delivery_mode: deliveryMode,
+    availability_preference: availabilityPreference,
+    payment_preference: paymentPreference,
+    customer_city: trimIntentText(customerCity),
+    customer_province: trimIntentText(customerProvince),
+    source_placement: sourcePlacement ?? initialIntent?.source_placement ?? null,
+  };
+  const consultIntent: StorefrontBuyerIntent = {
+    ...baseIntent,
+    contact_goal: availabilityPreference === "stock_now" ? "confirm_stock" : "advice",
+  };
+  const payIntent: StorefrontBuyerIntent = {
+    ...baseIntent,
+    contact_goal: "buy_now",
+  };
+  const consultUrl = buildStorefrontConsultUrl(whatsappUrl, product, consultIntent);
+  const fallbackUrl = buildStorefrontPaymentFallbackUrl(whatsappUrl, product, payIntent);
+
+  const payLabel =
+    deliveryMode === "shipping_national"
+      ? "Quiero envío a todo el país"
+      : deliveryMode === "pickup_salta"
+        ? "Quiero retirarlo en Salta"
+        : "Quiero pagarlo ahora";
+  const consultLabel = availabilityPreference === "stock_now" ? "Confirmar stock hoy" : "Quiero asesoramiento";
+  const defaultActionNote =
+    intentCaptureMode === "full"
+      ? "Elegí cómo lo querés y seguimos por pago o WhatsApp con este modelo ya cargado."
+      : "Abrimos WhatsApp con este modelo ya cargado.";
+  const actionNote = note === null ? null : note ?? defaultActionNote;
 
   async function handlePayNow() {
     try {
@@ -59,6 +114,13 @@ export function StorefrontProductActions({
         payload: {
           title: product.title,
           brand: product.brand,
+          delivery_mode: payIntent.delivery_mode ?? null,
+          availability_preference: payIntent.availability_preference ?? null,
+          payment_preference: payIntent.payment_preference ?? null,
+          customer_city: payIntent.customer_city ?? null,
+          customer_province: payIntent.customer_province ?? null,
+          contact_goal: payIntent.contact_goal ?? null,
+          source_placement: payIntent.source_placement ?? null,
         },
       });
       const analytics = getStorefrontAnalyticsContext();
@@ -71,6 +133,13 @@ export function StorefrontProductActions({
         body: JSON.stringify({
           product_id: product.id,
           source_path: sourcePath || (typeof window !== "undefined" ? window.location.pathname : null),
+          delivery_mode: payIntent.delivery_mode ?? null,
+          availability_preference: payIntent.availability_preference ?? null,
+          payment_preference: payIntent.payment_preference ?? null,
+          customer_city: payIntent.customer_city ?? null,
+          customer_province: payIntent.customer_province ?? null,
+          contact_goal: payIntent.contact_goal ?? null,
+          source_placement: payIntent.source_placement ?? null,
           visitor_id: analytics?.visitor_id ?? null,
           session_id: analytics?.session_id ?? null,
           page_url: analytics?.page_url ?? null,
@@ -110,6 +179,102 @@ export function StorefrontProductActions({
 
   return (
     <>
+      {intentCaptureMode !== "none" ? (
+        <div className="storefront-intent-card">
+          <div className="storefront-intent-group">
+            <span className="storefront-intent-label">Cómo querés recibirlo</span>
+            <div className="storefront-intent-options">
+              <button
+                type="button"
+                className={`storefront-intent-chip ${deliveryMode === "shipping_national" ? "is-active" : ""}`}
+                onClick={() => setDeliveryMode(deliveryMode === "shipping_national" ? null : "shipping_national")}
+              >
+                Envío país
+              </button>
+              <button
+                type="button"
+                className={`storefront-intent-chip ${deliveryMode === "pickup_salta" ? "is-active" : ""}`}
+                onClick={() => setDeliveryMode(deliveryMode === "pickup_salta" ? null : "pickup_salta")}
+              >
+                Retiro Salta
+              </button>
+            </div>
+          </div>
+
+          <div className="storefront-intent-group">
+            <span className="storefront-intent-label">Tiempo</span>
+            <div className="storefront-intent-options">
+              <button
+                type="button"
+                className={`storefront-intent-chip ${availabilityPreference === "stock_now" ? "is-active" : ""}`}
+                onClick={() => setAvailabilityPreference(availabilityPreference === "stock_now" ? null : "stock_now")}
+              >
+                Stock hoy
+              </button>
+              <button
+                type="button"
+                className={`storefront-intent-chip ${availabilityPreference === "can_wait" ? "is-active" : ""}`}
+                onClick={() => setAvailabilityPreference(availabilityPreference === "can_wait" ? null : "can_wait")}
+              >
+                Puedo esperar
+              </button>
+            </div>
+          </div>
+
+          {intentCaptureMode === "full" ? (
+            <>
+              <div className="storefront-intent-group">
+                <span className="storefront-intent-label">Cómo pensás pagarlo</span>
+                <div className="storefront-intent-options">
+                  <button
+                    type="button"
+                    className={`storefront-intent-chip ${paymentPreference === "contado" ? "is-active" : ""}`}
+                    onClick={() => setPaymentPreference(paymentPreference === "contado" ? null : "contado")}
+                  >
+                    Contado
+                  </button>
+                  <button
+                    type="button"
+                    className={`storefront-intent-chip ${paymentPreference === "bancarizada" ? "is-active" : ""}`}
+                    onClick={() => setPaymentPreference(paymentPreference === "bancarizada" ? null : "bancarizada")}
+                  >
+                    Bancarizada
+                  </button>
+                  <button
+                    type="button"
+                    className={`storefront-intent-chip ${paymentPreference === "macro" ? "is-active" : ""}`}
+                    onClick={() => setPaymentPreference(paymentPreference === "macro" ? null : "macro")}
+                  >
+                    Macro
+                  </button>
+                </div>
+              </div>
+
+              <div className="storefront-intent-field-grid">
+                <label className="storefront-intent-field">
+                  <span>Ciudad</span>
+                  <input
+                    type="text"
+                    value={customerCity}
+                    onChange={(event) => setCustomerCity(event.target.value)}
+                    placeholder="Ej. Córdoba"
+                  />
+                </label>
+                <label className="storefront-intent-field">
+                  <span>Provincia</span>
+                  <input
+                    type="text"
+                    value={customerProvince}
+                    onChange={(event) => setCustomerProvince(event.target.value)}
+                    placeholder="Ej. Córdoba"
+                  />
+                </label>
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className={className || "storefront-card-actions"}>
         <button
           type="button"
@@ -123,7 +288,7 @@ export function StorefrontProductActions({
           data-fast-goal-price-ars={product.public_price_ars != null ? String(product.public_price_ars) : undefined}
           data-fast-goal-source-path={sourcePath ?? undefined}
         >
-          {pending ? "Preparando..." : "Quiero pagarlo ahora"}
+          {pending ? "Preparando..." : payLabel}
         </button>
         {detailHref ? (
           <Link className="storefront-secondary-button" href={detailHref}>
@@ -153,6 +318,13 @@ export function StorefrontProductActions({
                   title: product.title,
                   brand: product.brand,
                   channel: "whatsapp",
+                  delivery_mode: consultIntent.delivery_mode ?? null,
+                  availability_preference: consultIntent.availability_preference ?? null,
+                  payment_preference: consultIntent.payment_preference ?? null,
+                  customer_city: consultIntent.customer_city ?? null,
+                  customer_province: consultIntent.customer_province ?? null,
+                  contact_goal: consultIntent.contact_goal ?? null,
+                  source_placement: consultIntent.source_placement ?? null,
                 },
               });
             }}
@@ -164,11 +336,11 @@ export function StorefrontProductActions({
             data-fast-goal-source-path={sourcePath ?? undefined}
           >
             <WhatsAppIcon />
-            Consultar
+            {consultLabel}
           </a>
         ) : null}
       </div>
-      {note ? <p className="storefront-card-action-note">{note}</p> : null}
+      {actionNote ? <p className="storefront-card-action-note">{actionNote}</p> : null}
     </>
   );
 }

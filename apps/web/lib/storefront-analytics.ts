@@ -204,7 +204,13 @@ export function trackStorefrontPageView(payload: Pick<StorefrontEventPayload, "p
   trackStorefrontEvent("page_view", payload);
 }
 
-export function trackStorefrontSearch(query: string, options?: { results_count?: number; ram_filter?: string; storage_filter?: string; sort?: string }) {
+export function trackStorefrontSearch(query: string, options?: {
+  results_count?: number;
+  ram_filter?: string;
+  storage_filter?: string;
+  sort?: string;
+  placement?: string;
+}) {
   const normalizedQuery = query.trim();
   if (!normalizedQuery) {
     return;
@@ -217,7 +223,7 @@ export function trackStorefrontSearch(query: string, options?: { results_count?:
       ram_filter: options?.ram_filter ?? null,
       storage_filter: options?.storage_filter ?? null,
       sort: options?.sort ?? null,
-      placement: "storefront_catalog",
+      placement: options?.placement ?? "storefront_catalog",
     },
   });
 }

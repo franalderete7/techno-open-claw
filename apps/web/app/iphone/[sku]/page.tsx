@@ -44,12 +44,62 @@ function buildAppleSpecLine(product: StorefrontProduct) {
 
 function buildAppleSupportCopy(product: StorefrontProduct) {
   const installmentOffer = buildStorefrontInstallmentOffer(product);
-  const parts = ["Garantía de 1 año", "Envío nacional"];
+  const parts = ["Envíos a todo el país", "Seguimiento por WhatsApp"];
   if (installmentOffer) {
-    parts.push(`${installmentOffer.installments} cuotas`);
+    parts.push(`${installmentOffer.installments} cuotas claras`);
   }
 
   return parts.join(" · ");
+}
+
+type AppleFinancingOption = {
+  provider: "bancarizada" | "macro";
+  installments: number;
+  installmentAmount: number;
+  totalAmount: number | null;
+  interest: number | null;
+};
+
+function buildFinancingOptions(product: StorefrontProduct): AppleFinancingOption[] {
+  const installments = Math.round(product.cuotas_qty ?? 0);
+  if (!Number.isFinite(installments) || installments < 2) {
+    return [];
+  }
+
+  const options: AppleFinancingOption[] = [];
+  if (product.bancarizada_cuota != null && product.bancarizada_cuota > 0) {
+    options.push({
+      provider: "bancarizada",
+      installments,
+      installmentAmount: product.bancarizada_cuota,
+      totalAmount: product.bancarizada_total ?? null,
+      interest: product.bancarizada_interest ?? null,
+    });
+  }
+
+  if (product.macro_cuota != null && product.macro_cuota > 0) {
+    options.push({
+      provider: "macro",
+      installments,
+      installmentAmount: product.macro_cuota,
+      totalAmount: product.macro_total ?? null,
+      interest: product.macro_interest ?? null,
+    });
+  }
+
+  return options.sort((left, right) => left.installmentAmount - right.installmentAmount);
+}
+
+function buildShippingSummary(product: StorefrontProduct) {
+  if (product.in_stock) {
+    return "Si está en stock, coordinamos salida rápida y seguimiento por WhatsApp.";
+  }
+
+  if (product.delivery_days && product.delivery_days > 0) {
+    return `Si entra por proveedor, la entrega estimada es de ${product.delivery_days} días y te acompañamos en todo el proceso.`;
+  }
+
+  return "Confirmamos disponibilidad y tiempos antes de avanzar para que compres con tranquilidad.";
 }
 
 const loadAppleProductPageData = cache(async (requestedSku: string) => {
@@ -93,7 +143,7 @@ export async function generateMetadata({ params }: AppleProductPageProps): Promi
   if (!product) {
     return buildStorefrontPageMetadata({
       title: "iPhone | TechnoStore Apple",
-      description: "Catálogo de iPhone nuevos con precio final, WhatsApp y atención directa en Salta.",
+      description: "Catálogo de iPhone nuevos con precio final, cuotas visibles, envíos a todo el país y atención real por WhatsApp.",
       path: "/iphone",
       storefrontUrl: store.storefront_url,
       siteName: "TechnoStore Apple",
@@ -155,10 +205,60 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
   const specLine = product ? buildAppleSpecLine(product) : "";
   const detailHref = product ? buildAppleProductPath(product.sku) : "/iphone";
   const installmentOffer = product ? buildStorefrontInstallmentOffer(product) : null;
+  const financingOptions = product ? buildFinancingOptions(product) : [];
   const specChips = product
     ? [product.ram_gb ? `${product.ram_gb}GB RAM` : null, product.storage_gb ? `${product.storage_gb}GB` : null, product.network, product.color]
         .filter(Boolean)
         .map((value) => String(value))
+    : [];
+  const trustPoints = product
+    ? [
+        {
+          title: "Compra con respaldo",
+          copy: "Precio final claro, atención humana y acompañamiento por WhatsApp antes y después de pagar.",
+        },
+        {
+          title: "Envío o retiro",
+          copy: product.in_stock
+            ? "Podés coordinar envío nacional o retiro en Salta con stock listo para salir rápido."
+            : buildShippingSummary(product),
+        },
+        {
+          title: "Cuotas visibles",
+          copy:
+            financingOptions.length > 0
+              ? "Te mostramos el valor por cuota y el total financiado para que compares sin sorpresas."
+              : "Si querés financiación, te confirmamos la alternativa disponible antes de avanzar.",
+        },
+      ]
+    : [];
+  const buyingSteps = [
+    "Elegís el iPhone y nos decís si lo querés con envío o retiro.",
+    "Te confirmamos stock, precio final y la opción de pago que más te conviene.",
+    "Pagás y coordinamos despacho, retiro o ingreso desde proveedor.",
+  ];
+  const faqs = product
+    ? [
+        {
+          question: "¿Hacen envíos a todo el país?",
+          answer: "Sí. Coordinamos el envío y el seguimiento por WhatsApp para que tengas visibilidad durante toda la compra.",
+        },
+        {
+          question: "¿Qué pasa si no está en stock hoy?",
+          answer: buildShippingSummary(product),
+        },
+        {
+          question: "¿Puedo comprar en cuotas?",
+          answer:
+            financingOptions.length > 0
+              ? "Sí. En esta ficha ya ves las opciones de cuotas disponibles con el valor por cuota y el total financiado."
+              : "Si este modelo no muestra cuotas, igual podemos revisarte alternativas por WhatsApp.",
+        },
+        {
+          question: "¿Cómo los contacto para cerrar?",
+          answer: "Podés avanzar por pago o escribirnos por WhatsApp con el equipo ya cargado para cerrar más rápido.",
+        },
+      ]
     : [];
 
   return (
@@ -228,8 +328,10 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
                     product={product}
                     whatsappUrl={store.whatsapp_url}
                     sourcePath={detailHref}
-                    note={null}
+                    note="Elegí envío, urgencia y pago para que podamos atenderte más rápido."
                     className="apple-detail-actions"
+                    intentCaptureMode="full"
+                    sourcePlacement="apple_detail_mobile"
                   />
                 </div>
               </div>
@@ -260,10 +362,80 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
                   product={product}
                   whatsappUrl={store.whatsapp_url}
                   sourcePath={detailHref}
-                  note={null}
+                  note="Elegí envío, urgencia y pago para que podamos atenderte más rápido."
                   className="apple-detail-actions apple-detail-actions--footer"
+                  intentCaptureMode="full"
+                  sourcePlacement="apple_detail_footer"
                 />
               </div>
+            </section>
+
+            <section className="apple-info-grid">
+              <article className="apple-info-card">
+                <span className="apple-info-kicker">Confianza para comprar</span>
+                <h2 className="apple-info-title">Un iPhone premium merece una compra clara.</h2>
+                <div className="apple-info-list">
+                  {trustPoints.map((item) => (
+                    <div key={item.title} className="apple-info-row">
+                      <strong>{item.title}</strong>
+                      <p>{item.copy}</p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="apple-info-card">
+                <span className="apple-info-kicker">Opciones de pago</span>
+                <h2 className="apple-info-title">Compará contado y cuotas sin adivinar números.</h2>
+                {financingOptions.length > 0 ? (
+                  <div className="apple-payment-options">
+                    {financingOptions.map((option) => (
+                      <div key={option.provider} className="apple-payment-option">
+                        <div className="apple-payment-head">
+                          <strong>{option.provider === "macro" ? "Plan Macro" : "Bancarizada"}</strong>
+                          <span>{option.installments} cuotas</span>
+                        </div>
+                        <p className="apple-payment-amount">
+                          {option.installments} x {formatMoney(option.installmentAmount)}
+                        </p>
+                        <p className="apple-payment-total">
+                          Total financiado: {option.totalAmount != null ? formatMoney(option.totalAmount) : "A confirmar"}
+                        </p>
+                        {option.interest != null ? (
+                          <small className="apple-payment-interest">Interés estimado: {option.interest.toFixed(1)}%</small>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="apple-info-copy">
+                    Este modelo no tiene una financiación cargada en este momento, pero igual podemos revisarte alternativas por
+                    WhatsApp.
+                  </p>
+                )}
+              </article>
+
+              <article className="apple-info-card">
+                <span className="apple-info-kicker">Cómo se compra</span>
+                <h2 className="apple-info-title">Un proceso simple para cerrar sin fricción.</h2>
+                <div className="apple-step-list">
+                  {buyingSteps.map((step, index) => (
+                    <div key={step} className="apple-step">
+                      <span>{index + 1}</span>
+                      <p>{step}</p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            </section>
+
+            <section className="apple-faq-grid">
+              {faqs.map((item) => (
+                <details key={item.question} className="apple-faq-card">
+                  <summary className="apple-faq-question">{item.question}</summary>
+                  <p className="apple-faq-answer">{item.answer}</p>
+                </details>
+              ))}
             </section>
           </div>
         </>

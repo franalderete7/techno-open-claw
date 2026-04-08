@@ -782,6 +782,13 @@ export async function createStorefrontPaymentIntent(payload: {
   source_host?: string | null;
   source_path?: string | null;
   channel?: "storefront" | "whatsapp" | "telegram" | "api";
+  delivery_mode?: string | null;
+  availability_preference?: string | null;
+  payment_preference?: string | null;
+  customer_city?: string | null;
+  customer_province?: string | null;
+  contact_goal?: string | null;
+  source_placement?: string | null;
   visitor_id?: string | null;
   session_id?: string | null;
   page_url?: string | null;

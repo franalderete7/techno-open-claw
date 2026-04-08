@@ -33,6 +33,16 @@ type CheckoutAnalyticsContext = {
   language?: string | null;
 };
 
+type CheckoutBuyerIntent = {
+  deliveryMode?: string | null;
+  availabilityPreference?: string | null;
+  paymentPreference?: string | null;
+  city?: string | null;
+  province?: string | null;
+  contactGoal?: string | null;
+  sourcePlacement?: string | null;
+};
+
 type CreateStorefrontPaymentIntentInput = {
   productId: number;
   sourceHost?: string | null;
@@ -41,6 +51,7 @@ type CreateStorefrontPaymentIntentInput = {
   customerId?: number | null;
   customerPhone?: string | null;
   customerName?: string | null;
+  buyerIntent?: CheckoutBuyerIntent | null;
   analytics?: CheckoutAnalyticsContext | null;
 };
 
@@ -418,6 +429,7 @@ export async function createStorefrontPaymentIntent({
   customerId,
   customerPhone,
   customerName,
+  buyerIntent,
   analytics,
 }: CreateStorefrontPaymentIntentInput): Promise<StorefrontPaymentIntentResult> {
   const client = await pool.connect();
@@ -543,6 +555,17 @@ export async function createStorefrontPaymentIntent({
           payment_provider: paymentProvider,
           source_path: sourcePath ?? null,
           product_slug: product.slug,
+          buyer_intent: buyerIntent
+            ? {
+                delivery_mode: buyerIntent.deliveryMode ?? null,
+                availability_preference: buyerIntent.availabilityPreference ?? null,
+                payment_preference: buyerIntent.paymentPreference ?? null,
+                city: buyerIntent.city ?? null,
+                province: buyerIntent.province ?? null,
+                contact_goal: buyerIntent.contactGoal ?? null,
+                source_placement: buyerIntent.sourcePlacement ?? null,
+              }
+            : null,
           analytics: analytics
             ? {
                 visitor_id: analytics.visitorId ?? null,

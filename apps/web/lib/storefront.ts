@@ -34,6 +34,16 @@ export type StorefrontInstallmentOffer = {
   totalAmount: number | null;
 };
 
+export type StorefrontBuyerIntent = {
+  delivery_mode?: "shipping_national" | "pickup_salta" | null;
+  availability_preference?: "stock_now" | "can_wait" | null;
+  payment_preference?: "contado" | "bancarizada" | "macro" | null;
+  customer_city?: string | null;
+  customer_province?: string | null;
+  contact_goal?: "buy_now" | "confirm_stock" | "advice" | null;
+  source_placement?: string | null;
+};
+
 export type StorefrontProfile = {
   name: string;
   tagline: string;
@@ -78,6 +88,46 @@ function normalizePhone(value: string | null) {
 function buildWhatsAppUrl(baseUrl: string | null, message: string) {
   if (!baseUrl) return null;
   return `${baseUrl}?text=${encodeURIComponent(message)}`;
+}
+
+function buildBuyerIntentLines(intent?: StorefrontBuyerIntent | null) {
+  if (!intent) return [] as string[];
+
+  const lines: string[] = [];
+  if (intent.delivery_mode === "shipping_national") {
+    lines.push("Lo quiero con envío a todo el país.");
+  } else if (intent.delivery_mode === "pickup_salta") {
+    lines.push("Prefiero retiro en Salta.");
+  }
+
+  if (intent.availability_preference === "stock_now") {
+    lines.push("Si lo tenés en stock para entrega rápida, mejor.");
+  } else if (intent.availability_preference === "can_wait") {
+    lines.push("Si hay que esperarlo unos días, puedo esperar.");
+  }
+
+  if (intent.payment_preference === "contado") {
+    lines.push("Mi idea es cerrarlo de contado.");
+  } else if (intent.payment_preference === "bancarizada") {
+    lines.push("Quiero verlo con bancarizada.");
+  } else if (intent.payment_preference === "macro") {
+    lines.push("Quiero verlo con Macro.");
+  }
+
+  const location = [intent.customer_city, intent.customer_province].filter(Boolean).join(", ");
+  if (location) {
+    lines.push(`Estoy en ${location}.`);
+  }
+
+  if (intent.contact_goal === "confirm_stock") {
+    lines.push("Quiero confirmar stock hoy.");
+  } else if (intent.contact_goal === "buy_now") {
+    lines.push("Estoy listo para avanzar hoy.");
+  } else if (intent.contact_goal === "advice") {
+    lines.push("Quiero que me recomienden la mejor opción.");
+  }
+
+  return lines;
 }
 
 function pickText(settingsMap: Map<string, unknown>, storeRoot: Record<string, unknown>, ...keys: string[]) {
@@ -157,12 +207,22 @@ export function buildStorefrontProductUrl(storefrontUrl: string | null, sku: str
   return `${storefrontUrl.replace(/\/$/, "")}${path}`;
 }
 
-export function buildStorefrontConsultUrl(whatsappUrl: string | null, product: Pick<StorefrontProduct, "title">) {
-  return buildWhatsAppUrl(whatsappUrl, `Hola! Quiero consultar por ${product.title}.`);
+export function buildStorefrontConsultUrl(
+  whatsappUrl: string | null,
+  product: Pick<StorefrontProduct, "title">,
+  intent?: StorefrontBuyerIntent | null
+) {
+  const lines = [`Hola! Quiero consultar por ${product.title}.`, ...buildBuyerIntentLines(intent)];
+  return buildWhatsAppUrl(whatsappUrl, lines.join(" "));
 }
 
-export function buildStorefrontPaymentFallbackUrl(whatsappUrl: string | null, product: Pick<StorefrontProduct, "title">) {
-  return buildWhatsAppUrl(whatsappUrl, `Hola! Quiero pagarlo ahora por ${product.title}.`);
+export function buildStorefrontPaymentFallbackUrl(
+  whatsappUrl: string | null,
+  product: Pick<StorefrontProduct, "title">,
+  intent?: StorefrontBuyerIntent | null
+) {
+  const lines = [`Hola! Quiero pagarlo ahora por ${product.title}.`, ...buildBuyerIntentLines(intent)];
+  return buildWhatsAppUrl(whatsappUrl, lines.join(" "));
 }
 
 export function buildStorefrontProducts(items: ProductRecord[]): StorefrontProduct[] {

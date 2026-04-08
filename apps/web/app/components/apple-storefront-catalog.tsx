@@ -26,30 +26,93 @@ function buildAppleProductPath(sku: string) {
   return `/iphone/${encodeURIComponent(sku.trim().toLowerCase())}`;
 }
 
-function buildAppleProductUrl(storefrontUrl: string | null, sku: string) {
-  const path = buildAppleProductPath(sku);
-  if (!storefrontUrl) {
-    return path;
-  }
-
-  return `${storefrontUrl.replace(/\/$/, "")}${path}`;
-}
-
 function buildAppleSpecLine(product: StorefrontProduct) {
   return [product.color, product.storage_gb ? `${product.storage_gb}GB` : null].filter(Boolean).join(" · ");
 }
 
+function getAppleGeneration(product: Pick<StorefrontProduct, "model" | "title">) {
+  const match = `${product.model} ${product.title}`.match(/iphone\s*(\d{2})/i);
+  if (!match) {
+    return null;
+  }
+
+  const generation = Number(match[1]);
+  return Number.isFinite(generation) ? generation : null;
+}
+
 function buildAppleSupportCopy(product: StorefrontProduct) {
   const installmentOffer = buildStorefrontInstallmentOffer(product);
-  const parts = ["Garantía de 1 año", "Envío nacional"];
+  const parts = ["Envíos a todo el país", "Seguimiento por WhatsApp"];
   if (installmentOffer) {
-    parts.push(`${installmentOffer.installments} cuotas`);
+    parts.push(`${installmentOffer.installments} cuotas claras`);
   }
 
   return parts.join(" · ");
 }
 
-function ProductImage({ product, eager = false }: { product: StorefrontProduct; eager?: boolean }) {
+function buildAppleSalesPitch(product: StorefrontProduct) {
+  const generation = getAppleGeneration(product);
+
+  if (generation === 13) {
+    return "La entrada más inteligente al mundo iPhone: rápido, confiable y con un precio que invita a cerrar.";
+  }
+
+  if (generation === 14) {
+    return "Un equilibrio muy fuerte entre cámara, batería y valor para comprar bien sin irte demasiado arriba.";
+  }
+
+  if (generation === 15) {
+    return "USB-C, mejor cámara y una generación muy buscada para usar varios años con tranquilidad.";
+  }
+
+  if (generation === 16) {
+    return "Nueva generación para quien quiere potencia, imagen premium y un iPhone con mucha vigencia por delante.";
+  }
+
+  if (generation === 17) {
+    return "Lo más nuevo de Apple para quien quiere cerrar hoy y quedarse con lo último desde el primer día.";
+  }
+
+  if ((product.storage_gb ?? 0) >= 256) {
+    return "Más memoria para fotos, video y trabajo sin estar pensando en liberar espacio a cada rato.";
+  }
+
+  return "Una opción sólida para comprar con precio final claro, buena reventa y atención directa por WhatsApp.";
+}
+
+function buildAppleMerchLabel(
+  product: StorefrontProduct,
+  context: {
+    lowestPrice: number | null;
+    highestGeneration: number | null;
+    highestStorage: number | null;
+  }
+) {
+  const generation = getAppleGeneration(product);
+  if (product.public_price_ars != null && context.lowestPrice != null && product.public_price_ars === context.lowestPrice) {
+    return "Entrada Apple";
+  }
+
+  if (generation != null && context.highestGeneration != null && generation === context.highestGeneration) {
+    return "Lo más nuevo";
+  }
+
+  if ((product.storage_gb ?? 0) > 0 && context.highestStorage != null && product.storage_gb === context.highestStorage) {
+    return "Más memoria";
+  }
+
+  if (product.in_stock) {
+    return "Entrega rápida";
+  }
+
+  if (buildStorefrontInstallmentOffer(product)) {
+    return "Cuotas claras";
+  }
+
+  return "Muy buscado";
+}
+
+function ProductImage({ product }: { product: StorefrontProduct }) {
   const initials = product.brand.slice(0, 2).toUpperCase();
   const [failed, setFailed] = useState(false);
 
@@ -63,10 +126,10 @@ function ProductImage({ product, eager = false }: { product: StorefrontProduct; 
   }
 
   return (
-    <img
+      <img
       src={product.image_url}
       alt={product.title}
-      loading={eager ? "eager" : "lazy"}
+      loading="lazy"
       decoding="async"
       referrerPolicy="no-referrer"
       className="apple-phone-image"
@@ -102,6 +165,30 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
       ),
     [products]
   );
+  const catalogStats = useMemo(() => {
+    const pricedProducts = products.filter((product) => product.public_price_ars != null);
+    const generations = products.map((product) => getAppleGeneration(product)).filter((value): value is number => value != null);
+    const installmentProducts = products.filter((product) => buildStorefrontInstallmentOffer(product)).length;
+    const inStockProducts = products.filter((product) => product.in_stock).length;
+    const lowestPrice = pricedProducts.length > 0 ? Math.min(...pricedProducts.map((product) => product.public_price_ars ?? Number.MAX_SAFE_INTEGER)) : null;
+    const highestGeneration = generations.length > 0 ? Math.max(...generations) : null;
+    const highestStorage = products.reduce<number | null>((current, product) => {
+      if (product.storage_gb == null) {
+        return current;
+      }
+
+      return current == null ? product.storage_gb : Math.max(current, product.storage_gb);
+    }, null);
+
+    return {
+      lowestPrice,
+      highestGeneration,
+      highestStorage,
+      installmentProducts,
+      inStockProducts,
+      generations: [...new Set(generations)].sort((left, right) => left - right),
+    };
+  }, [products]);
 
   const filteredProducts = useMemo(() => {
     const next = products.filter((product) => {
@@ -169,12 +256,14 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
       results_count: filteredProducts.length,
       storage_filter: storageFilter === "all" ? undefined : storageFilter,
       sort,
+      placement: "apple_catalog",
     });
   }, [colorFilter, deferredQuery, filteredProducts.length, needle, sort, storageFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pagedProducts = filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const heroGenerations = catalogStats.generations.slice(0, 4);
 
   return (
     <div className="apple-storefront">
@@ -183,14 +272,99 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
           <Image src="/brand/logo-blanco-salta.png" alt="" width={108} height={28} priority />
         </Link>
 
-        {store.whatsapp_url ? (
-          <div className="apple-storefront-nav-links">
+        <div className="apple-storefront-nav-links">
+          <a className="apple-storefront-link" href="#modelos">
+            Ver modelos
+          </a>
+          {store.whatsapp_url ? (
             <a className="apple-storefront-cta" href={store.whatsapp_url} target="_blank" rel="noreferrer">
               WhatsApp
             </a>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </header>
+
+      <section className="apple-hero">
+        <div className="apple-hero-copy">
+          <span className="apple-hero-kicker">Store iPhone profesional</span>
+          <h1 className="apple-hero-title">Comprá tu iPhone con precio final claro, cuotas visibles y envío a todo el país.</h1>
+          <p className="apple-hero-description">
+            Atención directa por WhatsApp, retiro en Salta y despacho rápido cuando el equipo está en stock. Si entra por proveedor,
+            te acompañamos igual para que compres con información clara y sin vueltas.
+          </p>
+
+          <div className="apple-hero-actions">
+            <a className="apple-storefront-cta" href="#modelos">
+              Explorar iPhone
+            </a>
+            {store.whatsapp_url ? (
+              <a
+                className="apple-storefront-link"
+                href={store.whatsapp_url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => {
+                  trackStorefrontEvent("contact", {
+                    payload: {
+                      channel: "whatsapp",
+                      source_placement: "apple_hero",
+                      contact_goal: "advice",
+                    },
+                  });
+                }}
+              >
+                Hablar con un asesor
+              </a>
+            ) : null}
+          </div>
+
+          <div className="apple-hero-facts">
+            <div className="apple-hero-fact">
+              <strong>{products.length}</strong>
+              <span>iPhone para comparar</span>
+            </div>
+            <div className="apple-hero-fact">
+              <strong>{catalogStats.inStockProducts}</strong>
+              <span>con stock listo hoy</span>
+            </div>
+            <div className="apple-hero-fact">
+              <strong>{catalogStats.lowestPrice != null ? formatMoney(catalogStats.lowestPrice) : "Consultar"}</strong>
+              <span>precio de entrada</span>
+            </div>
+            <div className="apple-hero-fact">
+              <strong>{catalogStats.installmentProducts}</strong>
+              <span>con cuotas visibles</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="apple-hero-panel">
+          <span className="apple-hero-panel-kicker">Lo que más confianza da</span>
+          <div className="apple-hero-trust-grid">
+            <div className="apple-hero-trust-item">
+              <strong>Envíos a todo el país</strong>
+              <span>Coordinamos despacho y seguimiento por WhatsApp.</span>
+            </div>
+            <div className="apple-hero-trust-item">
+              <strong>Cuotas claras</strong>
+              <span>Mostramos el valor por cuota y el total financiado.</span>
+            </div>
+            <div className="apple-hero-trust-item">
+              <strong>Atención real</strong>
+              <span>Hablás con una persona y no con una página fría.</span>
+            </div>
+            <div className="apple-hero-trust-item">
+              <strong>Compra guiada</strong>
+              <span>Te ayudamos a elegir según presupuesto y urgencia.</span>
+            </div>
+          </div>
+          <p className="apple-hero-note">
+            {heroGenerations.length > 0
+              ? `Trabajamos generaciones ${heroGenerations.join(", ")} para que compares desde opciones más accesibles hasta lo último de Apple.`
+              : "Catálogo curado para comparar rápido y cerrar con seguridad."}
+          </p>
+        </div>
+      </section>
 
       <section className="apple-filters" id="filtros">
         <label className="apple-filter-field apple-filter-search">
@@ -237,6 +411,21 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
       </section>
 
       <section className="apple-catalog-shell" id="modelos">
+        <div className="apple-catalog-intro">
+          <div>
+            <span className="apple-hero-kicker">Modelos listos para comparar</span>
+            <h2 className="apple-catalog-title">Elegí el iPhone que mejor te cierre hoy.</h2>
+            <p className="apple-catalog-copy">
+              Vas a ver precio final, cuotas disponibles y una descripción corta de venta para elegir más rápido. Si querés, podés
+              marcar envío, retiro o urgencia antes de hablar con nosotros.
+            </p>
+          </div>
+          <div className="apple-catalog-summary">
+            <span>{filteredProducts.length} equipos con tus filtros</span>
+            <span>{catalogStats.inStockProducts} listos para entrega rápida</span>
+          </div>
+        </div>
+
         {pagedProducts.length === 0 ? (
           <div className="apple-empty-state">
             <h3>No encontramos equipos con esos filtros.</h3>
@@ -249,15 +438,24 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
               const specLine = buildAppleSpecLine(product);
               const detailHref = buildAppleProductPath(product.sku);
               const installmentOffer = buildStorefrontInstallmentOffer(product);
+              const merchLabel = buildAppleMerchLabel(product, {
+                lowestPrice: catalogStats.lowestPrice,
+                highestGeneration: catalogStats.highestGeneration,
+                highestStorage: catalogStats.highestStorage,
+              });
 
               return (
                 <article key={product.id} className="apple-product-card">
                   <Link href={detailHref} className="apple-card-link-surface apple-card-copy">
-                    <AppleTierPill />
+                    <div className="apple-card-badges">
+                      <span className="apple-merch-pill">{merchLabel}</span>
+                      <AppleTierPill />
+                    </div>
                     <div className="apple-card-headline">
                       <span>{titleLine}</span>
                     </div>
                     {specLine ? <p className="apple-card-spec">{specLine}</p> : null}
+                    <p className="apple-card-story">{buildAppleSalesPitch(product)}</p>
                   </Link>
 
                   <Link href={detailHref} className="apple-card-link-surface apple-card-visual" aria-label={`Ver ${product.title}`}>
@@ -271,7 +469,8 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                       <strong>{formatMoney(product.public_price_ars)}</strong>
                       {installmentOffer ? (
                         <small className="apple-installment-copy">
-                          o en {installmentOffer.installments} cuotas de {formatMoney(installmentOffer.installmentAmount)}
+                          o en {installmentOffer.installments} cuotas de {formatMoney(installmentOffer.installmentAmount)} con{" "}
+                          {installmentOffer.provider === "macro" ? "Macro" : "bancarizada"}
                         </small>
                       ) : null}
                     </div>
@@ -279,8 +478,10 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                       product={product}
                       whatsappUrl={store.whatsapp_url}
                       sourcePath="/iphone"
-                      note="Abrimos WhatsApp con este modelo ya cargado."
+                      note="Elegí envío o retiro y seguimos con este iPhone ya cargado."
                       className="apple-card-actions storefront-card-actions"
+                      intentCaptureMode="compact"
+                      sourcePlacement="apple_catalog_card"
                     />
                   </div>
                 </article>

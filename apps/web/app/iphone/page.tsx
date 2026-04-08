@@ -8,7 +8,7 @@ import { AppleStorefrontCatalog } from "../components/apple-storefront-catalog";
 
 export const metadata: Metadata = buildStorefrontPageMetadata({
   title: "iPhone | TechnoStore Apple",
-  description: "Catálogo de iPhone nuevos con precio final, pago coordinado y atención directa por WhatsApp.",
+  description: "Catálogo de iPhone nuevos con precio final, cuotas visibles, envíos a todo el país y atención directa por WhatsApp.",
   path: "/iphone",
   storefrontUrl: "https://technostoresalta.com",
   siteName: "TechnoStore Apple",

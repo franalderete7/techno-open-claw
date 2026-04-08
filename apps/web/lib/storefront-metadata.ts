@@ -57,7 +57,7 @@ function buildProductDescription(product: StorefrontProduct, storeName: string) 
     [product.color, product.storage_gb ? `${product.storage_gb}GB` : null, product.network].filter(Boolean).join(" · ") || null,
     formatMoney(product.public_price_ars),
     buildAvailabilityLabel(product),
-    `Consultá por WhatsApp en ${storeName}.`,
+    `Envíos a todo el país y atención por WhatsApp en ${storeName}.`,
   ].filter(Boolean);
 
   return parts.join(" ").slice(0, 260);
