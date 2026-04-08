@@ -63,6 +63,7 @@ export function ApplePurchaseProcess({ variant = "hero", inStock = true, deliver
   const [mode, setMode] = useState<PurchaseMode>("shipping");
   const [activeStep, setActiveStep] = useState(0);
   const steps = useMemo(() => buildSteps(mode, inStock, deliveryDays), [deliveryDays, inStock, mode]);
+  const activeStepData = steps[activeStep] ?? steps[0];
 
   useEffect(() => {
     setActiveStep(0);
@@ -115,16 +116,32 @@ export function ApplePurchaseProcess({ variant = "hero", inStock = true, deliver
       </div>
 
       <div className="apple-purchase-process-body">
-        {steps.map((step, index) => (
-          <article key={step.title} className={`apple-purchase-process-step ${index === activeStep ? "is-active" : ""}`}>
-            <div className="apple-purchase-process-step-top">
-              <span>{index + 1}</span>
-              <small>{step.label}</small>
-            </div>
-            <strong>{step.title}</strong>
-            <p>{step.body}</p>
-          </article>
-        ))}
+        <article className="apple-purchase-process-stage">
+          <div className="apple-purchase-process-stage-glow" aria-hidden="true" />
+          <div className="apple-purchase-process-stage-top">
+            <span>{activeStep + 1}</span>
+            <small>{activeStepData.label}</small>
+          </div>
+          <strong>{activeStepData.title}</strong>
+          <p>{activeStepData.body}</p>
+        </article>
+
+        <div className="apple-purchase-process-step-list">
+          {steps.map((step, index) => (
+            <button
+              key={step.title}
+              type="button"
+              className={`apple-purchase-process-step ${index === activeStep ? "is-active" : ""}`}
+              onClick={() => setActiveStep(index)}
+            >
+              <div className="apple-purchase-process-step-top">
+                <span>{index + 1}</span>
+                <small>{step.label}</small>
+              </div>
+              <strong>{step.title}</strong>
+            </button>
+          ))}
+        </div>
       </div>
     </section>
   );

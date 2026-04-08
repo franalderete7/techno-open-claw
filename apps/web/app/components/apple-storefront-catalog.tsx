@@ -275,9 +275,6 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
         </Link>
 
         <div className="apple-storefront-nav-links">
-          <a className="apple-storefront-link" href="#modelos">
-            Ver modelos
-          </a>
           {store.whatsapp_url ? (
             <a className="apple-storefront-cta" href={store.whatsapp_url} target="_blank" rel="noreferrer">
               WhatsApp
