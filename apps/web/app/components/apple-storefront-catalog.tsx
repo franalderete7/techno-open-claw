@@ -5,6 +5,9 @@ import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { trackStorefrontEvent, trackStorefrontSearch } from "../../lib/storefront-analytics";
 import { buildStorefrontInstallmentOffer, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
+import { AppleAnnouncementBar } from "./apple-announcement-bar";
+import { ApplePurchaseProcess } from "./apple-purchase-process";
+import { AppleStorefrontFooter } from "./apple-storefront-footer";
 import { StorefrontProductActions } from "./storefront-product-actions";
 
 type AppleStorefrontCatalogProps = {
@@ -41,13 +44,7 @@ function getAppleGeneration(product: Pick<StorefrontProduct, "model" | "title">)
 }
 
 function buildAppleSupportCopy(product: StorefrontProduct) {
-  const installmentOffer = buildStorefrontInstallmentOffer(product);
-  const parts = ["Envíos a todo el país", "Seguimiento por WhatsApp"];
-  if (installmentOffer) {
-    parts.push(`${installmentOffer.installments} cuotas claras`);
-  }
-
-  return parts.join(" · ");
+  return "Envíos a todo el país · Seguimiento por WhatsApp";
 }
 
 function buildAppleSalesPitch(product: StorefrontProduct) {
@@ -263,10 +260,20 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pagedProducts = filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const heroGenerations = catalogStats.generations.slice(0, 4);
+  const heroMeta = [
+    catalogStats.lowestPrice != null ? `Desde ${formatMoney(catalogStats.lowestPrice)}` : null,
+    `${products.length} modelos seleccionados`,
+    `${catalogStats.inStockProducts} con stock`,
+  ].filter(Boolean);
+  const announcementItems = [
+    "Envíos a todo el país con seguimiento por WhatsApp",
+    "Retiro en Salta con coordinación simple",
+    "Cuotas visibles y precio final claro antes de comprar",
+  ];
 
   return (
     <div className="apple-storefront">
+      <AppleAnnouncementBar items={announcementItems} />
       <header className="apple-storefront-nav">
         <Link href="/iphone" className="apple-storefront-brand" aria-label="Inicio iPhone">
           <Image src="/brand/logo-blanco-salta.png" alt="" width={108} height={28} priority />
@@ -287,11 +294,8 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
       <section className="apple-hero">
         <div className="apple-hero-copy">
           <span className="apple-hero-kicker">Store iPhone profesional</span>
-          <h1 className="apple-hero-title">Comprá tu iPhone con precio final claro, cuotas visibles y envío a todo el país.</h1>
-          <p className="apple-hero-description">
-            Atención directa por WhatsApp, retiro en Salta y despacho rápido cuando el equipo está en stock. Si entra por proveedor,
-            te acompañamos igual para que compres con información clara y sin vueltas.
-          </p>
+          <h1 className="apple-hero-title">iPhone con precio final claro, cuotas visibles y compra simple.</h1>
+          <p className="apple-hero-description">Atención directa por WhatsApp, retiro en Salta y envío a todo el país.</p>
 
           <div className="apple-hero-actions">
             <a className="apple-storefront-cta" href="#modelos">
@@ -318,51 +322,11 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
             ) : null}
           </div>
 
-          <div className="apple-hero-facts">
-            <div className="apple-hero-fact">
-              <strong>{products.length}</strong>
-              <span>iPhone para comparar</span>
-            </div>
-            <div className="apple-hero-fact">
-              <strong>{catalogStats.inStockProducts}</strong>
-              <span>con stock listo hoy</span>
-            </div>
-            <div className="apple-hero-fact">
-              <strong>{catalogStats.lowestPrice != null ? formatMoney(catalogStats.lowestPrice) : "Consultar"}</strong>
-              <span>precio de entrada</span>
-            </div>
-            <div className="apple-hero-fact">
-              <strong>{catalogStats.installmentProducts}</strong>
-              <span>con cuotas visibles</span>
-            </div>
-          </div>
+          <p className="apple-hero-meta">{heroMeta.join(" • ")}</p>
         </div>
 
         <div className="apple-hero-panel">
-          <span className="apple-hero-panel-kicker">Lo que más confianza da</span>
-          <div className="apple-hero-trust-grid">
-            <div className="apple-hero-trust-item">
-              <strong>Envíos a todo el país</strong>
-              <span>Coordinamos despacho y seguimiento por WhatsApp.</span>
-            </div>
-            <div className="apple-hero-trust-item">
-              <strong>Cuotas claras</strong>
-              <span>Mostramos el valor por cuota y el total financiado.</span>
-            </div>
-            <div className="apple-hero-trust-item">
-              <strong>Atención real</strong>
-              <span>Hablás con una persona y no con una página fría.</span>
-            </div>
-            <div className="apple-hero-trust-item">
-              <strong>Compra guiada</strong>
-              <span>Te ayudamos a elegir según presupuesto y urgencia.</span>
-            </div>
-          </div>
-          <p className="apple-hero-note">
-            {heroGenerations.length > 0
-              ? `Trabajamos generaciones ${heroGenerations.join(", ")} para que compares desde opciones más accesibles hasta lo último de Apple.`
-              : "Catálogo curado para comparar rápido y cerrar con seguridad."}
-          </p>
+          <ApplePurchaseProcess variant="hero" inStock={catalogStats.inStockProducts > 0} />
         </div>
       </section>
 
@@ -415,10 +379,7 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
           <div>
             <span className="apple-hero-kicker">Modelos listos para comparar</span>
             <h2 className="apple-catalog-title">Elegí el iPhone que mejor te cierre hoy.</h2>
-            <p className="apple-catalog-copy">
-              Vas a ver precio final, cuotas disponibles y una descripción corta de venta para elegir más rápido. Si querés, podés
-              marcar envío, retiro o urgencia antes de hablar con nosotros.
-            </p>
+            <p className="apple-catalog-copy">Compará rápido, mirá cuotas y abrí WhatsApp con el modelo ya cargado.</p>
           </div>
           <div className="apple-catalog-summary">
             <span>{filteredProducts.length} equipos con tus filtros</span>
@@ -478,9 +439,8 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
                       product={product}
                       whatsappUrl={store.whatsapp_url}
                       sourcePath="/iphone"
-                      note="Elegí envío o retiro y seguimos con este iPhone ya cargado."
+                      note={null}
                       className="apple-card-actions storefront-card-actions"
-                      intentCaptureMode="compact"
                       sourcePlacement="apple_catalog_card"
                     />
                   </div>
@@ -509,6 +469,23 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
           </div>
         ) : null}
       </section>
+
+      <AppleStorefrontFooter
+        sections={[
+          {
+            title: "Envíos a todo el país",
+            body: "Coordinamos despacho y seguimiento por WhatsApp para que tengas visibilidad durante todo el proceso.",
+          },
+          {
+            title: "Retiro en Salta",
+            body: "Si preferís retirar, te confirmamos reserva, horario y punto de entrega antes de que salgas.",
+          },
+          {
+            title: "Pago y cuotas",
+            body: "Mostramos precio final y, cuando corresponde, el valor por cuota y el total financiado de forma clara.",
+          },
+        ]}
+      />
     </div>
   );
 }
