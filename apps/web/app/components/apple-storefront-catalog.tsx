@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { trackStorefrontEvent, trackStorefrontSearch } from "../../lib/storefront-analytics";
+import { trackStorefrontSearch } from "../../lib/storefront-analytics";
 import { buildStorefrontInstallmentOffer, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
 import { AppleAnnouncementBar } from "./apple-announcement-bar";
 import { ApplePurchaseProcess } from "./apple-purchase-process";
@@ -260,16 +260,10 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pagedProducts = filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const heroMeta = [
-    catalogStats.lowestPrice != null ? `Desde ${formatMoney(catalogStats.lowestPrice)}` : null,
-    `${products.length} modelos seleccionados`,
-    `${catalogStats.inStockProducts} con stock`,
-  ].filter(Boolean);
   const announcementItems = [
-    "Envíos a todo el país con seguimiento real por WhatsApp",
-    "Retiro en Salta con coordinación simple y confirmada",
-    "Precio final claro y cuotas visibles antes de avanzar",
-    "Atención directa para elegir rápido el iPhone correcto",
+    "Envíos a todo el país con seguimiento por WhatsApp",
+    "Retiro en Salta con coordinación por WhatsApp",
+    "6 cuotas en cualquier teléfono",
   ];
 
   return (
@@ -292,40 +286,8 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
         </div>
       </header>
 
-      <section className="apple-hero">
-        <div className="apple-hero-copy">
-          <h1 className="apple-hero-title">iPhone con precio final claro, cuotas visibles y compra simple.</h1>
-          <p className="apple-hero-description">Atención directa por WhatsApp, retiro en Salta y envío a todo el país.</p>
-
-          <div className="apple-hero-actions">
-            <a className="apple-storefront-cta" href="#modelos">
-              Explorar iPhone
-            </a>
-            {store.whatsapp_url ? (
-              <a
-                className="apple-storefront-link"
-                href={store.whatsapp_url}
-                target="_blank"
-                rel="noreferrer"
-                onClick={() => {
-                  trackStorefrontEvent("contact", {
-                    payload: {
-                      channel: "whatsapp",
-                      source_placement: "apple_hero",
-                      contact_goal: "advice",
-                    },
-                  });
-                }}
-              >
-                Hablar con un asesor
-              </a>
-            ) : null}
-          </div>
-
-          <p className="apple-hero-meta">{heroMeta.join(" • ")}</p>
-        </div>
-
-        <div className="apple-hero-panel">
+      <section className="apple-hero apple-hero--process-only">
+        <div className="apple-hero-panel apple-hero-panel--wide">
           <ApplePurchaseProcess variant="hero" inStock={catalogStats.inStockProducts > 0} />
         </div>
       </section>

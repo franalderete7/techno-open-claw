@@ -3470,9 +3470,7 @@ nav a:hover {
 }
 
 .apple-announcement-bar-inner {
-  width: min(var(--apple-content-width), 100%);
-  margin: 0 auto;
-  padding-inline: var(--apple-content-padding);
+  width: 100%;
 }
 
 .apple-announcement-marquee {
@@ -3505,6 +3503,7 @@ nav a:hover {
 .apple-announcement-message span {
   display: inline-flex;
   align-items: center;
+  padding-inline: 2px;
 }
 
 .apple-announcement-separator {
@@ -3585,6 +3584,10 @@ nav a:hover {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   gap: 20px;
+}
+
+.apple-hero--process-only {
+  grid-template-columns: 1fr;
 }
 
 .apple-hero-copy,
@@ -3685,6 +3688,11 @@ nav a:hover {
   background:
     radial-gradient(circle at top right, rgba(37, 211, 102, 0.08), transparent 34%),
     linear-gradient(180deg, rgba(18, 22, 31, 0.96), rgba(11, 14, 20, 0.98));
+}
+
+.apple-hero-panel--wide {
+  width: 100%;
+  max-width: none;
 }
 
 .apple-hero-trust-grid {
@@ -4732,7 +4740,7 @@ nav a:hover {
   }
 
   .apple-announcement-bar-inner {
-    padding-inline: 14px;
+    width: 100%;
   }
 
   .apple-announcement-message {
