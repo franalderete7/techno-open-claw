@@ -30,6 +30,14 @@ function formatMoney(amount: number | null) {
   }).format(amount);
 }
 
+function formatPercent(amount: number | null) {
+  if (amount == null || !Number.isFinite(amount)) {
+    return null;
+  }
+
+  return `${amount.toFixed(1)}%`;
+}
+
 function normalizeSku(value: string) {
   return decodeURIComponent(value).trim().toLowerCase();
 }
@@ -401,8 +409,8 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
                         <p className="apple-payment-total">
                           Total financiado: {option.totalAmount != null ? formatMoney(option.totalAmount) : "A confirmar"}
                         </p>
-                        {option.interest != null ? (
-                          <small className="apple-payment-interest">Interés estimado: {option.interest.toFixed(1)}%</small>
+                        {formatPercent(option.interest) ? (
+                          <small className="apple-payment-interest">Interés estimado: {formatPercent(option.interest)}</small>
                         ) : null}
                       </div>
                     ))}

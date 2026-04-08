@@ -3545,9 +3545,10 @@ nav a:hover {
 
 .apple-hero-title {
   margin: 0;
-  font-size: clamp(2.5rem, 5.2vw, 5.5rem);
-  line-height: 0.92;
+  font-size: clamp(2.3rem, 4.4vw, 4.7rem);
+  line-height: 0.95;
   letter-spacing: -0.07em;
+  max-width: 11ch;
 }
 
 .apple-hero-description,
@@ -4014,8 +4015,8 @@ nav a:hover {
 .apple-catalog-title,
 .apple-info-title {
   margin: 6px 0 0;
-  font-size: clamp(1.45rem, 2.8vw, 2.4rem);
-  line-height: 1.02;
+  font-size: clamp(1.35rem, 2.3vw, 2.05rem);
+  line-height: 1.06;
   letter-spacing: -0.05em;
 }
 

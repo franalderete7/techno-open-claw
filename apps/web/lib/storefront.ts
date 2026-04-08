@@ -71,12 +71,31 @@ function toText(value: unknown) {
   return null;
 }
 
+function toFiniteNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
 function asPositiveNumber(value: unknown) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+  const normalized = toFiniteNumber(value);
+  if (normalized == null || normalized <= 0) {
     return null;
   }
 
-  return value;
+  return normalized;
 }
 
 function normalizePhone(value: string | null) {
@@ -237,22 +256,22 @@ export function buildStorefrontProducts(items: ProductRecord[]): StorefrontProdu
       title: item.title,
       description: item.description,
       condition: item.condition,
-      public_price_ars: item.promo_price_ars ?? item.price_amount,
+      public_price_ars: toFiniteNumber(item.promo_price_ars) ?? toFiniteNumber(item.price_amount),
       image_url: item.image_url,
-      delivery_days: item.delivery_days,
-      ram_gb: item.ram_gb,
-      storage_gb: item.storage_gb,
+      delivery_days: toFiniteNumber(item.delivery_days),
+      ram_gb: toFiniteNumber(item.ram_gb),
+      storage_gb: toFiniteNumber(item.storage_gb),
       network: item.network,
       color: item.color,
-      battery_health: item.battery_health,
+      battery_health: toFiniteNumber(item.battery_health),
       in_stock: item.in_stock,
-      bancarizada_total: item.bancarizada_total ?? null,
-      bancarizada_cuota: item.bancarizada_cuota ?? null,
-      bancarizada_interest: item.bancarizada_interest ?? null,
-      macro_total: item.macro_total ?? null,
-      macro_cuota: item.macro_cuota ?? null,
-      macro_interest: item.macro_interest ?? null,
-      cuotas_qty: item.cuotas_qty ?? null,
+      bancarizada_total: toFiniteNumber(item.bancarizada_total),
+      bancarizada_cuota: toFiniteNumber(item.bancarizada_cuota),
+      bancarizada_interest: toFiniteNumber(item.bancarizada_interest),
+      macro_total: toFiniteNumber(item.macro_total),
+      macro_cuota: toFiniteNumber(item.macro_cuota),
+      macro_interest: toFiniteNumber(item.macro_interest),
+      cuotas_qty: toFiniteNumber(item.cuotas_qty),
     }));
 }
 
