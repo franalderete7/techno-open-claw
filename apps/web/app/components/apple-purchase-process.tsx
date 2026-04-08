@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type ApplePurchaseProcessProps = {
   variant?: "hero" | "detail";
@@ -9,40 +9,94 @@ type ApplePurchaseProcessProps = {
 };
 
 type PurchaseMode = "shipping" | "pickup";
+type PurchaseStep = {
+  title: string;
+  body: string;
+  label: string;
+};
 
-function buildSteps(mode: PurchaseMode, inStock: boolean, deliveryDays: number | null) {
+function buildSteps(mode: PurchaseMode, inStock: boolean, deliveryDays: number | null): PurchaseStep[] {
   if (mode === "pickup") {
     return [
-      "Reservás el iPhone por WhatsApp o pago.",
-      inStock ? "Te confirmamos stock y horario para retiro en Salta." : "Te avisamos cuándo ingresa y coordinamos el retiro en Salta.",
-      "Retirás el equipo con la operación ya confirmada.",
+      {
+        label: "Elegís",
+        title: "Seleccionás tu iPhone",
+        body: "Ves el precio final, confirmás la versión y reservás sin vueltas.",
+      },
+      {
+        label: "Coordinamos",
+        title: inStock ? "Te apartamos stock y horario" : "Te avisamos ingreso y reserva",
+        body: inStock
+          ? "Te confirmamos por WhatsApp el retiro en Salta antes de que salgas."
+          : "Si entra por proveedor, te avisamos cuándo llega y coordinamos el retiro apenas esté listo.",
+      },
+      {
+        label: "Retirás",
+        title: "Pasás con todo confirmado",
+        body: "Retirás el equipo con la operación ya validada y atención directa.",
+      },
     ];
   }
 
   return [
-    "Reservás el iPhone por WhatsApp o pago.",
-    inStock
-      ? "Confirmamos stock, datos de envío y despacho."
-      : `Te confirmamos ingreso y tiempos estimados${deliveryDays ? ` de ${deliveryDays} días` : ""}.`,
-    "Te enviamos seguimiento y acompañamiento por WhatsApp hasta que llegue.",
+    {
+      label: "Elegís",
+      title: "Elegís el modelo correcto",
+      body: "Comparás precio final, cuotas y versión antes de avanzar.",
+    },
+    {
+      label: "Confirmamos",
+      title: inStock ? "Reservamos y despachamos" : "Reservamos e informamos tiempos",
+      body: inStock
+        ? "Confirmamos datos, pago y despacho para que salga rápido."
+        : `Te pasamos tiempos estimados${deliveryDays ? ` de ${deliveryDays} días` : ""} y seguimos el ingreso con vos.`,
+    },
+    {
+      label: "Seguís",
+      title: "Recibís seguimiento real",
+      body: "Te acompañamos por WhatsApp hasta la entrega para que sepas cómo viene todo.",
+    },
   ];
 }
 
 export function ApplePurchaseProcess({ variant = "hero", inStock = true, deliveryDays = null }: ApplePurchaseProcessProps) {
   const [mode, setMode] = useState<PurchaseMode>("shipping");
-  const steps = buildSteps(mode, inStock, deliveryDays);
+  const [activeStep, setActiveStep] = useState(0);
+  const steps = useMemo(() => buildSteps(mode, inStock, deliveryDays), [deliveryDays, inStock, mode]);
+
+  useEffect(() => {
+    setActiveStep(0);
+  }, [mode]);
+
+  useEffect(() => {
+    if (steps.length <= 1) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setActiveStep((current) => (current + 1) % steps.length);
+    }, 2200);
+
+    return () => window.clearInterval(timer);
+  }, [steps]);
 
   return (
     <section className={`apple-purchase-process apple-purchase-process--${variant}`}>
       <div className="apple-purchase-process-head">
-        <span className="apple-hero-kicker">Proceso de compra</span>
+        <div className="apple-purchase-process-copy">
+          <span className="apple-purchase-process-kicker">Proceso de compra</span>
+          <h2 className="apple-purchase-process-title">
+            {mode === "shipping" ? "Envío a todo el país, claro y acompañado." : "Retiro en Salta, simple y coordinado."}
+          </h2>
+        </div>
+
         <div className="apple-purchase-process-tabs" role="tablist" aria-label="Elegir tipo de compra">
           <button
             type="button"
             className={`apple-purchase-process-tab ${mode === "shipping" ? "is-active" : ""}`}
             onClick={() => setMode("shipping")}
           >
-            Envío
+            Envío país
           </button>
           <button
             type="button"
@@ -54,12 +108,22 @@ export function ApplePurchaseProcess({ variant = "hero", inStock = true, deliver
         </div>
       </div>
 
+      <div className="apple-purchase-process-progress" aria-hidden="true">
+        {steps.map((step, index) => (
+          <span key={step.title} className={`apple-purchase-process-progress-segment ${index <= activeStep ? "is-active" : ""}`} />
+        ))}
+      </div>
+
       <div className="apple-purchase-process-body">
         {steps.map((step, index) => (
-          <div key={step} className="apple-purchase-process-step">
-            <span>{index + 1}</span>
-            <p>{step}</p>
-          </div>
+          <article key={step.title} className={`apple-purchase-process-step ${index === activeStep ? "is-active" : ""}`}>
+            <div className="apple-purchase-process-step-top">
+              <span>{index + 1}</span>
+              <small>{step.label}</small>
+            </div>
+            <strong>{step.title}</strong>
+            <p>{step.body}</p>
+          </article>
         ))}
       </div>
     </section>

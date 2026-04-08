@@ -266,9 +266,10 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
     `${catalogStats.inStockProducts} con stock`,
   ].filter(Boolean);
   const announcementItems = [
-    "Envíos a todo el país con seguimiento por WhatsApp",
-    "Retiro en Salta con coordinación simple",
-    "Cuotas visibles y precio final claro antes de comprar",
+    "Envíos a todo el país con seguimiento real por WhatsApp",
+    "Retiro en Salta con coordinación simple y confirmada",
+    "Precio final claro y cuotas visibles antes de avanzar",
+    "Atención directa para elegir rápido el iPhone correcto",
   ];
 
   return (
@@ -293,7 +294,6 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
 
       <section className="apple-hero">
         <div className="apple-hero-copy">
-          <span className="apple-hero-kicker">Store iPhone profesional</span>
           <h1 className="apple-hero-title">iPhone con precio final claro, cuotas visibles y compra simple.</h1>
           <p className="apple-hero-description">Atención directa por WhatsApp, retiro en Salta y envío a todo el país.</p>
 
@@ -474,15 +474,15 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
         sections={[
           {
             title: "Envíos a todo el país",
-            body: "Coordinamos despacho y seguimiento por WhatsApp para que tengas visibilidad durante todo el proceso.",
+            body: "Coordinamos despacho, seguimiento y confirmación real para que sepas en qué etapa está tu compra.",
           },
           {
             title: "Retiro en Salta",
-            body: "Si preferís retirar, te confirmamos reserva, horario y punto de entrega antes de que salgas.",
+            body: "Si preferís retirar, te confirmamos reserva, horario y punto de entrega antes de que salgas al local.",
           },
           {
             title: "Pago y cuotas",
-            body: "Mostramos precio final y, cuando corresponde, el valor por cuota y el total financiado de forma clara.",
+            body: "Mostramos contado, valor por cuota y total financiado cuando el producto tiene esa información cargada.",
           },
         ]}
       />

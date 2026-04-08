@@ -217,9 +217,10 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
         .map((value) => String(value))
     : [];
   const announcementItems = [
-    "Envíos a todo el país con seguimiento por WhatsApp",
-    product?.in_stock ? "Stock listo para coordinar entrega rápida" : "Te confirmamos ingreso y tiempos antes de avanzar",
+    "Envíos a todo el país con seguimiento real por WhatsApp",
+    product?.in_stock ? "Stock listo para coordinar entrega rápida" : "Ingreso y tiempos confirmados antes de avanzar",
     financingOptions.length > 0 ? "Cuotas visibles y total financiado claro" : "Precio final claro antes de cerrar la compra",
+    "Atención directa para elegir versión, pago y entrega",
   ];
   return (
     <div className="apple-storefront apple-storefront--detail">
@@ -336,7 +337,7 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
                 {
                   title: "Envío y retiro",
                   body: product.in_stock
-                    ? "Si el equipo está en stock, coordinamos envío nacional o retiro en Salta con salida rápida."
+                    ? "Si el equipo está en stock, coordinamos envío nacional o retiro en Salta con salida rápida y confirmación real."
                     : buildShippingSummary(product),
                 },
                 {
@@ -354,7 +355,7 @@ export default async function AppleProductPage({ params }: AppleProductPageProps
                 },
                 {
                   title: "Atención y garantía",
-                  body: "Te acompañamos por WhatsApp durante la compra y coordinamos la entrega con información clara en cada paso.",
+                  body: "Te acompañamos por WhatsApp durante toda la operación para que compres con información clara y seguimiento real.",
                 },
               ]}
             />
