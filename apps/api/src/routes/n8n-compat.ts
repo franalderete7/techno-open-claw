@@ -33,6 +33,14 @@ type ProductRow = {
   price_amount: string | number | null;
   price_usd: string | number | null;
   promo_price_ars: string | number | null;
+  bancarizada_total: string | number | null;
+  bancarizada_cuota: string | number | null;
+  bancarizada_interest: string | number | null;
+  macro_total: string | number | null;
+  macro_cuota: string | number | null;
+  macro_interest: string | number | null;
+  cuotas_qty: number | null;
+  usd_rate: string | number | null;
   currency_code: string;
   active: boolean;
   in_stock: boolean;
@@ -65,6 +73,15 @@ type CandidateProduct = {
   price_ars: number | null;
   promo_price_ars: number | null;
   price_usd: number | null;
+  bancarizada_total: number | null;
+  bancarizada_cuota: number | null;
+  bancarizada_interest: number | null;
+  macro_total: number | null;
+  macro_cuota: number | null;
+  macro_interest: number | null;
+  cuotas_qty: number | null;
+  usd_rate: number | null;
+  currency_code: string | null;
   image_url: string | null;
 };
 
@@ -1139,6 +1156,14 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           p.price_amount,
           p.price_usd,
           p.promo_price_ars,
+          p.bancarizada_total,
+          p.bancarizada_cuota,
+          p.bancarizada_interest,
+          p.macro_total,
+          p.macro_cuota,
+          p.macro_interest,
+          p.cuotas_qty,
+          p.usd_rate,
           p.currency_code,
           p.active,
           p.in_stock,
@@ -1206,6 +1231,15 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           price_ars: product.price_amount == null ? null : Number(product.price_amount),
           promo_price_ars: product.promo_price_ars == null ? null : Number(product.promo_price_ars),
           price_usd: product.price_usd == null ? null : Number(product.price_usd),
+          bancarizada_total: product.bancarizada_total == null ? null : Number(product.bancarizada_total),
+          bancarizada_cuota: product.bancarizada_cuota == null ? null : Number(product.bancarizada_cuota),
+          bancarizada_interest: product.bancarizada_interest == null ? null : Number(product.bancarizada_interest),
+          macro_total: product.macro_total == null ? null : Number(product.macro_total),
+          macro_cuota: product.macro_cuota == null ? null : Number(product.macro_cuota),
+          macro_interest: product.macro_interest == null ? null : Number(product.macro_interest),
+          cuotas_qty: product.cuotas_qty == null ? null : Number(product.cuotas_qty),
+          usd_rate: product.usd_rate == null ? null : Number(product.usd_rate),
+          currency_code: product.currency_code == null ? null : String(product.currency_code),
           image_url: product.image_url,
         };
       })
@@ -1264,6 +1298,11 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         settingValueToText(storeRoot.store_website_url) ||
         settingValueToText(storeRoot.storefront_url) ||
         "https://technostoresalta.com",
+      store_usd_rate:
+        asNullableNumber(settingsMap.get("pricing_default_usd_rate")) ??
+        asNullableNumber(settingsMap.get("usd_to_ars")) ??
+        asNullableNumber(storeRoot.pricing_default_usd_rate) ??
+        asNullableNumber(storeRoot.usd_to_ars),
     };
 
     const candidateProducts: CandidateProduct[] = shortlistedCandidateProducts.map((product) => ({
