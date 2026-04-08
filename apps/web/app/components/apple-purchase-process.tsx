@@ -118,12 +118,17 @@ export function ApplePurchaseProcess({ variant = "hero", inStock = true, deliver
       <div className="apple-purchase-process-body">
         <article className="apple-purchase-process-stage">
           <div className="apple-purchase-process-stage-glow" aria-hidden="true" />
-          <div className="apple-purchase-process-stage-top">
-            <span>{activeStep + 1}</span>
-            <small>{activeStepData.label}</small>
+          <div
+            key={`${mode}-${activeStep}`}
+            className="apple-purchase-process-stage-surface"
+          >
+            <div className="apple-purchase-process-stage-top">
+              <span>{activeStep + 1}</span>
+              <small>{activeStepData.label}</small>
+            </div>
+            <strong>{activeStepData.title}</strong>
+            <p>{activeStepData.body}</p>
           </div>
-          <strong>{activeStepData.title}</strong>
-          <p>{activeStepData.body}</p>
         </article>
 
         <div className="apple-purchase-process-step-list">

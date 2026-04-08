@@ -4453,6 +4453,7 @@ nav a:hover {
   display: grid;
   gap: 18px;
   overflow: hidden;
+  color: var(--apple-text);
 }
 
 .apple-purchase-process--detail {
@@ -4539,8 +4540,8 @@ nav a:hover {
   position: relative;
   overflow: hidden;
   display: grid;
-  gap: 14px;
-  min-height: 186px;
+  gap: 0;
+  min-height: 248px;
   padding: 20px 22px 22px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 24px;
@@ -4548,6 +4549,33 @@ nav a:hover {
     radial-gradient(circle at top right, rgba(37, 211, 102, 0.16), transparent 32%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.apple-purchase-process-stage-surface {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  animation: apple-purchase-stage-surface-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apple-purchase-process-stage-surface {
+    animation: none;
+  }
+}
+
+@keyframes apple-purchase-stage-surface-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
 }
 
 .apple-purchase-process-stage-glow {
@@ -4562,8 +4590,6 @@ nav a:hover {
 }
 
 .apple-purchase-process-stage-top {
-  position: relative;
-  z-index: 1;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -4590,17 +4616,15 @@ nav a:hover {
 }
 
 .apple-purchase-process-stage strong {
-  position: relative;
-  z-index: 1;
   font-size: clamp(1.25rem, 2.2vw, 1.85rem);
   line-height: 1.02;
   letter-spacing: -0.045em;
   max-width: 20ch;
+  color: var(--apple-text);
+  font-weight: 600;
 }
 
 .apple-purchase-process-stage p {
-  position: relative;
-  z-index: 1;
   margin: 0;
   color: var(--apple-soft);
   line-height: 1.68;
@@ -4615,6 +4639,7 @@ nav a:hover {
 
 .apple-purchase-process-step {
   appearance: none;
+  font: inherit;
   text-align: left;
   cursor: pointer;
   display: grid;
@@ -4623,14 +4648,14 @@ nav a:hover {
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.03);
-  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease, opacity 180ms ease;
+  color: var(--apple-soft);
+  transition: border-color 200ms ease, box-shadow 200ms ease, background 200ms ease, opacity 200ms ease;
 }
 
 .apple-purchase-process-step.is-active {
   border-color: rgba(37, 211, 102, 0.24);
   background: linear-gradient(180deg, rgba(37, 211, 102, 0.09), rgba(255, 255, 255, 0.04));
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.18);
-  transform: translateY(-1px);
 }
 
 .apple-purchase-process-step-top {
@@ -4662,6 +4687,12 @@ nav a:hover {
 .apple-purchase-process-step strong {
   font-size: 0.98rem;
   letter-spacing: -0.03em;
+  color: var(--apple-text);
+  font-weight: 600;
+}
+
+.apple-purchase-process-step:not(.is-active) strong {
+  color: rgba(244, 246, 251, 0.82);
 }
 
 .apple-storefront-footer {
@@ -4840,7 +4871,7 @@ nav a:hover {
   }
 
   .apple-purchase-process-stage {
-    min-height: 0;
+    min-height: 228px;
     padding: 18px;
   }
 
