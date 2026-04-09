@@ -91,3 +91,59 @@ export async function ollamaGenerate(params: OllamaGenerateParams) {
   const reason = lastError instanceof Error ? lastError.message : "unknown error";
   throw new Error(`OpenClaw model is unreachable. Tried ${candidates.join(", ")}. Last error: ${reason}`);
 }
+
+type OllamaChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
+export async function ollamaChat(params: {
+  messages: OllamaChatMessage[];
+  model?: string;
+  format?: "json";
+  temperature?: number;
+  numPredict?: number;
+}) {
+  const model = (params.model || config.OLLAMA_MODEL).trim();
+  const body: Record<string, unknown> = {
+    model,
+    messages: params.messages,
+    stream: false,
+    options: {
+      temperature: params.temperature ?? 0.1,
+      num_predict: params.numPredict ?? 8192,
+    },
+  };
+
+  if (params.format) {
+    body.format = params.format;
+  }
+
+  const candidates = getOllamaBaseUrlCandidates();
+  let lastError: unknown = null;
+
+  for (const baseUrl of candidates) {
+    try {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        lastError = new Error(`ollama chat failed via ${baseUrl}: ${response.status}`);
+        continue;
+      }
+
+      const raw = (await response.json()) as { message?: { content?: string } };
+      const content = String(raw.message?.content || "");
+      cachedWorkingBaseUrl = baseUrl;
+      return { baseUrl, content };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  const reason = lastError instanceof Error ? lastError.message : "unknown error";
+  throw new Error(`OpenClaw chat model is unreachable. Tried ${candidates.join(", ")}. Last error: ${reason}`);
+}

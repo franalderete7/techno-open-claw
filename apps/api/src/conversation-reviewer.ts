@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { PoolClient } from "pg";
 import { config } from "./config.js";
 import { pool } from "./db.js";
+import { ollamaChat } from "./ollama.js";
 import { sendTelegramTextMessages } from "./telegram.js";
 
 type LoggerLike = {
@@ -164,7 +165,13 @@ function getReviewTargetChatIds() {
 }
 
 function isReviewerEnabled() {
-  return config.CONVERSATION_REVIEW_ENABLED && Boolean(config.OPENAI_API_KEY.trim());
+  return config.CONVERSATION_REVIEW_ENABLED;
+}
+
+function reviewerModelLabel() {
+  const override = config.OLLAMA_REVIEW_MODEL.trim();
+  const main = config.OLLAMA_MODEL.trim();
+  return override || main || "qwen3.5:cloud";
 }
 
 function pickReviewRepoDir() {
@@ -459,46 +466,33 @@ function buildReviewerMessages(params: {
   ];
 }
 
-async function callOpenAiReviewer(workflowContext: WorkflowReviewContext, conversations: ConversationReviewInput[]) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: config.OPENAI_REVIEW_MODEL,
-      temperature: 0.1,
-      messages: buildReviewerMessages({ workflowContext, conversations }),
-    }),
+async function callOllamaReviewer(workflowContext: WorkflowReviewContext, conversations: ConversationReviewInput[]) {
+  const messages = buildReviewerMessages({ workflowContext, conversations }) as Array<{
+    role: "system" | "user";
+    content: string;
+  }>;
+
+  const { content } = await ollamaChat({
+    model: reviewerModelLabel(),
+    messages,
+    format: "json",
+    temperature: 0.1,
+    numPredict: 8192,
   });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`OpenAI reviewer request failed (${response.status}): ${body}`);
-  }
-
-  const payload = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: string;
-      };
-    }>;
-  };
-
-  const content = String(payload.choices?.[0]?.message?.content || "").trim();
-  if (!content) {
-    throw new Error("OpenAI reviewer returned empty content.");
+  const trimmed = content.trim();
+  if (!trimmed) {
+    throw new Error("Ollama reviewer returned empty content.");
   }
 
   try {
-    return JSON.parse(content) as ReviewerResult;
+    return JSON.parse(trimmed) as ReviewerResult;
   } catch {
-    const match = content.match(/\{[\s\S]*\}/);
+    const match = trimmed.match(/\{[\s\S]*\}/);
     if (match) {
       return JSON.parse(match[0]) as ReviewerResult;
     }
-    throw new Error("OpenAI reviewer returned non-JSON content.");
+    throw new Error("Ollama reviewer returned non-JSON content.");
   }
 }
 
@@ -801,7 +795,7 @@ async function createBatchRecord(client: PoolClient, params: {
     `,
     [
       params.triggeredBy,
-      config.OPENAI_REVIEW_MODEL,
+      `ollama:${reviewerModelLabel()}`,
       params.workflowContext.repoDir,
       params.workflowContext.repoCommitSha,
       params.conversations.length,
@@ -964,7 +958,7 @@ export async function runConversationReviewCycle(logger: LoggerLike, options: Ru
       conversations,
     });
 
-    const reviewResult = await callOpenAiReviewer(workflowContext, conversations);
+    const reviewResult = await callOllamaReviewer(workflowContext, conversations);
     const markdown = buildBatchMarkdown(batchId, reviewResult.batch_summary || {}, reviewResult.items || []);
     const telegramSummary = buildTelegramSummary(batchId, reviewResult.batch_summary || {}, reviewResult.items || []);
     const deliveredChatIds = await deliverBatchToTelegram(telegramSummary, logger);

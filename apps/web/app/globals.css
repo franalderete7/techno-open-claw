@@ -2980,27 +2980,43 @@ nav a:hover {
   font-size: 0.88em;
 }
 
-.reviews-toolbar-panel {
+.reviews-cta-panel {
   display: grid;
-  gap: 12px;
-  padding: 16px 18px;
-}
-
-.reviews-toolbar-title {
-  margin: 0;
-  font-size: 1.15rem;
-}
-
-.reviews-toolbar {
-  display: flex;
-  flex-wrap: wrap;
   gap: 14px;
-  align-items: flex-end;
+  padding: 20px 20px 18px;
+  border: 0.5px solid var(--line);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.95), rgba(255, 250, 245, 0.9));
 }
 
-.reviews-toolbar-field {
+.reviews-cta-heading {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.reviews-cta-lead {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+.reviews-cta-form {
   display: grid;
-  gap: 6px;
+  gap: 16px;
+  max-width: 420px;
+}
+
+.reviews-cta-field {
+  display: grid;
+  gap: 8px;
+}
+
+.reviews-cta-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--soft-text);
+  font-weight: 600;
 }
 
 .reviews-toolbar-select {
@@ -3012,19 +3028,63 @@ nav a:hover {
   font-size: 0.95rem;
 }
 
-.reviews-toolbar-submit {
-  align-self: flex-end;
+.reviews-cta-select {
+  min-width: 100%;
+  max-width: 420px;
+  padding: 12px 14px;
+  font-size: 1rem;
 }
 
-.reviews-toolbar-hint {
-  flex: 1 1 240px;
+.reviews-analyze-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 420px;
+  min-height: 48px;
+  padding: 14px 22px;
+  border: none;
+  border-radius: 14px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(191, 111, 77, 0.28);
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
+}
+
+.reviews-analyze-button:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 10px 28px rgba(191, 111, 77, 0.34);
+}
+
+.reviews-analyze-button:active {
+  transform: translateY(1px);
+}
+
+.reviews-storage-details {
   margin: 0;
-  font-size: 0.84rem;
-  line-height: 1.45;
+  padding-top: 4px;
+  font-size: 0.88rem;
 }
 
-.reviews-toolbar-secondary {
-  margin-top: 2px;
+.reviews-storage-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 500;
+  list-style: none;
+  user-select: none;
+}
+
+.reviews-storage-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.reviews-storage-body {
+  margin: 8px 0 0;
+  line-height: 1.5;
 }
 
 .reviews-manual-panel {

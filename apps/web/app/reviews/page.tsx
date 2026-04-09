@@ -5,7 +5,7 @@ import {
   getConversationReviewCandidates,
   type ConversationReviewBatchRecord,
 } from "../../lib/api";
-import { runAnalyzeFirstNAction, runQueuedReviewAction, runSelectedReviewAction } from "./actions";
+import { runAnalyzeFirstNAction, runSelectedReviewAction } from "./actions";
 
 type ReviewsPageProps = {
   searchParams?: Promise<{
@@ -93,8 +93,7 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
         <span className="eyebrow">Reviews</span>
         <h2 className="hero-title">Conversation QA</h2>
         <p className="hero-copy hero-copy-tight">
-          Resúmenes guardados en Postgres: <code className="mono-inline">conversation_review_batches</code> (batch + JSON) e{" "}
-          <code className="mono-inline">conversation_review_items</code> (por conversación).
+          Elegís cuántas conversaciones <strong>pendientes de revisar</strong> querés analizar. Un modelo de IA lee los mensajes, puntúa y devuelve resumen, problemas y sugerencias. El resultado aparece abajo y en la lista de la derecha.
         </p>
         <div className="chip-row">
           <span className="chip accent">{batches.length} batches</span>
@@ -107,33 +106,33 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
 
       <section className="reviews-layout">
         <div className="page-stack">
-          <section className="panel reviews-toolbar-panel">
-            <h3 className="panel-title reviews-toolbar-title">Nueva revisión</h3>
-            <form action={runAnalyzeFirstNAction} className="reviews-toolbar">
-              <label className="reviews-toolbar-field">
-                <span className="stat-label">Primeras N en cola</span>
-                <select name="n" className="reviews-toolbar-select" defaultValue={10}>
+          <section className="panel reviews-cta-panel">
+            <h3 className="panel-title reviews-cta-heading">Generar revisión con IA</h3>
+            <p className="reviews-cta-lead muted">
+              Solo conversaciones que todavía no tuvieron un batch de QA (orden: las más viejas en cola primero, para ir limpiando backlog).
+            </p>
+            <form action={runAnalyzeFirstNAction} className="reviews-cta-form">
+              <label className="reviews-cta-field">
+                <span className="reviews-cta-label">Cantidad de conversaciones</span>
+                <select name="n" className="reviews-toolbar-select reviews-cta-select" defaultValue={10} aria-label="Cantidad de conversaciones a analizar">
                   {[5, 10, 15, 20, 30, 40, 50].map((n) => (
                     <option key={n} value={n}>
-                      {n}
+                      {n} conversaciones
                     </option>
                   ))}
                 </select>
               </label>
-              <button type="submit" className="chip action-link accent reviews-toolbar-submit">
-                Analizar
+              <button type="submit" className="reviews-analyze-button">
+                Analizar con el modelo revisor
               </button>
-              <p className="reviews-toolbar-hint muted">
-                Cola = elegibles sin revisar (más antiguas primero, misma lógica que el cron). No son necesariamente las “últimas” por fecha de mensaje.
-              </p>
             </form>
-            <div className="reviews-toolbar-secondary">
-              <form action={runQueuedReviewAction}>
-                <button type="submit" className="chip">
-                  Lote fijo de 10 (cron)
-                </button>
-              </form>
-            </div>
+            <details className="reviews-storage-details">
+              <summary>¿Dónde se guarda el resultado?</summary>
+              <p className="muted reviews-storage-body">
+                En la base de datos: tablas <code className="mono-inline">conversation_review_batches</code> (resumen del lote) y{" "}
+                <code className="mono-inline">conversation_review_items</code> (detalle por conversación).
+              </p>
+            </details>
           </section>
 
           <details className="panel reviews-manual-panel">

@@ -69,7 +69,8 @@ const configSchema = z.object({
   CONVERSATION_REVIEW_BATCH_SIZE: z.coerce.number().int().min(1).max(50).default(10),
   CONVERSATION_REVIEW_IDLE_MINUTES: z.coerce.number().int().min(1).max(1440).default(20),
   CONVERSATION_REVIEW_REPO_DIR: z.string().default(""),
-  OPENAI_REVIEW_MODEL: z.string().default("gpt-5-mini"),
+  /** Optional override for reviewer; if empty, uses `OLLAMA_MODEL` (same runtime as sales agent). */
+  OLLAMA_REVIEW_MODEL: z.string().default(""),
   MANYCHAT_API_KEY: z.string().default(""),
   MANYCHAT_ACCOUNT_ID: z.string().default(""),
   STORE_WHATSAPP_PHONE: z.string().default("543875319940"),

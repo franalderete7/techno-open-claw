@@ -11,7 +11,7 @@ function buildNotice(result: Awaited<ReturnType<typeof runConversationReview>>) 
     case "busy":
       return "Ya hay una revisión corriendo.";
     case "disabled":
-      return "El reviewer no está configurado todavía.";
+      return "El reviewer no está activo: CONVERSATION_REVIEW_ENABLED=true en el API y Ollama accesible (OLLAMA_BASE_URL / qwen3.5:cloud).";
     case "skipped":
       if (result.reason === "not_enough_unreviewed_conversations") {
         return `Todavía no hay suficientes conversaciones elegibles. Disponibles: ${result.available ?? 0}.`;
@@ -20,17 +20,6 @@ function buildNotice(result: Awaited<ReturnType<typeof runConversationReview>>) 
     default:
       return "No pude iniciar la revisión.";
   }
-}
-
-export async function runQueuedReviewAction() {
-  const result = await runConversationReview({ limit: 10 });
-  revalidatePath("/reviews");
-
-  if (result.status === "completed") {
-    redirect(`/reviews?batch=${result.batchId}`);
-  }
-
-  redirect(`/reviews?notice=${encodeURIComponent(buildNotice(result) || "No pude iniciar la revisión.")}`);
 }
 
 export async function runAnalyzeFirstNAction(formData: FormData) {
