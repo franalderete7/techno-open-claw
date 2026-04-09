@@ -19,8 +19,17 @@ export function AppleAnnouncementBar({ items }: AppleAnnouncementBarProps) {
       <div className="apple-announcement-bar-inner">
         <div className="apple-announcement-marquee">
           <div className="apple-announcement-marquee-track">
-            {normalizedItems.map((item) => (
-              <span key={item} className="apple-announcement-message">
+            {normalizedItems.map((item, index) => (
+              <span key={`a-${index}`} className="apple-announcement-message">
+                <span>{item}</span>
+              </span>
+            ))}
+            {normalizedItems.map((item, index) => (
+              <span
+                key={`b-${index}`}
+                className="apple-announcement-message apple-announcement-message--repeat"
+                aria-hidden="true"
+              >
                 <span>{item}</span>
               </span>
             ))}

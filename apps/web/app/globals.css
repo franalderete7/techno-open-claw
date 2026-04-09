@@ -3475,43 +3475,57 @@ nav a:hover {
 
 .apple-announcement-marquee {
   overflow: hidden;
+  width: 100%;
 }
 
 .apple-announcement-marquee-track {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 28px;
-  animation: apple-marquee-drift 5.4s ease-in-out infinite alternate;
+  width: max-content;
+  gap: clamp(28px, 5vw, 52px);
+  animation: apple-announcement-marquee-scroll 12s linear infinite;
   will-change: transform;
 }
 
 .apple-announcement-message {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 1 1 0;
+  flex: 0 0 auto;
   padding: 10px 0;
   color: rgba(255, 255, 255, 0.92);
   font-size: 0.74rem;
   line-height: 1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .apple-announcement-message span {
-  display: block;
-  text-align: center;
+  white-space: nowrap;
 }
 
-@keyframes apple-marquee-drift {
+@media (prefers-reduced-motion: reduce) {
+  .apple-announcement-marquee-track {
+    animation: none;
+    width: max-content;
+    margin-inline: auto;
+  }
+
+  .apple-announcement-message--repeat {
+    display: none;
+  }
+}
+
+@keyframes apple-announcement-marquee-scroll {
   from {
-    transform: translateX(-1.6%);
+    transform: translate3d(0, 0, 0);
   }
 
   to {
-    transform: translateX(1.6%);
+    transform: translate3d(-50%, 0, 0);
   }
 }
 
@@ -4857,8 +4871,8 @@ nav a:hover {
 
   .apple-announcement-message {
     padding: 11px 0;
-    font-size: 0.66rem;
-    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
   }
 
   .apple-card-support {
