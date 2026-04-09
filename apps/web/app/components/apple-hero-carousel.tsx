@@ -30,12 +30,12 @@ export function AppleHeroCarousel({ items, whatsappUrl }: AppleHeroCarouselProps
       return;
     }
 
-    const timer = window.setInterval(() => {
+    const timer = window.setTimeout(() => {
       setCurrent((value) => (value + 1) % safeItems.length);
     }, AUTO_ADVANCE_MS);
 
-    return () => window.clearInterval(timer);
-  }, [safeItems.length]);
+    return () => window.clearTimeout(timer);
+  }, [current, safeItems.length]);
 
   useEffect(() => {
     if (current > safeItems.length - 1) {

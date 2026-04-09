@@ -9,6 +9,7 @@ export function AppleAnnouncementBar({ items }: AppleAnnouncementBarProps) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 3);
+  const repeatedGroups = Array.from({ length: 2 }, (_, index) => index);
 
   if (normalizedItems.length === 0) {
     return null;
@@ -19,20 +20,19 @@ export function AppleAnnouncementBar({ items }: AppleAnnouncementBarProps) {
       <div className="apple-announcement-bar-inner">
         <div className="apple-announcement-marquee">
           <div className="apple-announcement-marquee-track">
-            <div className="apple-announcement-marquee-group">
-              {normalizedItems.map((item, index) => (
-                <span key={`a-${index}`} className="apple-announcement-message">
-                  <span>{item}</span>
-                </span>
-              ))}
-            </div>
-            <div className="apple-announcement-marquee-group apple-announcement-marquee-group--repeat" aria-hidden="true">
-              {normalizedItems.map((item, index) => (
-                <span key={`b-${index}`} className="apple-announcement-message">
-                  <span>{item}</span>
-                </span>
-              ))}
-            </div>
+            {repeatedGroups.map((groupIndex) => (
+              <div
+                key={groupIndex}
+                className="apple-announcement-marquee-group"
+                aria-hidden={groupIndex > 0}
+              >
+                {normalizedItems.map((item, index) => (
+                  <span key={`${groupIndex}-${index}`} className="apple-announcement-message">
+                    <span>{item}</span>
+                  </span>
+                ))}
+              </div>
+            ))}
           </div>
         </div>
       </div>
