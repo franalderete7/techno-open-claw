@@ -64,7 +64,6 @@ export function AppleHeroCarousel({ items, whatsappUrl }: AppleHeroCarouselProps
               <span className="apple-hero-slide-kicker">iPhone destacado</span>
               <h2 className="apple-hero-slide-title">{item.title}</h2>
               {item.subtitle ? <p className="apple-hero-slide-subtitle">{item.subtitle}</p> : null}
-              <p className="apple-hero-slide-pitch">{item.pitch}</p>
               <div className="apple-hero-slide-price">
                 <span>Precio final</span>
                 <strong>{item.price}</strong>
@@ -107,10 +106,14 @@ export function AppleHeroCarousel({ items, whatsappUrl }: AppleHeroCarouselProps
         <>
           <div className="apple-hero-carousel-controls">
             <button type="button" className="apple-hero-carousel-arrow" onClick={goPrev} aria-label="Slide anterior">
-              ‹
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="apple-hero-carousel-arrow-icon">
+                <path d="M14.5 5.5 8 12l6.5 6.5" />
+              </svg>
             </button>
             <button type="button" className="apple-hero-carousel-arrow" onClick={goNext} aria-label="Slide siguiente">
-              ›
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="apple-hero-carousel-arrow-icon">
+                <path d="M9.5 5.5 16 12l-6.5 6.5" />
+              </svg>
             </button>
           </div>
 

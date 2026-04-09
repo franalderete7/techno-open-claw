@@ -3646,20 +3646,20 @@ nav a:hover {
   width: 100%;
   min-width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 0.88fr) minmax(320px, 1.12fr);
+  grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
   align-items: center;
-  gap: clamp(24px, 4vw, 56px);
+  gap: clamp(20px, 3.2vw, 42px);
   padding: clamp(24px, 4vw, 44px);
 }
 
 .apple-hero-slide-copy {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   align-content: center;
   min-width: 0;
-  padding-left: clamp(12px, 2vw, 38px);
-  padding-right: clamp(12px, 1.6vw, 24px);
-  max-width: 560px;
+  padding-left: clamp(34px, 4.2vw, 72px);
+  padding-right: clamp(8px, 1vw, 16px);
+  max-width: 520px;
 }
 
 .apple-hero-slide-kicker {
@@ -3729,7 +3729,7 @@ nav a:hover {
   display: grid;
   place-items: center;
   min-height: clamp(260px, 42vw, 480px);
-  padding-right: clamp(8px, 1vw, 18px);
+  padding-right: clamp(26px, 3vw, 54px);
 }
 
 .apple-hero-slide-visual::before {
@@ -3766,29 +3766,47 @@ nav a:hover {
   display: flex;
   justify-content: space-between;
   width: 100%;
-  padding: 0 18px;
+  padding: 0 26px;
   pointer-events: none;
 }
 
 .apple-hero-carousel-arrow {
   pointer-events: auto;
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(10, 13, 19, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(10, 13, 19, 0.66);
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   color: var(--apple-text);
-  font-size: 1.8rem;
-  line-height: 1;
   display: inline-grid;
   place-items: center;
-  transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+  transition: background 180ms ease, border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 }
 
 .apple-hero-carousel-arrow:hover {
-  background: rgba(10, 13, 19, 0.82);
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: scale(1.03);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04)),
+    rgba(10, 13, 19, 0.82);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transform: scale(1.04);
+}
+
+.apple-hero-carousel-arrow-icon {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
 }
 
 .apple-hero-carousel-dots {
@@ -5137,9 +5155,13 @@ nav a:hover {
   }
 
   .apple-hero-carousel-arrow {
-    width: 42px;
-    height: 42px;
-    font-size: 1.55rem;
+    width: 46px;
+    height: 46px;
+  }
+
+  .apple-hero-carousel-arrow-icon {
+    width: 18px;
+    height: 18px;
   }
 
   .apple-hero-carousel-dots {
