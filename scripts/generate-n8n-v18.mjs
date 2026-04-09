@@ -221,6 +221,7 @@ const pickId = (value) => {
   const num = Number(value);
   return Number.isFinite(num) && num > 0 ? num : null;
 };
+const pickBool = (value) => value === true || value === 'true';
 
 const candidates = [];
 
@@ -242,10 +243,12 @@ if (raw && typeof raw === 'object') {
 }
 
 let savedMessageId = null;
+let savedMessageDuplicate = false;
 
 for (const candidate of candidates) {
   if (!candidate || typeof candidate !== 'object') continue;
   savedMessageId = pickId(candidate.id ?? candidate.message_id ?? candidate.saved_message_id);
+  savedMessageDuplicate = pickBool(candidate.duplicate);
   if (savedMessageId != null) break;
 }
 
@@ -253,6 +256,7 @@ return [{
   json: {
     ...base,
     saved_message_id: savedMessageId,
+    saved_message_duplicate: savedMessageDuplicate,
   }
 }];`
   );
@@ -338,21 +342,24 @@ if (isLatest == null && latestMessageId != null && checkedMessageId != null) {
   isLatest = latestMessageId === checkedMessageId;
 }
 
+const isDuplicateSavedMessage = base.saved_message_duplicate === true;
 const debounceReason =
   base.saved_message_id == null
     ? 'missing_saved_message_id'
-    : base.is_empty
-      ? 'empty_message'
-      : isLatest == null
-        ? 'rpc_shape_unknown'
-        : isLatest === true
-        ? 'latest'
-        : 'not_latest';
+    : isDuplicateSavedMessage
+      ? 'duplicate_saved_message'
+      : base.is_empty
+        ? 'empty_message'
+        : isLatest == null
+          ? 'rpc_shape_unknown'
+          : isLatest === true
+            ? 'latest'
+            : 'not_latest';
 
 return [{
   json: {
     ...base,
-    should_continue: base.saved_message_id != null && isLatest === true && !base.is_empty,
+    should_continue: base.saved_message_id != null && isLatest === true && !base.is_empty && !isDuplicateSavedMessage,
     debounce_reason: debounceReason,
     rpc_is_latest: isLatest,
     rpc_latest_message_id: latestMessageId,
@@ -373,6 +380,135 @@ return [{
       alwaysOutputData: false,
     });
   }
+
+  upsertNode(workflow, "Claim Reply Send (RPC)", (existing) => ({
+    ...(existing || {}),
+    parameters: {
+      method: "POST",
+      url: "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/rpc/claim_reply_send",
+      sendHeaders: true,
+      headerParameters: {
+        parameters: [
+          {
+            name: "Authorization",
+            value: "=Bearer {{ $env.OPENCLAW_API_TOKEN }}",
+          },
+          {
+            name: "Content-Type",
+            value: "application/json",
+          },
+        ],
+      },
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: "={{ JSON.stringify({ p_manychat_id: $json.subscriber_id, p_message_id: $json.saved_message_id || 0 }) }}",
+      options: {
+        timeout: 5000,
+      },
+    },
+    id: existing?.id || "9ea6a658-d2a2-41da-a62f-claimreply0001",
+    name: "Claim Reply Send (RPC)",
+    type: "n8n-nodes-base.httpRequest",
+    typeVersion: 4.2,
+    position: [4640, 120],
+    continueOnFail: false,
+    alwaysOutputData: false,
+  }));
+
+  upsertNode(workflow, "Reply Claimed?", (existing) => ({
+    ...(existing || {}),
+    parameters: {
+      conditions: {
+        options: {
+          caseSensitive: true,
+          typeValidation: "strict",
+          version: 2,
+        },
+        conditions: [
+          {
+            id: "3e14f4f0-909f-4c8c-90d2-claimreply0002",
+            leftValue: "={{ $json.claim_reply_send }}",
+            rightValue: true,
+            operator: {
+              type: "boolean",
+              operation: "equals",
+            },
+          },
+        ],
+        combinator: "and",
+      },
+      options: {},
+    },
+    id: existing?.id || "5ad16f47-3e98-4578-b1a0-claimreply0003",
+    name: "Reply Claimed?",
+    type: "n8n-nodes-base.if",
+    typeVersion: 2.2,
+    position: [4920, 120],
+  }));
+
+  const prepareNode = (workflow.nodes ?? []).find((node) => node?.name === "Prepare WhatsApp Payload");
+  if (prepareNode) {
+    prepareNode.position = [5200, 120];
+  }
+
+  const sendNode = (workflow.nodes ?? []).find((node) => node?.name === "Send to WhatsApp");
+  if (sendNode) {
+    sendNode.position = [5480, 120];
+  }
+
+  const sentStateNode = (workflow.nodes ?? []).find((node) => node?.name === "Build Sent State Input");
+  if (sentStateNode) {
+    sentStateNode.position = [5760, 120];
+  }
+
+  workflow.connections = workflow.connections || {};
+  workflow.connections["Should Send?"] = {
+    main: [
+      [
+        {
+          node: "Claim Reply Send (RPC)",
+          type: "main",
+          index: 0,
+        },
+      ],
+      [
+        {
+          node: "Build Skipped State Input",
+          type: "main",
+          index: 0,
+        },
+      ],
+    ],
+  };
+  workflow.connections["Claim Reply Send (RPC)"] = {
+    main: [
+      [
+        {
+          node: "Reply Claimed?",
+          type: "main",
+          index: 0,
+        },
+      ],
+    ],
+  };
+  workflow.connections["Reply Claimed?"] = {
+    main: [
+      [
+        {
+          node: "Prepare WhatsApp Payload",
+          type: "main",
+          index: 0,
+        },
+      ],
+      [
+        {
+          node: "Build Skipped State Input",
+          type: "main",
+          index: 0,
+        },
+      ],
+    ],
+  };
 }
 
 function patchStateUpdateWorkflow(workflow, outputFile) {
@@ -767,7 +903,7 @@ const wantsPaymentAcceptance =
   /(reciben|aceptan|toman|aceptas|recibis)/.test(normalized) &&
   /(tarjeta|naranja|macro|visa|credito|credit)/.test(normalized);
 const wantsNonProductStoreAsk =
-  /(plan canje|parte de pago|permuta|\bcanje\b|mayorista|imagenes rot|sidebar)/.test(normalized);
+  /(plan canje|parte de pago|parte pago|permuta|permutas|toma de usado|toma de usados|\bcanje\b|mayorista|imagenes rot|sidebar)/.test(normalized);
 const wantsStoreInfo =
   wantsHoursInfo ||
   wantsPaymentAcceptance ||
@@ -1296,7 +1432,8 @@ const promptParts = [
   'candidate_products es la única fuente de verdad para productos. No menciones marcas, categorías, modelos o precios que no estén ahí.',
   'Si la consulta es amplia como "catálogo", "lista de precios" o "modelos", primero intentá acotarla por marca o categoría. Si candidate_products ya viene claramente filtrado, podés listar esos resultados sin inventar otros. Si candidate_products trae iPhone priorizados, respetá ese orden exacto.',
   'Los productos pueden incluir celulares, tablets y parlantes JBL.',
-  'Plan canje, parte de pago, permuta, crédito personal o compra mayorista: no inventes condiciones, tasas ni valores de usado. Si no hay política explícita en los textos de store, decí que lo confirman en el local o con un asesor por este chat.',
+  'Plan canje, parte de pago, permuta, toma de usado o crédito personal: respondé claro que no lo aceptamos. No ofrezcas excepción, evaluación ni cotización del usado.',
+  'Compra mayorista: no inventes condiciones ni precios especiales; decí que la confirma el equipo comercial.',
   'Consolas, notebooks u otros rubros que no estén en candidate_products: no inventes stock ni precios; decí que en el catálogo de este turno no figuran y ofrecé ver la web o consultar otro modelo que sí aparezca.',
   'Comparaciones técnicas (cámara, batería, rendimiento): no inventes benchmarks ni specs; solo contrastá si el contexto trae datos; si no, orientá a la ficha del producto en el link.',
   'Solo usá product_url si ya viene en candidate_products. No inventes links. En este negocio los iPhone usan /iphone/{sku} y el resto usa /{sku}, pero preferí siempre el product_url provisto.',
@@ -1645,7 +1782,7 @@ const wantsPayments =
   /(pago|pagos|cuotas|tarjeta|transferencia|efectivo|crypto|mercado pago|link de pago|naranja|macro|credito personal|credito con dni)/.test(message);
 const wantsShipping = /(envio|envios|despacho|retiro)/.test(message);
 const wantsWarranty = /(garantia|warranty)/.test(message);
-const wantsTradeHelp = /(plan canje|parte de pago|permuta|\bcanje\b)/.test(message);
+const wantsTradeHelp = /(plan canje|parte de pago|parte pago|permuta|permutas|toma de usado|toma de usados|\bcanje\b)/.test(message);
 const wantsWholesale = /mayorista/.test(message);
 const wantsWebsiteIssue =
   /(imagen rota|imagenes rotas|imagenes rot|sidebar|web rota|sitio roto|error en la web|no carga la web)/.test(message);
@@ -1721,7 +1858,7 @@ switch (router.route_key) {
     }
     if (wantsTradeHelp) {
       parts.push(
-        'Plan canje, toma de usado o permuta se evalúa caso a caso en el local; en este canal automático no puedo cerrar condiciones ni cotizar el usado.',
+        'No aceptamos plan canje, permutas, parte de pago ni toma de usados.',
       );
     }
     if (wantsWholesale) {

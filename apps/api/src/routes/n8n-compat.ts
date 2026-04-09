@@ -985,6 +985,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         return reply.send({
           id: duplicateRows[0].id,
           conversation_id: conversationId,
+          duplicate: true,
         });
       }
     }
@@ -1027,6 +1028,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({
       id: rows[0].id,
       conversation_id: conversationId,
+      duplicate: false,
     });
   });
 
@@ -1067,6 +1069,43 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({
       check_is_latest_message: isLatest,
       latest_message_id: latestMessageId,
+      checked_message_id: messageId,
+    });
+  });
+
+  app.post("/rpc/claim_reply_send", async (request, reply) => {
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const manychatId = String(body.p_manychat_id ?? body.manychat_id ?? "").trim();
+    const messageId = Number(body.p_message_id ?? body.message_id);
+
+    if (!manychatId || !Number.isFinite(messageId)) {
+      return reply.code(400).send({ error: "Missing p_manychat_id or p_message_id" });
+    }
+
+    const rows = await query<{ id: number | string }>(
+      `
+        update public.messages m
+        set payload = jsonb_set(
+          coalesce(m.payload, '{}'::jsonb),
+          '{reply_send_claimed_at}',
+          to_jsonb(now()),
+          true
+        )
+        from public.conversations c
+        where m.id = $2
+          and m.conversation_id = c.id
+          and c.channel_thread_key = $1
+          and m.direction = 'inbound'
+          and m.sender_kind = 'customer'
+          and coalesce(m.payload->>'reply_send_claimed_at', '') = ''
+        returning m.id
+      `,
+      [`manychat:${manychatId}`, messageId]
+    );
+
+    return reply.send({
+      claim_reply_send: rows.length > 0,
+      claimed_message_id: rows[0]?.id == null ? null : Number(rows[0].id),
       checked_message_id: messageId,
     });
   });

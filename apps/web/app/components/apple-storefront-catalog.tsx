@@ -17,6 +17,8 @@ type AppleStorefrontCatalogProps = {
 };
 
 const PAGE_SIZE = 9;
+const CATALOG_SCROLL_OFFSET = 96;
+
 function formatMoney(amount: number | null) {
   if (amount == null) return "Consultar";
   return new Intl.NumberFormat("es-AR", {
@@ -149,6 +151,8 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
   const deferredQuery = useDeferredValue(query);
   const needle = deferredQuery.trim().toLowerCase();
   const lastTrackedSearchKeyRef = useRef("");
+  const catalogSectionRef = useRef<HTMLElement | null>(null);
+  const previousPageRef = useRef(1);
 
   const storageOptions = useMemo(
     () =>
@@ -261,6 +265,27 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pagedProducts = filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  useEffect(() => {
+    if (previousPageRef.current === currentPage) {
+      return;
+    }
+
+    previousPageRef.current = currentPage;
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const catalogSection = catalogSectionRef.current;
+    if (!catalogSection) {
+      return;
+    }
+
+    const top = catalogSection.getBoundingClientRect().top + window.scrollY - CATALOG_SCROLL_OFFSET;
+    window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }, [currentPage]);
+
   const heroProducts = useMemo(
     () =>
       [...products].sort((left, right) => {
@@ -365,7 +390,7 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
         </label>
       </section>
 
-      <section className="apple-catalog-shell" id="modelos">
+      <section ref={catalogSectionRef} className="apple-catalog-shell" id="modelos">
         {pagedProducts.length === 0 ? (
           <div className="apple-empty-state">
             <h3>No encontramos equipos con esos filtros.</h3>
@@ -431,7 +456,12 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
 
         {totalPages > 1 ? (
           <div className="apple-pagination">
-            <button type="button" className="apple-page-button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={currentPage === 1}>
+            <button
+              type="button"
+              className="apple-page-button"
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={currentPage === 1}
+            >
               Anterior
             </button>
             <span className="apple-page-indicator">

@@ -21,6 +21,7 @@ type StorefrontCatalogProps = {
 };
 
 const PAGE_SIZE = 12;
+const CATALOG_SCROLL_OFFSET = 96;
 const FAQ_ITEMS = [
   {
     question: "Como funciona la compra?",
@@ -177,6 +178,8 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
   const deferredQuery = useDeferredValue(query);
   const needle = deferredQuery.trim().toLowerCase();
   const lastTrackedSearchKeyRef = useRef("");
+  const catalogSectionRef = useRef<HTMLElement | null>(null);
+  const previousPageRef = useRef(1);
 
   const ramOptions = useMemo(
     () =>
@@ -288,13 +291,30 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
     store.whatsapp_url,
     "Hola! Quiero comprar un equipo en TechnoStore Salta."
   );
+
+  useEffect(() => {
+    if (previousPageRef.current === currentPage) {
+      return;
+    }
+
+    previousPageRef.current = currentPage;
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const catalogSection = catalogSectionRef.current;
+    if (!catalogSection) {
+      return;
+    }
+
+    const top = catalogSection.getBoundingClientRect().top + window.scrollY - CATALOG_SCROLL_OFFSET;
+    window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }, [currentPage]);
+
   function goToPage(nextPage: number) {
     const bounded = Math.max(1, Math.min(totalPages, nextPage));
     setPage(bounded);
-
-    if (typeof window !== "undefined") {
-      document.getElementById("modelos")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
   }
 
   return (
@@ -417,7 +437,7 @@ export function StorefrontCatalog({ store, products, eyebrow }: StorefrontCatalo
         </section>
       ) : (
         <>
-          <section className="storefront-grid" id="modelos">
+          <section ref={catalogSectionRef} className="storefront-grid" id="modelos">
             {pagedProducts.map((product) => {
               const detailHref = buildStorefrontProductPath(product.sku);
               const specSummary = buildSpecSummary(product);
