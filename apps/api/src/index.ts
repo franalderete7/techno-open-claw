@@ -20,6 +20,7 @@ import { metaAdsApiRoutes } from "./routes/meta-ads-api.js";
 import { metaCatalogApiRoutes } from "./routes/meta-catalog-api.js";
 import { storefrontAnalyticsApiRoutes } from "./routes/storefront-analytics-api.js";
 import { telegramOperatorApiRoutes } from "./routes/telegram-operator-api.js";
+import { conversationReviewApiRoutes } from "./routes/conversation-review-api.js";
 import { sendMetaPurchaseEventForOrder } from "./meta-conversions.js";
 import { recordStorefrontPurchaseEvent } from "./storefront-analytics.js";
 import {
@@ -37,6 +38,7 @@ import {
   listInventoryPurchases,
   updateInventoryPurchase,
 } from "./inventory-purchases.js";
+import { startConversationReviewScheduler } from "./conversation-reviewer.js";
 
 const app = Fastify({
   logger: true,
@@ -249,6 +251,7 @@ app.register(async (protectedApp) => {
   protectedApp.register(metaAdsApiRoutes);
   protectedApp.register(storefrontAnalyticsApiRoutes);
   protectedApp.register(telegramOperatorApiRoutes);
+  protectedApp.register(conversationReviewApiRoutes);
 
   protectedApp.get("/v1/telegram/status", async () => {
     const targetUrl = config.TELEGRAM_WEBHOOK_BASE_URL
@@ -2054,6 +2057,7 @@ async function start() {
       host: config.API_HOST,
       port: config.API_PORT,
     });
+    startConversationReviewScheduler(app.log);
   } catch (error) {
     app.log.error(error);
     process.exit(1);
