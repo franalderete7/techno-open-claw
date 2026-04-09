@@ -34,6 +34,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./db/migrations:/migrations:ro
     command:
@@ -41,12 +42,12 @@ services:
       - -lc
       - |
         set -eu
-        until pg_isready -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+        until pg_isready -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"; do
           sleep 2
         done
         for file in /migrations/*.sql; do
-          echo "Applying $(basename "$file")"
-          psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f "$file"
+          echo "Applying $$(basename "$$file")"
+          psql -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -f "$$file"
         done
 
   api:

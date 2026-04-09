@@ -2666,6 +2666,7 @@ nav a:hover {
   display: grid;
   gap: 16px;
   grid-template-columns: 1fr;
+  align-items: start;
 }
 
 .growth-table-card {
@@ -2673,6 +2674,73 @@ nav a:hover {
   gap: 12px;
   padding: 16px;
   background: rgba(255, 255, 255, 0.72);
+  align-content: start;
+}
+
+.growth-table-card-head.panel-header {
+  margin-bottom: 0;
+}
+
+.growth-cell-product {
+  max-width: 320px;
+  vertical-align: top;
+}
+
+.growth-path-clip {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.growth-product-name {
+  display: block;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.growth-row-details {
+  margin-top: 4px;
+  font-size: 0.78rem;
+}
+
+.growth-row-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  user-select: none;
+  list-style: none;
+}
+
+.growth-row-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.growth-row-details-body {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.growth-cell-nowrap {
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+.growth-table-dense th,
+.growth-table-dense td {
+  padding: 8px 8px;
+  vertical-align: top;
+}
+
+.growth-warning-head.panel-header {
+  margin-bottom: 8px;
+}
+
+.hero-copy-tight {
+  max-width: 52ch;
 }
 
 .growth-table-link {
@@ -2905,6 +2973,130 @@ nav a:hover {
 
 .ads-note-line {
   margin: 0;
+}
+
+.mono-inline {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.88em;
+}
+
+.reviews-toolbar-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.reviews-toolbar-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.reviews-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+}
+
+.reviews-toolbar-field {
+  display: grid;
+  gap: 6px;
+}
+
+.reviews-toolbar-select {
+  min-width: 88px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 0.5px solid var(--line);
+  background: var(--surface);
+  font-size: 0.95rem;
+}
+
+.reviews-toolbar-submit {
+  align-self: flex-end;
+}
+
+.reviews-toolbar-hint {
+  flex: 1 1 240px;
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.reviews-toolbar-secondary {
+  margin-top: 2px;
+}
+
+.reviews-manual-panel {
+  padding: 12px 16px;
+}
+
+.reviews-manual-summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+  padding: 4px 0;
+}
+
+.reviews-manual-summary::-webkit-details-marker {
+  display: none;
+}
+
+.reviews-manual-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--line);
+}
+
+.reviews-candidate-meta {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.reviews-candidate-preview {
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+  line-height: 1.38;
+}
+
+.reviews-candidate-preview-label {
+  color: var(--accent);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.reviews-candidate-thread {
+  margin-top: 6px;
+  font-size: 0.84rem;
+}
+
+.reviews-candidate-thread summary {
+  cursor: pointer;
+  color: var(--accent);
+  user-select: none;
+  list-style: none;
+}
+
+.reviews-candidate-thread summary::-webkit-details-marker {
+  display: none;
+}
+
+.reviews-candidate-thread-body {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.reviews-candidate-chips {
+  margin-top: 4px;
+}
+
+.reviews-candidate-card-compact {
+  padding: 10px 12px;
+  gap: 8px;
 }
 
 .reviews-layout {
@@ -3533,6 +3725,7 @@ nav a:hover {
 
   .growth-table-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
   }
 
   .reviews-layout {

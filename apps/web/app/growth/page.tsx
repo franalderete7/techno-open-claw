@@ -86,9 +86,7 @@ export default async function GrowthPage({ searchParams }: GrowthPageProps) {
       <section className="page-hero">
         <span className="eyebrow">Growth</span>
         <h2 className="hero-title">Storefront intelligence</h2>
-        <p className="hero-copy">
-          First-party storefront analytics reorganized for decision-making: what traffic is useful, where intent appears, and where the funnel is leaking.
-        </p>
+        <p className="hero-copy hero-copy-tight">Tráfico, intención y productos — datos de primer partido.</p>
         <section className="search-toolbar growth-filter-shell">
           <div className="growth-filter-top">
             <div className="chip-row growth-range-row">

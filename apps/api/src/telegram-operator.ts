@@ -477,14 +477,14 @@ function describeListProductsIntentNatural(parsed: ListProductsParsed): string {
 function buildEmptyProductListMessage(parsed: ListProductsParsed, hadIphoneMisassignedBrand: boolean): string {
   const intent = describeListProductsIntentNatural(parsed);
   const bits = [
-    `No tenemos nada en catálogo que calce con ${intent}.`,
+    `Con ese filtro el catálogo no devolvió filas para ${intent}.`,
     hadIphoneMisassignedBrand
       ? "Los iPhone suelen estar como marca Apple y el modelo en el título; ya combiné eso en la búsqueda."
       : "",
     parsed.has_image === false
       ? "Si el catálogo ya tiene fotos en todos, este filtro no va a devolver filas."
       : "",
-    `Si querés, probá otra palabra (ej. otro modelo), “marca Samsung”, “256GB”, o decime que liste todo el catálogo.`,
+    `Probá otra palabra (ej. otro modelo), “marca Samsung”, “256GB”, o decime que liste todo el catálogo.`,
   ];
   return bits.filter(Boolean).join(" ");
 }
@@ -1413,6 +1413,11 @@ function buildDateRangeLabel(from?: string, to?: string) {
   return from || to || "";
 }
 
+function buildEmptyReadResultMessage(label: string, suggestion: string, query?: string | null) {
+  const intro = query?.trim() ? `Con el criterio "${query.trim()}" no salió nada útil en ${label}.` : `Con ese filtro no salió nada útil en ${label}.`;
+  return `${intro} ${suggestion}`;
+}
+
 export function formatOperatorError(error: unknown) {
   if (error instanceof z.ZodError) {
     const statusIssue = error.issues.find((issue) => issue.path.at(-1) === "status");
@@ -1433,10 +1438,42 @@ export function formatOperatorError(error: unknown) {
       return "No pude validar esa acción. Revisá los datos y probá de nuevo.";
     }
 
-    return error.message;
+    return rewriteOperatorFailureMessage(error.message);
   }
 
   return "No pude preparar esa acción. Revisá la referencia y los campos.";
+}
+
+function buildEntityRecoveryMessage(entity: string, reference: string, suggestion: string) {
+  return `Todavía no pude ubicar ${entity} con "${reference}". ${suggestion}`;
+}
+
+function rewriteOperatorFailureMessage(message: string) {
+  const trimmed = message.trim();
+
+  const replacements: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+    [/^No encontré un producto para "(.+)"\.$/i, (m) => buildEntityRecoveryMessage("ese producto", m[1], "Pasame el SKU, el ID o una palabra más precisa y lo sigo.")],
+    [/^No encontré una unidad de stock para "(.+)"\.$/i, (m) => buildEntityRecoveryMessage("esa unidad", m[1], "Pasame serial, IMEI, SKU o ID y lo sigo.")],
+    [/^No encontré un cliente para "(.+)"\.$/i, (m) => buildEntityRecoveryMessage("ese cliente", m[1], "Pasame teléfono, email, ID o nombre más completo y lo sigo.")],
+    [/^No encontré un setting para "(.+)"\.$/i, (m) => buildEntityRecoveryMessage("ese setting", m[1], "Pasame la key exacta o una parte más precisa y lo sigo.")],
+    [/^No encontré una compra para "(.+)"\.$/i, (m) => buildEntityRecoveryMessage("esa compra", m[1], "Pasame el purchase_number, el ID o el proveedor y lo sigo.")],
+    [/^No encontré la compra (.+)\.$/i, (m) => buildEntityRecoveryMessage("esa compra", m[1], "Pasame el purchase_number exacto o el ID y lo sigo.")],
+    [/^No encontré imágenes recientes en este chat\..*$/i, () => "Para hacer eso necesito que primero me mandes las fotos en este chat y después me pidas la acción."],
+    [/^No encontré líneas del tipo .+$/i, () => "Ese bloque no me dio un lote usable todavía. Pegámelo con líneas tipo “Producto - 123 USD” y lo sigo."],
+    [/^No encontré unidades existentes para los IMEIs\/seriales de las imágenes recientes\.$/i, () => "De esas imágenes todavía no pude cruzar unidades existentes. Mandame IMEIs/seriales más nítidos o decime si querés crear stock nuevo."],
+    [/^No encontré stock para: (.+)$/i, (m) => `Todavía no pude cruzar stock para ${m[1]}. Si querés, mandame IMEI/serial más claro o te preparo alta nueva.`],
+    [/^No encontré una acción pendiente para aprobar\.$/i, () => "Ahora no hay una acción pendiente para aprobar. Si querés, decime de nuevo la acción y la preparo."],
+    [/^No encontré una acción pendiente para cancelar\.$/i, () => "Ahora no hay una acción pendiente para cancelar. Si querés, te muestro la última acción o preparo una nueva."],
+  ];
+
+  for (const [pattern, builder] of replacements) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      return builder(match);
+    }
+  }
+
+  return trimmed;
 }
 
 function normalizeMatch(value: string) {
@@ -3091,6 +3128,8 @@ function buildDraftPrompts(params: {
     "After list_products in Telegram, the server may attach one button per SKU when the result count is small (≤20); picks open get_product_details for that SKU or id.",
     "For price and numeric values, use numbers, not strings, when possible.",
     "If the message is just a greeting like hey/hola, reply briefly in reply and use mode=chat.",
+    "Never dead-end the operator with replies like 'no encontré nada relacionado' or generic refusal. If the reference is weak, ask for the next best discriminator: SKU, ID, phone, purchase_number, IMEI, serial, exact key, or a narrower filter.",
+    "When something does not match cleanly, keep momentum: suggest the most likely next input instead of denying the action.",
     "Tone: direct ops teammate. No filler, no pep talk, no 'I'd be happy to', no long apologies. If mode=chat or mode=clarify, keep reply under 4 short sentences unless listing data.",
     "If an image is attached and the user wants it on a product (new or existing), use mode=write with create_product or update_product and pass the attached URL as image_url unless they give a different URL.",
   ].join("\n");
@@ -3989,7 +4028,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return `No pude cargar la fila completa del producto ${parsed.product_ref}.`;
+        return `Todavía no pude abrir la ficha completa de ${parsed.product_ref}. Pasame SKU o ID exacto y la vuelvo a buscar.`;
       }
 
       return formatRecordDump(`Fila completa de producto ${product.sku}:`, rows[0]);
@@ -4069,7 +4108,11 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return "No encontré stock con ese criterio.";
+        return buildEmptyReadResultMessage(
+          "stock",
+          "Probá con SKU, serial, IMEI, marca, estado o ubicación.",
+          parsed.query ?? parsed.product_ref ?? parsed.brand ?? parsed.location_code ?? null
+        );
       }
 
       const filters = [
@@ -4118,7 +4161,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return `No pude cargar la fila completa del stock ${parsed.stock_ref}.`;
+        return `Todavía no pude abrir la ficha completa de ${parsed.stock_ref}. Pasame serial, IMEI o ID exacto y la vuelvo a buscar.`;
       }
 
       return formatRecordDump(`Fila completa de stock #${stock.id}:`, rows[0]);
@@ -4138,7 +4181,11 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return "No encontré settings con ese criterio.";
+        return buildEmptyReadResultMessage(
+          "settings",
+          "Probá con una parte más precisa de la key o pedime que liste todos.",
+          parsed.query ?? null
+        );
       }
 
       return [`Settings (${rows.length}${parsed.all ? "" : ` máx. ${limit}`}) :`, ...rows.map((row) => `• ${row.key} = ${asText(row.value)}`)].join("\n");
@@ -4157,7 +4204,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return `No pude cargar la fila completa del setting ${parsed.key}.`;
+        return `Todavía no pude abrir el setting ${parsed.key}. Pasame la key exacta y la vuelvo a buscar.`;
       }
 
       return formatRecordDump(`Fila completa del setting ${setting.key}:`, rows[0]);
@@ -4181,7 +4228,11 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return "No encontré clientes con ese criterio.";
+        return buildEmptyReadResultMessage(
+          "clientes",
+          "Probá con teléfono, email, nombre o apellido.",
+          parsed.query ?? null
+        );
       }
 
       return [
@@ -4208,7 +4259,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return `No pude cargar la fila completa del cliente ${parsed.customer_ref}.`;
+        return `Todavía no pude abrir la ficha de ${parsed.customer_ref}. Pasame teléfono, email o ID exacto y la vuelvo a buscar.`;
       }
 
       return formatRecordDump(`Fila completa del cliente #${customer.id}:`, rows[0]);
@@ -4228,7 +4279,11 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return "No encontré órdenes con ese criterio.";
+        return buildEmptyReadResultMessage(
+          "órdenes",
+          "Probá con order_number, una nota o pedime las últimas.",
+          parsed.query ?? null
+        );
       }
 
       return [
@@ -4246,7 +4301,11 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       });
 
       if (rows.length === 0) {
-        return "No encontré compras de inventario con ese criterio.";
+        return buildEmptyReadResultMessage(
+          "compras de inventario",
+          "Probá con purchase_number, proveedor, estado o pedime las últimas.",
+          parsed.query ?? parsed.status ?? null
+        );
       }
 
       return [
@@ -4265,7 +4324,7 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       const detail = await getInventoryPurchaseDetail(pool, purchase.id);
 
       if (!detail) {
-        return `No pude cargar la compra ${parsed.purchase_ref}.`;
+        return `Todavía no pude abrir la compra ${parsed.purchase_ref}. Pasame purchase_number o ID exacto y la vuelvo a buscar.`;
       }
 
       return formatRecordDump(`Fila completa de compra ${detail.purchase_number}:`, detail as Record<string, unknown>);
@@ -4351,7 +4410,11 @@ async function executeReadCommand(command: ReadCommandName, params: Record<strin
       );
 
       if (rows.length === 0) {
-        return "No encontré conversaciones con ese criterio.";
+        return buildEmptyReadResultMessage(
+          "conversaciones",
+          "Probá con título, canal, thread key o pedime las últimas.",
+          parsed.query ?? null
+        );
       }
 
       return [
@@ -6564,6 +6627,7 @@ function buildChatPrompts(params: {
     OPERATOR_SKILL_GUIDE,
     "You must never claim a mutation happened unless the deterministic command layer executed it.",
     "If the user asks for a mutation but there is not enough information, ask for the missing field or exact reference in one short question.",
+    "Never answer with a dead-end like 'no encontré nada relacionado'. If context is weak, ask for the next best discriminator and keep the action moving.",
     "Keep replies under 6 sentences unless listing tabular data. Do not dump schema, SQL, tool names, or validation rules unless explicitly asked.",
     "Use recent thread history to resolve follow-up references and preserve conversational continuity.",
     "Recent thread history:",

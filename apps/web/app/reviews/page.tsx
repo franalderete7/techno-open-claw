@@ -5,7 +5,7 @@ import {
   getConversationReviewCandidates,
   type ConversationReviewBatchRecord,
 } from "../../lib/api";
-import { runQueuedReviewAction, runSelectedReviewAction } from "./actions";
+import { runAnalyzeFirstNAction, runQueuedReviewAction, runSelectedReviewAction } from "./actions";
 
 type ReviewsPageProps = {
   searchParams?: Promise<{
@@ -33,6 +33,12 @@ function scoreTone(value: number | null | undefined) {
   return "warn";
 }
 
+function clipSnippet(value: string | null | undefined, max = 140) {
+  const text = String(value ?? "").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}…`;
+}
+
 function pickSelectedBatchId(searchBatch: string | undefined, batches: ConversationReviewBatchRecord[]) {
   const parsed = Number(searchBatch);
   if (Number.isInteger(parsed) && parsed > 0) {
@@ -54,7 +60,7 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
   try {
     const [batchResponse, candidateResponse] = await Promise.all([
       getConversationReviewBatches(24),
-      getConversationReviewCandidates(30),
+      getConversationReviewCandidates(80),
     ]);
     batches = batchResponse.items;
     candidates = candidateResponse.items;
@@ -86,8 +92,9 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
       <section className="page-hero">
         <span className="eyebrow">Reviews</span>
         <h2 className="hero-title">Conversation QA</h2>
-        <p className="hero-copy">
-          Stored reviewer batches live here now. You can inspect past analyses, see the saved summaries from Postgres, and manually launch a batch from selected conversations.
+        <p className="hero-copy hero-copy-tight">
+          Resúmenes guardados en Postgres: <code className="mono-inline">conversation_review_batches</code> (batch + JSON) e{" "}
+          <code className="mono-inline">conversation_review_items</code> (por conversación).
         </p>
         <div className="chip-row">
           <span className="chip accent">{batches.length} batches</span>
@@ -100,77 +107,94 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
 
       <section className="reviews-layout">
         <div className="page-stack">
-          <section className="panel reviews-action-panel">
-            <div className="panel-header">
-              <div>
-                <h3 className="panel-title">Run reviewer</h3>
-                <p className="panel-copy">Podés disparar el siguiente lote automático de 10 o elegir conversaciones puntuales.</p>
-              </div>
-            </div>
-            <div className="reviews-action-grid">
-              <form action={runQueuedReviewAction} className="reviews-action-card">
-                <p className="catalog-kicker">Automático</p>
-                <h4 className="record-title">Revisar próximas 10</h4>
-                <p className="muted">Usa la misma lógica del cron: toma el próximo lote elegible y guarda el resumen en la base.</p>
-                <button type="submit" className="chip action-link accent">
-                  Analizar siguiente lote
-                </button>
-              </form>
-
-              <form action={runSelectedReviewAction} className="reviews-action-card">
-                <div className="reviews-candidate-head">
-                  <div>
-                    <p className="catalog-kicker">Manual</p>
-                    <h4 className="record-title">Elegir conversaciones</h4>
-                  </div>
-                  <button type="submit" className="chip action-link accent">
-                    Analizar selección
-                  </button>
-                </div>
-                <div className="reviews-candidate-list">
-                  {candidates.length === 0 ? <p className="empty">No hay conversaciones elegibles pendientes.</p> : null}
-                  {candidates.map((candidate) => (
-                    <label key={candidate.conversation_id} className="reviews-candidate-card">
-                      <input type="checkbox" name="conversation_id" value={candidate.conversation_id} />
-                      <div className="reviews-candidate-body">
-                        <div className="reviews-candidate-title">
-                          <strong>{candidate.customer_name}</strong>
-                          <span className="chip mono">#{candidate.conversation_id}</span>
-                        </div>
-                        <p className="muted">
-                          {candidate.customer_phone ?? "Sin teléfono"} · {candidate.inbound_count} inbound · {candidate.outbound_count} outbound · {formatDateTime(candidate.last_message_at)}
-                        </p>
-                        <p className="reviews-candidate-snippet">
-                          <strong>Cliente:</strong> {candidate.last_customer_message || "—"}
-                        </p>
-                        <p className="reviews-candidate-snippet">
-                          <strong>Bot:</strong> {candidate.last_bot_message || "—"}
-                        </p>
-                        <div className="chip-row">
-                          {candidate.route_keys_seen.slice(0, 3).map((routeKey) => (
-                            <span key={routeKey} className="chip">
-                              {routeKey}
-                            </span>
-                          ))}
-                          {candidate.auto_flags.slice(0, 3).map((flag) => (
-                            <span key={flag} className="chip warn">
-                              {flag}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </label>
+          <section className="panel reviews-toolbar-panel">
+            <h3 className="panel-title reviews-toolbar-title">Nueva revisión</h3>
+            <form action={runAnalyzeFirstNAction} className="reviews-toolbar">
+              <label className="reviews-toolbar-field">
+                <span className="stat-label">Primeras N en cola</span>
+                <select name="n" className="reviews-toolbar-select" defaultValue={10}>
+                  {[5, 10, 15, 20, 30, 40, 50].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
                   ))}
-                </div>
+                </select>
+              </label>
+              <button type="submit" className="chip action-link accent reviews-toolbar-submit">
+                Analizar
+              </button>
+              <p className="reviews-toolbar-hint muted">
+                Cola = elegibles sin revisar (más antiguas primero, misma lógica que el cron). No son necesariamente las “últimas” por fecha de mensaje.
+              </p>
+            </form>
+            <div className="reviews-toolbar-secondary">
+              <form action={runQueuedReviewAction}>
+                <button type="submit" className="chip">
+                  Lote fijo de 10 (cron)
+                </button>
               </form>
             </div>
           </section>
 
+          <details className="panel reviews-manual-panel">
+            <summary className="reviews-manual-summary">Selección manual y lista</summary>
+            <form action={runSelectedReviewAction} className="reviews-manual-form">
+              <div className="reviews-candidate-head">
+                <p className="catalog-kicker">Marcá conversaciones y enviá</p>
+                <button type="submit" className="chip action-link accent">
+                  Analizar selección
+                </button>
+              </div>
+              <div className="reviews-candidate-list">
+                {candidates.length === 0 ? <p className="empty">No hay conversaciones elegibles pendientes.</p> : null}
+                {candidates.map((candidate) => (
+                  <label key={candidate.conversation_id} className="reviews-candidate-card reviews-candidate-card-compact">
+                    <input type="checkbox" name="conversation_id" value={candidate.conversation_id} />
+                    <div className="reviews-candidate-body">
+                      <div className="reviews-candidate-title">
+                        <strong>{candidate.customer_name}</strong>
+                        <span className="chip mono">#{candidate.conversation_id}</span>
+                      </div>
+                      <p className="reviews-candidate-meta muted">
+                        {candidate.customer_phone ?? "—"} · {candidate.inbound_count}/{candidate.outbound_count} · {formatDateTime(candidate.last_message_at)}
+                      </p>
+                      <p className="reviews-candidate-preview">
+                        <span className="reviews-candidate-preview-label">C:</span> {clipSnippet(candidate.last_customer_message, 120)}
+                      </p>
+                      <details className="reviews-candidate-thread">
+                        <summary>Ver mensajes</summary>
+                        <div className="reviews-candidate-thread-body">
+                          <p className="reviews-candidate-snippet">
+                            <strong>Cliente:</strong> {candidate.last_customer_message || "—"}
+                          </p>
+                          <p className="reviews-candidate-snippet">
+                            <strong>Bot:</strong> {candidate.last_bot_message || "—"}
+                          </p>
+                        </div>
+                      </details>
+                      <div className="chip-row reviews-candidate-chips">
+                        {candidate.route_keys_seen.slice(0, 2).map((routeKey) => (
+                          <span key={routeKey} className="chip">
+                            {routeKey}
+                          </span>
+                        ))}
+                        {candidate.auto_flags.slice(0, 2).map((flag) => (
+                          <span key={flag} className="chip warn">
+                            {flag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </form>
+          </details>
+
           <section className="panel reviews-detail-panel">
             <div className="panel-header">
               <div>
-                <h3 className="panel-title">Batch detail</h3>
-                <p className="panel-copy">El resumen y los hallazgos se leen desde `conversation_review_batches` y `conversation_review_items`.</p>
+                <h3 className="panel-title">Resultado del batch</h3>
               </div>
             </div>
 

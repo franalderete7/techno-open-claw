@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { runConversationReview } from "../../lib/api";
+import { getConversationReviewCandidates, runConversationReview } from "../../lib/api";
 
 function buildNotice(result: Awaited<ReturnType<typeof runConversationReview>>) {
   switch (result.status) {
@@ -24,6 +24,30 @@ function buildNotice(result: Awaited<ReturnType<typeof runConversationReview>>) 
 
 export async function runQueuedReviewAction() {
   const result = await runConversationReview({ limit: 10 });
+  revalidatePath("/reviews");
+
+  if (result.status === "completed") {
+    redirect(`/reviews?batch=${result.batchId}`);
+  }
+
+  redirect(`/reviews?notice=${encodeURIComponent(buildNotice(result) || "No pude iniciar la revisión.")}`);
+}
+
+export async function runAnalyzeFirstNAction(formData: FormData) {
+  const parsed = Number(formData.get("n"));
+  const n = Math.min(50, Math.max(1, Number.isFinite(parsed) && parsed > 0 ? parsed : 10));
+  const { items } = await getConversationReviewCandidates(n);
+  const ids = items.map((item) => item.conversation_id);
+
+  if (ids.length === 0) {
+    redirect(`/reviews?notice=${encodeURIComponent("No hay conversaciones elegibles en cola.")}`);
+  }
+
+  const result = await runConversationReview({
+    force: true,
+    conversation_ids: ids,
+  });
+
   revalidatePath("/reviews");
 
   if (result.status === "completed") {

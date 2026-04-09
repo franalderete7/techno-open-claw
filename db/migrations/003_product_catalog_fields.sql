@@ -31,6 +31,13 @@ begin
     select 1
     from pg_constraint
     where conname = 'products_battery_health_check'
+  ) and exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'products'
+      and column_name = 'battery_health'
+      and data_type in ('smallint', 'integer', 'bigint', 'numeric')
   ) then
     alter table public.products
       add constraint products_battery_health_check

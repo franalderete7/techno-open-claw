@@ -115,25 +115,6 @@ function browserLabel(value: string | null | undefined) {
   return value;
 }
 
-function buildLinePath(values: number[], width: number, height: number, padding = 18) {
-  const max = Math.max(1, ...values);
-  const drawableWidth = width - padding * 2;
-  const drawableHeight = height - padding * 2;
-
-  return values
-    .map((value, index) => {
-      const x = padding + (values.length <= 1 ? drawableWidth / 2 : (index / (values.length - 1)) * drawableWidth);
-      const y = padding + drawableHeight - (value / max) * drawableHeight;
-      return `${index === 0 ? "M" : "L"} ${x} ${y}`;
-    })
-    .join(" ");
-}
-
-function barWidth(value: number, max: number) {
-  if (max <= 0 || value <= 0) return "0%";
-  return `${Math.max(6, (value / max) * 100)}%`;
-}
-
 function buildGrowthHref(
   days: number,
   applied: { source: string | null; device: string | null; interval: "day" | "week" | "month" },
@@ -165,7 +146,7 @@ function GrowthSection({
   children,
 }: {
   title: string;
-  copy: string;
+  copy?: string;
   badges?: GrowthSummaryBadge[];
   defaultOpen?: boolean;
   children: ReactNode;
@@ -177,7 +158,7 @@ function GrowthSection({
       <summary className="growth-section-summary">
         <div className="growth-section-heading">
           <h3 className="panel-title">{title}</h3>
-          <p className="panel-copy">{copy}</p>
+          {copy ? <p className="panel-copy">{copy}</p> : null}
         </div>
         {badges?.length ? (
           <div className="chip-row growth-section-meta">
@@ -194,173 +175,21 @@ function GrowthSection({
   );
 }
 
-function ActivityChart({
-  daily,
-  days,
-  interval,
-}: {
-  daily: StorefrontAnalyticsOverviewResponse["daily"];
-  days: number;
-  interval: "day" | "week" | "month";
-}) {
-  const width = 740;
-  const height = 240;
-  const series = [
-    { key: "page_views", label: "Visitas", color: "#b68f7a" },
-    { key: "searches", label: "Búsquedas", color: "#9366cc" },
-    { key: "view_contents", label: "Vistas producto", color: "#bf6f4d" },
-    { key: "contacts", label: "WhatsApp", color: "#8a6c2c" },
-    { key: "checkout_starts", label: "Checkout", color: "#4d698d" },
-    { key: "purchases", label: "Compras", color: "#3e6a2f" },
-  ] as const;
-
-  const activeSeries = series.filter((item) => daily.some((point) => point[item.key] > 0));
-  const visibleSeries = activeSeries.length > 0 ? activeSeries : series.slice(0, 1);
-  const values = daily.flatMap((point) => visibleSeries.map((item) => point[item.key]));
-  const max = Math.max(1, ...values);
-  const guideValues = [0.25, 0.5, 0.75, 1].map((ratio) => Math.round(max * ratio));
-  const labelModulo = daily.length > 14 ? 6 : daily.length > 8 ? 4 : 2;
-  const labels = daily.filter((_, index) => index === 0 || index === daily.length - 1 || index % labelModulo === 0);
-
-  return (
-    <article className="growth-chart-card">
-      <div className="panel-header">
-        <div>
-          <h4 className="panel-title">Ritmo de actividad</h4>
-          <p className="panel-copy">
-            Tendencia por {interval === "month" ? "mes" : interval === "week" ? "semana" : "día"} en los últimos {days} días.
-          </p>
-        </div>
-      </div>
-
-      <div className="growth-legend">
-        {visibleSeries.map((item) => (
-          <span key={item.key} className="chip">
-            <span className="growth-legend-dot" style={{ backgroundColor: item.color }} />
-            {item.label}
-          </span>
-        ))}
-      </div>
-
-      <div className="growth-chart-shell">
-        <div className="growth-chart-guides">
-          {guideValues.reverse().map((value) => (
-            <span key={value}>{formatNumber(value)}</span>
-          ))}
-        </div>
-        <svg viewBox={`0 0 ${width} ${height}`} className="growth-chart" role="img" aria-label="Tendencia diaria de actividad">
-          {guideValues.map((value, index) => {
-            const y = 18 + (height - 36) - (value / max) * (height - 36);
-            return (
-              <line
-                key={`${value}-${index}`}
-                x1="18"
-                x2={width - 18}
-                y1={y}
-                y2={y}
-                stroke="rgba(20,20,19,0.08)"
-                strokeDasharray="4 6"
-              />
-            );
-          })}
-          {visibleSeries.map((item) => (
-            <path
-              key={item.key}
-              d={buildLinePath(
-                daily.map((point) => point[item.key]),
-                width,
-                height
-              )}
-              fill="none"
-              stroke={item.color}
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          ))}
-        </svg>
-      </div>
-
-      <div className="growth-chart-labels">
-        {labels.map((point) => (
-          <span key={point.date}>{point.label}</span>
-        ))}
-      </div>
-    </article>
-  );
-}
-
-function JourneyPanel({
-  journey,
-  searches,
-  checkouts,
-}: {
-  journey: StorefrontAnalyticsOverviewResponse["journey"];
-  searches: number;
-  checkouts: number;
-}) {
-  const max = Math.max(1, ...journey.map((item) => item.count));
-
-  return (
-    <article className="growth-table-card">
-      <div className="panel-header">
-        <div>
-          <h4 className="panel-title">Journey real</h4>
-          <p className="panel-copy">Sólo etapas ordenadas del recorrido para que los porcentajes sean entendibles.</p>
-        </div>
-      </div>
-
-      <div className="growth-journey-flow">
-        {journey.map((step, index) => (
-          <div key={step.key} className="growth-journey-stage">
-            <div className="growth-journey-card">
-              <span className="stat-label">{step.label}</span>
-              <strong className="growth-journey-value">{formatNumber(step.count)}</strong>
-              <span className="growth-journey-copy">{step.detail}</span>
-              <div className="growth-funnel-bar">
-                <div className={`growth-funnel-fill is-${step.key === "sessions" ? "page_view" : step.key}`} style={{ width: barWidth(step.count, max) }} />
-              </div>
-              <div className="growth-journey-metrics">
-                <span>{formatPct(step.conversion_from_sessions_pct)} de sesiones</span>
-                <span>{step.conversion_from_previous_pct == null ? "Base" : `${formatPct(step.conversion_from_previous_pct)} desde el paso anterior`}</span>
-              </div>
-            </div>
-            {index < journey.length - 1 ? <div className="growth-journey-arrow" aria-hidden="true">→</div> : null}
-          </div>
-        ))}
-      </div>
-
-      <div className="growth-journey-sidekicks">
-        <div className="growth-mini-metric">
-          <span className="stat-label">Búsquedas</span>
-          <strong>{formatNumber(searches)}</strong>
-          <span className="muted">Se leen aparte porque no todas las sesiones buscan.</span>
-        </div>
-        <div className="growth-mini-metric">
-          <span className="stat-label">Checkout</span>
-          <strong>{formatNumber(checkouts)}</strong>
-          <span className="muted">Se muestra como señal paralela, no como paso obligatorio.</span>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 function GrowthTableCard({
   title,
   copy,
   children,
 }: {
   title: string;
-  copy: string;
+  copy?: string;
   children: ReactNode;
 }) {
   return (
     <article className="table-card growth-table-card">
-      <div className="panel-header">
+      <div className="panel-header growth-table-card-head">
         <div>
           <h4 className="panel-title">{title}</h4>
-          <p className="panel-copy">{copy}</p>
+          {copy ? <p className="panel-copy">{copy}</p> : null}
         </div>
       </div>
       <div className="table-wrap">{children}</div>
@@ -368,24 +197,10 @@ function GrowthTableCard({
   );
 }
 
-function InsightCard({
-  title,
-  value,
-  note,
-  tone = "accent",
-}: {
-  title: string;
-  value: string;
-  note: string;
-  tone?: "accent" | "good" | "warn";
-}) {
-  return (
-    <article className={`growth-insight-card is-${tone}`}>
-      <span className="stat-label">{title}</span>
-      <strong className="growth-insight-value">{value}</strong>
-      <p className="growth-insight-note">{note}</p>
-    </article>
-  );
+function truncateText(value: string, max = 96) {
+  const trimmed = value.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max)}…`;
 }
 
 function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
@@ -403,21 +218,14 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
   const deviceSessions = snapshot.devices.reduce((sum, device) => sum + device.sessions, 0);
   const deviceCoveragePct = deviceSessions > 0 ? (knownDeviceSessions / deviceSessions) * 100 : null;
   const productViewStep = snapshot.journey.find((step) => step.key === "view_content");
-  const intentStep = snapshot.journey.find((step) => step.key === "engaged");
-  const purchaseStep = snapshot.journey.find((step) => step.key === "purchase");
-  const topSource = snapshot.sources[0] ?? null;
-  const topProduct = snapshot.products[0] ?? null;
   const topSearch = snapshot.searches[0] ?? null;
 
   return (
     <div className="page-stack">
       {snapshot.warnings.length > 0 ? (
         <section className="panel growth-warning-panel">
-          <div className="panel-header">
-            <div>
-              <h3 className="panel-title">Alertas rápidas</h3>
-              <p className="panel-copy">Señales que conviene revisar antes de sacar conclusiones de marketing.</p>
-            </div>
+          <div className="panel-header growth-warning-head">
+            <h3 className="panel-title">Alertas</h3>
           </div>
           <div className="growth-warning-list">
             {snapshot.warnings.map((warning) => (
@@ -429,86 +237,42 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
         </section>
       ) : null}
 
-      <section className="growth-spotlight-grid">
-        <InsightCard
-          title="Tráfico útil"
-          value={`${formatNumber(snapshot.totals.sessions)} sesiones`}
-          note={`${formatNumber(snapshot.totals.visitors)} visitantes y ${formatDuration(snapshot.totals.avg_session_duration_seconds)} de permanencia promedio.`}
-          tone="accent"
-        />
-        <InsightCard
-          title="Interés real"
-          value={formatPct(productViewStep?.conversion_from_sessions_pct)}
-          note={`${formatNumber(snapshot.totals.view_contents)} vistas de producto. ${topProduct ? `El producto más visto fue ${topProduct.title}.` : "Todavía sin producto líder."}`}
-          tone="good"
-        />
-        <InsightCard
-          title="Señal de intención"
-          value={formatPct(intentStep?.conversion_from_sessions_pct ?? snapshot.totals.contact_rate_pct)}
-          note={`${formatNumber(snapshot.totals.contacts)} WhatsApp y ${formatNumber(snapshot.totals.checkout_starts)} checkouts. ${topSource ? `La fuente más fuerte fue ${sourceLabel(topSource.source)}.` : "Todavía sin fuente dominante."}`}
-          tone="accent"
-        />
-        <InsightCard
-          title="Compra final"
-          value={formatPct(purchaseStep?.conversion_from_sessions_pct ?? snapshot.totals.purchase_rate_pct)}
-          note={`${formatNumber(snapshot.totals.purchases)} compras y ${formatMoney(snapshot.totals.revenue_ars)} de revenue. ${topSearch ? `Búsqueda líder: “${topSearch.query}”.` : "Todavía sin búsqueda dominante."}`}
-          tone={snapshot.totals.purchases > 0 ? "good" : "warn"}
-        />
-      </section>
-
       <section className="stats-grid growth-kpi-grid">
         <article className="stat-card">
           <span className="stat-label">Visitantes</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.visitors)}</strong>
-          <span className="stat-note">{formatNumber(snapshot.totals.sessions)} sesiones reales</span>
+          <span className="stat-note">{formatNumber(snapshot.totals.sessions)} sesiones</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Vistas producto</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.view_contents)}</strong>
-          <span className="stat-note">{formatPct(productViewStep?.conversion_from_sessions_pct)} de sesiones llegan a una PDP</span>
+          <span className="stat-note">{formatPct(productViewStep?.conversion_from_sessions_pct)} a PDP</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Búsquedas</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.searches)}</strong>
-          <span className="stat-note">{topSearch ? `Top query: ${topSearch.query}` : `${formatDuration(snapshot.totals.avg_session_duration_seconds)} promedio por sesión`}</span>
+          <span className="stat-note">{topSearch ? topSearch.query : formatDuration(snapshot.totals.avg_session_duration_seconds)}</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">WhatsApp</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.contacts)}</strong>
-          <span className="stat-note">{formatPct(snapshot.totals.contact_rate_pct)} de sesiones dejan contacto</span>
+          <span className="stat-note">{formatPct(snapshot.totals.contact_rate_pct)} sesiones</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Checkout</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.checkout_starts)}</strong>
-          <span className="stat-note">{formatPct(snapshot.totals.checkout_rate_pct)} de sesiones llegan a checkout</span>
+          <span className="stat-note">{formatPct(snapshot.totals.checkout_rate_pct)} sesiones</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Compras</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.purchases)}</strong>
-          <span className="stat-note">{formatMoney(snapshot.totals.revenue_ars)} revenue total</span>
+          <span className="stat-note">{formatMoney(snapshot.totals.revenue_ars)}</span>
         </article>
       </section>
 
       <GrowthSection
-        title="Panorama"
-        copy="Primero leé ritmo e intención. Después bajás a fuentes, productos y recorridos finos."
-        badges={[
-          { label: `${formatNumber(snapshot.totals.events)} eventos`, tone: "accent" },
-          { label: `${days} días` },
-          { label: `Vista: ${snapshot.filters.applied.interval === "month" ? "Mes" : snapshot.filters.applied.interval === "week" ? "Semana" : "Día"}` },
-          snapshot.filters.applied.source ? { label: `Fuente: ${sourceLabel(snapshot.filters.applied.source)}` } : null,
-          snapshot.filters.applied.device ? { label: `Dispositivo: ${deviceLabel(snapshot.filters.applied.device)}` } : null,
-        ].filter((badge): badge is GrowthSummaryBadge => badge != null)}
-      >
-        <section className="split-grid growth-top-grid">
-          <ActivityChart daily={snapshot.daily} days={days} interval={snapshot.filters.applied.interval} />
-          <JourneyPanel journey={snapshot.journey} searches={snapshot.totals.searches} checkouts={snapshot.totals.checkout_starts} />
-        </section>
-      </GrowthSection>
-
-      <GrowthSection
         title="Adquisición y demanda"
-        copy="Fuentes, equipos y términos de búsqueda en tablas compactas, para leer la ventana rápido."
+        copy="Fuentes, dispositivos y búsquedas."
         badges={[
           { label: `${snapshot.sources.length} fuentes` },
           { label: `${snapshot.devices.length} dispositivos` },
@@ -516,10 +280,7 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
         ].filter((badge): badge is GrowthSummaryBadge => badge != null)}
       >
         <div className="growth-table-grid">
-          <GrowthTableCard
-            title="Fuentes"
-            copy="Ordenadas por sesiones, con links rápidos para filtrar la vista."
-          >
+          <GrowthTableCard title="Fuentes">
             <table className="table is-compact">
               <thead>
                 <tr>
@@ -563,10 +324,7 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
             </table>
           </GrowthTableCard>
 
-          <GrowthTableCard
-            title="Dispositivos"
-            copy="Cuando no se puede identificar bien, la fila queda al final como Sin identificar."
-          >
+          <GrowthTableCard title="Dispositivos">
             <table className="table is-compact">
               <thead>
                 <tr>
@@ -614,10 +372,7 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
         </div>
 
         <div className="growth-table-grid">
-          <GrowthTableCard
-            title="Lo que buscan"
-            copy="Consultas reales ya limpiadas para que no manden el panel al ruido."
-          >
+          <GrowthTableCard title="Lo que buscan">
             <table className="table is-compact">
               <thead>
                 <tr>
@@ -649,10 +404,7 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
             </table>
           </GrowthTableCard>
 
-          <GrowthTableCard
-            title="URLs de entrada"
-            copy="Landings reales que abren la relación. El root se corre del foco para no ensuciar la lectura."
-          >
+          <GrowthTableCard title="URLs de entrada">
             <table className="table is-compact">
               <thead>
                 <tr>
@@ -687,92 +439,95 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
       </GrowthSection>
 
       <GrowthSection
-        title="Productos y URLs"
-        copy="Las URLs de producto están ordenadas por vistas por defecto, y la tabla de productos conserva contacto, checkout y revenue al lado."
+        title="Productos"
         badges={[
           { label: `${snapshot.products.length} productos` },
-          { label: `${productUrls.length} URLs visibles`, tone: "accent" },
+          { label: `${productUrls.length} URLs`, tone: "accent" },
         ]}
       >
         <div className="growth-table-grid">
-          <GrowthTableCard
-            title="URLs de producto"
-            copy="Ordenadas por vistas de producto para ver rápido qué PDP mueve más intención."
-          >
-            <table className="table is-compact">
+          <GrowthTableCard title="URLs de producto (por vistas)">
+            <table className="table is-compact growth-table-dense">
               <thead>
                 <tr>
-                  <th>URL</th>
+                  <th>Ruta</th>
                   <th>Vistas</th>
-                  <th>Contactos</th>
-                  <th>Checkout</th>
-                  <th>Compras</th>
-                  <th>Última señal</th>
+                  <th>WA</th>
+                  <th>CO</th>
+                  <th>Compra</th>
+                  <th>Última</th>
                 </tr>
               </thead>
               <tbody>
                 {productUrls.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="empty">Todavía no hay URLs de producto con actividad.</td>
+                    <td colSpan={6} className="empty">Sin URLs con actividad.</td>
                   </tr>
                 ) : null}
                 {productUrls.map((product) => (
                   <tr key={product.sku ?? product.url_path ?? product.title}>
-                    <td>
-                      <div className="value-stack">
-                        <strong className="mono">{product.url_path}</strong>
-                        <span className="muted">{product.title}</span>
-                      </div>
+                    <td className="growth-cell-product">
+                      <code className="growth-path-clip" title={product.url_path ?? ""}>
+                        {truncateText(String(product.url_path ?? ""), 44)}
+                      </code>
+                      {product.title ? (
+                        <details className="growth-row-details">
+                          <summary>Ver título</summary>
+                          <span className="muted growth-row-details-body">{product.title}</span>
+                        </details>
+                      ) : null}
                     </td>
                     <td>{formatNumber(product.view_contents)}</td>
                     <td>{formatNumber(product.contacts)}</td>
                     <td>{formatNumber(product.checkout_starts)}</td>
                     <td>{formatNumber(product.purchases)}</td>
-                    <td>{formatDateTime(product.last_seen)}</td>
+                    <td className="growth-cell-nowrap">{formatDateTime(product.last_seen)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </GrowthTableCard>
 
-          <GrowthTableCard
-            title="Top productos"
-            copy="Misma lógica: primero vistas, después señales más profundas."
-          >
-            <table className="table is-compact">
+          <GrowthTableCard title="Top productos">
+            <table className="table is-compact growth-table-dense">
               <thead>
                 <tr>
                   <th>Producto</th>
                   <th>Vistas</th>
-                  <th>Contactos</th>
-                  <th>Checkout</th>
-                  <th>Compras</th>
-                  <th>Revenue</th>
+                  <th>WA</th>
+                  <th>CO</th>
+                  <th>Compra</th>
+                  <th>$</th>
                 </tr>
               </thead>
               <tbody>
                 {snapshot.products.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="empty">Todavía no hay eventos a nivel producto.</td>
+                    <td colSpan={6} className="empty">Sin eventos por producto.</td>
                   </tr>
                 ) : null}
-                {snapshot.products.map((product) => (
-                  <tr key={product.product_id ?? product.sku ?? product.title}>
-                    <td>
-                      <div className="value-stack">
-                        <strong>{product.title}</strong>
-                        <span className="muted">
-                          {[product.sku, product.brand, product.url_path].filter(Boolean).join(" · ") || "Sin detalle"}
-                        </span>
-                      </div>
-                    </td>
-                    <td>{formatNumber(product.view_contents)}</td>
-                    <td>{formatNumber(product.contacts)}</td>
-                    <td>{formatNumber(product.checkout_starts)}</td>
-                    <td>{formatNumber(product.purchases)}</td>
-                    <td>{formatMoney(product.revenue_ars)}</td>
-                  </tr>
-                ))}
+                {snapshot.products.map((product) => {
+                  const metaBits = [product.sku, product.brand, product.url_path].filter(Boolean);
+                  const metaLine = metaBits.join(" · ");
+                  return (
+                    <tr key={product.product_id ?? product.sku ?? product.title}>
+                      <td className="growth-cell-product">
+                        <strong className="growth-product-name">{truncateText(product.title, 56)}</strong>
+                        {metaLine ? (
+                          <details className="growth-row-details">
+                            <summary>SKU / marca / ruta</summary>
+                            <span className="muted growth-row-details-body mono">{metaLine}</span>
+                          </details>
+                        ) : null}
+                      </td>
+                      <td>{formatNumber(product.view_contents)}</td>
+                      <td>{formatNumber(product.contacts)}</td>
+                      <td>{formatNumber(product.checkout_starts)}</td>
+                      <td>{formatNumber(product.purchases)}</td>
+                      <td className="growth-cell-nowrap">{formatMoney(product.revenue_ars)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </GrowthTableCard>
@@ -781,7 +536,6 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
 
       <GrowthSection
         title="Personas y recorridos"
-        copy="Queda plegado por defecto para que no invada la lectura. Abrís sólo a quien necesitás mirar."
         defaultOpen={false}
         badges={[
           { label: `${snapshot.people.length} recorridos` },
@@ -862,8 +616,7 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
       </GrowthSection>
 
       <GrowthSection
-        title="Feed reciente de eventos"
-        copy="También queda plegado: sirve para inspección fina, no para la vista de gestión."
+        title="Feed de eventos"
         defaultOpen={false}
         badges={[
           { label: `${snapshot.recent_events.length} eventos recientes` },
