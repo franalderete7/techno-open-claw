@@ -945,6 +945,13 @@ async function deliverBatchToTelegram(summaryText: string, logger: LoggerLike) {
 
 export async function runConversationReviewCycle(logger: LoggerLike, options: RunOptions = {}): Promise<RunResult> {
   if (!isReviewerEnabled() && !isManualReviewTrigger(options)) {
+    logger.info(
+      {
+        triggeredBy: options.triggeredBy || "cron",
+        enabled: config.CONVERSATION_REVIEW_ENABLED,
+      },
+      "Conversation review cycle skipped because reviewer is disabled."
+    );
     return { status: "disabled", reason: "conversation_reviewer_not_configured" };
   }
 
@@ -966,11 +973,13 @@ export async function runConversationReviewCycle(logger: LoggerLike, options: Ru
         : await fetchEligibleConversations(client, limit, config.CONVERSATION_REVIEW_IDLE_MINUTES, options.force === true);
 
     if (conversations.length === 0) {
+      logger.info(
+        {
+          triggeredBy: options.triggeredBy || "cron",
+        },
+        "Conversation review cycle skipped because there are no eligible ManyChat conversations."
+      );
       return { status: "skipped", reason: "no_eligible_conversations", available: 0 };
-    }
-
-    if (requestedConversationIds.length === 0 && !options.force && conversations.length < limit) {
-      return { status: "skipped", reason: "not_enough_unreviewed_conversations", available: conversations.length };
     }
 
     batchId = await createBatchRecord(client, {
@@ -1016,16 +1025,37 @@ export async function runConversationReviewCycle(logger: LoggerLike, options: Ru
 }
 
 export function startConversationReviewScheduler(logger: LoggerLike) {
-  if (reviewIntervalHandle || !config.CONVERSATION_REVIEW_ENABLED) {
+  if (reviewIntervalHandle) {
+    return;
+  }
+
+  if (!config.CONVERSATION_REVIEW_ENABLED) {
+    logger.info(
+      {
+        enabled: config.CONVERSATION_REVIEW_ENABLED,
+        batchSize: config.CONVERSATION_REVIEW_BATCH_SIZE,
+        idleMinutes: config.CONVERSATION_REVIEW_IDLE_MINUTES,
+        reviewRecipients: getReviewTargetChatIds(),
+      },
+      "Conversation review scheduler is disabled. Set CONVERSATION_REVIEW_ENABLED=true to turn it on."
+    );
     return;
   }
 
   const intervalMs = Math.max(1, config.CONVERSATION_REVIEW_INTERVAL_MINUTES) * 60_000;
 
   const runScheduled = () => {
-    void runConversationReviewCycle(logger, { triggeredBy: "cron" }).catch((error) => {
-      logger.error({ error }, "Conversation review cron cycle failed.");
-    });
+    void runConversationReviewCycle(logger, { triggeredBy: "cron" })
+      .then((result) => {
+        if (result.status === "completed") {
+          return;
+        }
+
+        logger.info({ result }, "Conversation review cron cycle did not produce a batch.");
+      })
+      .catch((error) => {
+        logger.error({ error }, "Conversation review cron cycle failed.");
+      });
   };
 
   reviewIntervalHandle = setInterval(runScheduled, intervalMs);
