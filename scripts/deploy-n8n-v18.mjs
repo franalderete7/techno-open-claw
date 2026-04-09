@@ -169,6 +169,20 @@ function ensureWorkflowFiles() {
   }
 }
 
+function validateWorkflowSourceJson() {
+  for (const workflow of EXPECTED_WORKFLOWS) {
+    const fullPath = join(WORKFLOW_DIR, workflow.file);
+    try {
+      JSON.parse(readFileSync(fullPath, "utf8"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Workflow JSON is invalid (deploy aborted; unpublish may already have run on a previous attempt — fix file and re-run):\n${fullPath}\n${message}\n\nTip: strings in "jsCode" / parameters must escape newlines as \\n, not literal line breaks inside the JSON string.`,
+      );
+    }
+  }
+}
+
 function timestampSlug() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -587,6 +601,7 @@ function restartContainer(container) {
 
 async function main() {
   ensureWorkflowFiles();
+  validateWorkflowSourceJson();
 
   const n8nContainer = findN8nContainer();
   const tmpDir = mkdtempSync(join(tmpdir(), "techno-open-claw-n8n-v18-"));

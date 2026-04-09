@@ -76,6 +76,10 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
     notable_wins?: string[];
     conversations_with_issues?: number;
   };
+  const topIssueTypes = Array.isArray(summary.top_issue_types) ? summary.top_issue_types : [];
+  const recommendedChanges = Array.isArray(summary.recommended_changes) ? summary.recommended_changes : [];
+  const urgentFindings = Array.isArray(summary.urgent_findings) ? summary.urgent_findings : [];
+  const notableWins = Array.isArray(summary.notable_wins) ? summary.notable_wins : [];
 
   return (
     <div className="page-stack">
@@ -193,22 +197,22 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
                   <article className="reviews-summary-card">
                     <h4 className="panel-title">Top issues</h4>
                     <div className="chip-row">
-                      {(summary.top_issue_types ?? []).slice(0, 6).map((item, index) => (
+                      {topIssueTypes.slice(0, 6).map((item, index) => (
                         <span key={`${item.type}-${index}`} className="chip warn">
                           {item.type ?? "issue"} · {item.count ?? 0}
                         </span>
                       ))}
-                      {(summary.top_issue_types ?? []).length === 0 ? <span className="muted">Sin issues repetidos.</span> : null}
+                      {topIssueTypes.length === 0 ? <span className="muted">Sin issues repetidos.</span> : null}
                     </div>
                   </article>
 
                   <article className="reviews-summary-card">
                     <h4 className="panel-title">Urgent findings</h4>
                     <ul className="reviews-list">
-                      {(summary.urgent_findings ?? []).slice(0, 5).map((item) => (
+                      {urgentFindings.slice(0, 5).map((item) => (
                         <li key={item}>{item}</li>
                       ))}
-                      {(summary.urgent_findings ?? []).length === 0 ? <li>Sin hallazgos urgentes.</li> : null}
+                      {urgentFindings.length === 0 ? <li>Sin hallazgos urgentes.</li> : null}
                     </ul>
                   </article>
                 </div>
@@ -216,7 +220,7 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
                 <article className="reviews-summary-card">
                   <h4 className="panel-title">Recommended changes</h4>
                   <div className="reviews-recommendation-list">
-                    {(summary.recommended_changes ?? []).slice(0, 6).map((change, index) => (
+                    {recommendedChanges.slice(0, 6).map((change, index) => (
                       <div key={`${change.area}-${index}`} className="reviews-recommendation-card">
                         <div className="chip-row">
                           <span className="chip accent">{change.priority ?? "medium"}</span>
@@ -226,15 +230,15 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
                         {change.reason ? <p className="muted">{change.reason}</p> : null}
                       </div>
                     ))}
-                    {(summary.recommended_changes ?? []).length === 0 ? <p className="empty">El reviewer no devolvió cambios sugeridos en este batch.</p> : null}
+                    {recommendedChanges.length === 0 ? <p className="empty">El reviewer no devolvió cambios sugeridos en este batch.</p> : null}
                   </div>
                 </article>
 
-                {(summary.notable_wins ?? []).length > 0 ? (
+                {notableWins.length > 0 ? (
                   <article className="reviews-summary-card">
                     <h4 className="panel-title">Notable wins</h4>
                     <ul className="reviews-list">
-                      {summary.notable_wins?.slice(0, 5).map((item) => <li key={item}>{item}</li>)}
+                      {notableWins.slice(0, 5).map((item) => <li key={item}>{item}</li>)}
                     </ul>
                   </article>
                 ) : null}
@@ -264,13 +268,13 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
                         {item.what_went_wrong ? <p>{item.what_went_wrong}</p> : null}
                         {item.suggested_fix ? <p className="muted"><strong>Fix:</strong> {item.suggested_fix}</p> : null}
                         <div className="chip-row">
-                          {item.issue_types.map((issueType) => (
+                          {(Array.isArray(item.issue_types) ? item.issue_types : []).map((issueType) => (
                             <span key={issueType} className="chip warn">
                               {issueType}
                             </span>
                           ))}
                         </div>
-                        {item.evidence.length > 0 ? (
+                        {Array.isArray(item.evidence) && item.evidence.length > 0 ? (
                           <div className="reviews-evidence-list">
                             {item.evidence.slice(0, 3).map((evidence, index) => (
                               <blockquote key={`${evidence.message_id ?? "quote"}-${index}`} className="reviews-evidence-quote">
