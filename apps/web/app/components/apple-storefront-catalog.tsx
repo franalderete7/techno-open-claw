@@ -6,6 +6,7 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 import { trackStorefrontSearch } from "../../lib/storefront-analytics";
 import { buildStorefrontInstallmentOffer, type StorefrontProduct, type StorefrontProfile } from "../../lib/storefront";
 import { AppleAnnouncementBar } from "./apple-announcement-bar";
+import { AppleHeroCarousel } from "./apple-hero-carousel";
 import { ApplePurchaseProcess } from "./apple-purchase-process";
 import { AppleStorefrontFooter } from "./apple-storefront-footer";
 import { StorefrontProductActions } from "./storefront-product-actions";
@@ -260,6 +261,39 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pagedProducts = filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const heroProducts = useMemo(
+    () =>
+      [...products].sort((left, right) => {
+        if (Number(right.in_stock) !== Number(left.in_stock)) {
+          return Number(right.in_stock) - Number(left.in_stock);
+        }
+
+        return (left.public_price_ars ?? Number.MAX_SAFE_INTEGER) - (right.public_price_ars ?? Number.MAX_SAFE_INTEGER);
+      }),
+    [products]
+  );
+  const heroSlides = useMemo(
+    () =>
+      heroProducts.map((product) => {
+        const installmentOffer = buildStorefrontInstallmentOffer(product);
+
+        return {
+          id: String(product.id),
+          title: (product.model || product.title).trim(),
+          subtitle: buildAppleSpecLine(product) || null,
+          pitch: buildAppleSalesPitch(product),
+          price: formatMoney(product.public_price_ars),
+          installment: installmentOffer
+            ? `${installmentOffer.installments} cuotas de ${formatMoney(installmentOffer.installmentAmount)} con ${
+                installmentOffer.provider === "macro" ? "Macro" : "bancarizada"
+              }`
+            : null,
+          imageUrl: product.image_url,
+          href: buildAppleProductPath(product.sku),
+        };
+      }),
+    [heroProducts]
+  );
   const announcementItems = [
     "Envíos a todo el país con seguimiento por WhatsApp",
     "Retiro en Salta con coordinación por WhatsApp",
@@ -283,10 +317,8 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
         </div>
       </header>
 
-      <section className="apple-hero apple-hero--process-only">
-        <div className="apple-hero-panel apple-hero-panel--wide">
-          <ApplePurchaseProcess variant="hero" inStock={catalogStats.inStockProducts > 0} />
-        </div>
+      <section className="apple-hero apple-hero--carousel">
+        <AppleHeroCarousel items={heroSlides} whatsappUrl={store.whatsapp_url} />
       </section>
 
       <section className="apple-filters" id="filtros">
@@ -418,6 +450,7 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
       </section>
 
       <AppleStorefrontFooter
+        preface={<ApplePurchaseProcess variant="footer" inStock={catalogStats.inStockProducts > 0} />}
         sections={[
           {
             title: "Envíos a todo el país",

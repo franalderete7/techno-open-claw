@@ -1,13 +1,18 @@
+import type { ReactNode } from "react";
+
 type AppleStorefrontFooterProps = {
   sections: Array<{
     title: string;
     body: string;
   }>;
+  preface?: ReactNode;
 };
 
-export function AppleStorefrontFooter({ sections }: AppleStorefrontFooterProps) {
+export function AppleStorefrontFooter({ sections, preface }: AppleStorefrontFooterProps) {
   return (
     <footer className="apple-storefront-footer" aria-label="Información de compra">
+      {preface ? <div className="apple-storefront-footer-preface">{preface}</div> : null}
+
       <div className="apple-storefront-footer-lead">
         <span className="apple-info-kicker">Compra clara</span>
         <h2 className="apple-storefront-footer-heading">Todo lo importante, visible antes de avanzar.</h2>

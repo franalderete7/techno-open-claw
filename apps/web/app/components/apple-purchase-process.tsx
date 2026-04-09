@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 type ApplePurchaseProcessProps = {
-  variant?: "hero" | "detail";
+  variant?: "hero" | "detail" | "footer";
   inStock?: boolean;
   deliveryDays?: number | null;
 };
