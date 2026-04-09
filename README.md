@@ -28,7 +28,6 @@ Everything operational happens through chat and tools:
 - change stock
 - inspect conversations
 - create and inspect orders
-- later manage ads
 
 The backend is the source of truth and OpenClaw calls backend tools.
 
@@ -48,32 +47,19 @@ It does not yet include:
 
 - Telegram channel handler
 - OpenClaw runtime config
-- Meta Ads integration
 - iOS app
 
 ## Quick start
 
 1. Copy `.env.example` to `.env`
 2. Fill the required values from [docs/CREDENTIALS.md](./docs/CREDENTIALS.md)
-3. Start Postgres:
+3. Start everything:
 
 ```bash
-docker compose up -d postgres
+docker compose up -d
 ```
 
-4. Apply schema:
-
-```bash
-./scripts/migrate.sh
-```
-
-5. Start API and web:
-
-```bash
-docker compose up -d api web
-```
-
-6. Verify:
+4. Verify:
 
 ```bash
 curl http://127.0.0.1:4000/health
@@ -96,4 +82,4 @@ For project history, current VPS status, and next migration steps, see [`docs/MI
 2. Product and stock updates via chat
 3. Order operations via chat
 4. Outbound Telegram replies from backend flows
-5. Meta Ads tool layer
+5. Admin and storefront polish

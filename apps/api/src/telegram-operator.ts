@@ -3031,8 +3031,6 @@ const OPERATOR_SCHEMA_GUIDE = [
   "- public.inventory_purchases stores inbound stock purchases. Stable refs: id or purchase_number. Common editable fields: supplier_name, currency_code, total_amount, status, acquired_at, notes, metadata.",
   "- public.inventory_purchase_funders stores how a purchase was funded. Fields: funder_name, payment_method, amount_amount, currency_code, share_pct, notes.",
   "- stock_units can link directly to inventory_purchases through inventory_purchase_id.",
-  "- Meta Ads live reads come from the configured ad account and business. Read commands can list campaigns, ad sets, and ads by status or text query.",
-  "- Meta Ads write commands can only activate, pause, or change budget fields on campaigns/ad sets, and activate/pause ads. Those changes must always stay behind inline approval buttons.",
   "- public.settings stores key/value configuration. Stable ref: key. update_setting requires key and value. delete_setting removes the key.",
   "- public.customers stores operator and customer contacts. Stable refs: id, external_ref, phone, email. create_customer requires at least one of external_ref, phone, or email.",
   "- public.conversations stores thread headers by channel_thread_key. public.messages stores the actual interaction timeline. Each Telegram inbound and outbound message is saved in public.messages.",
@@ -3067,8 +3065,8 @@ function buildDraftPrompts(params: {
     "Convert the operator request into a strict JSON decision for the automation flow.",
     "Think in natural operator intents like listing, filtering, creating, editing, archiving, deleting, moving stock, or changing settings. Do not mention internal tool names in user-facing reply text.",
     "Return JSON only. No prose. No markdown.",
-    "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, get_product_details, list_stock, get_stock_details, list_settings, get_setting_details, list_customers, get_customer_details, list_orders, list_conversations, list_inventory_purchases, get_inventory_purchase_details, list_meta_campaigns, list_meta_ad_sets, list_meta_ads.",
-    "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, bulk_sync_products, delete_product, bulk_delete_products, create_inventory_purchase, update_inventory_purchase, update_meta_campaign, update_meta_ad_set, update_meta_ad, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
+    "Allowed read commands: help, list_operator_skills, health_check, list_workflows, list_products, get_product_details, list_stock, get_stock_details, list_settings, get_setting_details, list_customers, get_customer_details, list_orders, list_conversations, list_inventory_purchases, get_inventory_purchase_details.",
+    "Allowed write commands: create_product, update_product, bulk_update_products, bulk_reprice_products, bulk_sync_products, delete_product, bulk_delete_products, create_inventory_purchase, update_inventory_purchase, create_stock_unit, create_stock_from_images, create_inventory_purchase_from_images, update_stock_unit, update_stock_status_from_images, delete_stock_unit, bulk_update_stock_units, update_setting, delete_setting, create_customer, update_customer.",
     "If the user is asking a general question or casual operator chat, return mode=chat and include the full operator-facing response in reply.",
     "If information is missing for a mutation, return mode=clarify and put the full clarification question in reply.",
     "If the operator asks for a concrete mutation that can be prepared safely, prefer mode=write over mode=chat. Do not answer with an execution plan when the command layer can already prepare the action.",
@@ -3087,7 +3085,6 @@ function buildDraftPrompts(params: {
     "If the operator changes cost_usd, logistics_usd, usd_rate, or cuotas_qty on a product, the server will recalculate derived pricing fields from settings. You should frame the action as a repricing preview, not as a manual field edit list only.",
     "If the operator refers to the latest Telegram images for new stock or sold devices, prefer the image-based stock commands rather than requesting manual IMEIs.",
     "Normalize stock status wording like available/disponible to in_stock.",
-    "Normalize Meta Ads status wording like activa/activo to ACTIVE and pausada/pausado to PAUSED when preparing updates.",
     "When the user asks for lists by brand, price range, RAM, storage, sold date, acquisition date, location, stock status, or image presence, use the available filter fields instead of plain text only.",
     "Apple iPhones are stored with brand Apple and model/title like iPhone 13 / iPhone 17 Pro Max. For 'iPhone 13' or similar, use list_products with query='iPhone 13' (and all=true if they need the full set). Never set brand to the phone line name (e.g. brand=iPhone 13); that matches zero rows.",
     "Common list_products intents: all iPhones → query=iPhone or query=iPhone 13; all Samsung → brand=Samsung; JBL → query=JBL; 256GB phones → min_storage_gb=256 and max_storage_gb=256; products missing storefront image → has_image=false (often with active=true).",
@@ -6710,125 +6707,7 @@ function stripMetaReadNoise(text: string, entityPattern: RegExp, status?: string
 }
 
 function parseQuickMetaDraft(text: string): Draft | null {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const entityDefinitions = [
-    {
-      entityKind: "campaign" as const,
-      readCommand: "list_meta_campaigns" as const,
-      writeCommand: "update_meta_campaign" as const,
-      refKey: "campaign_ref" as const,
-      nounPattern: /\b(campa(?:ñ|n)as?|campaigns?)\b/i,
-      budgetAllowed: true,
-    },
-    {
-      entityKind: "ad_set" as const,
-      readCommand: "list_meta_ad_sets" as const,
-      writeCommand: "update_meta_ad_set" as const,
-      refKey: "ad_set_ref" as const,
-      nounPattern: /\b(ad sets?|adsets?|conjuntos?)\b/i,
-      budgetAllowed: true,
-    },
-    {
-      entityKind: "ad" as const,
-      readCommand: "list_meta_ads" as const,
-      writeCommand: "update_meta_ad" as const,
-      refKey: "ad_ref" as const,
-      nounPattern: /\b(ads?|anuncios?)\b/i,
-      budgetAllowed: false,
-    },
-  ];
-
-  for (const definition of entityDefinitions) {
-    if (!definition.nounPattern.test(trimmed)) {
-      continue;
-    }
-
-    const readStatus = parseMetaStatusFilter(trimmed);
-    const wantsRead =
-      /\b(?:mostrame|mostra|mostrar|ver|dame|decime|listame|lista|listá)\b/i.test(trimmed) ||
-      (Boolean(readStatus) && !/\b(?:paus[aá]|pausa|deten[eé]|par[aá]|stop|activ[aá]|activa|activar|habilit[aá]|habilita|reanuda|encend[eé]|presupuesto)\b/i.test(trimmed));
-
-    if (wantsRead) {
-      const status = readStatus;
-      const query = stripMetaReadNoise(trimmed, definition.nounPattern, status);
-      return {
-        mode: "read",
-        command: definition.readCommand,
-        params: {
-          ...(status ? { status } : {}),
-          ...(query ? { query } : {}),
-          limit: 24,
-        },
-      };
-    }
-
-    const nextStatus = /\b(?:paus[aá]|pausa|deten[eé]|par[aá]|stop)\b/i.test(trimmed)
-      ? "PAUSED"
-      : /\b(?:activ[aá]|activa|activar|habilit[aá]|habilita|reanuda|encend[eé])\b/i.test(trimmed)
-        ? "ACTIVE"
-        : null;
-
-    if (nextStatus) {
-      const entityMatch = trimmed.match(definition.nounPattern);
-      const reference = cleanMetaReferenceText(trimmed.slice((entityMatch?.index ?? 0) + (entityMatch?.[0].length ?? 0)));
-      if (!reference) {
-        return {
-          mode: "clarify",
-          reply: `Decime qué ${getMetaEntityLabel(definition.entityKind)} querés ${nextStatus === "PAUSED" ? "pausar" : "activar"}.`,
-        };
-      }
-
-      return {
-        mode: "write",
-        command: definition.writeCommand,
-        params: {
-          [definition.refKey]: reference,
-          changes: { status: nextStatus },
-        },
-      };
-    }
-
-    if (definition.budgetAllowed && /\bpresupuesto\b/i.test(trimmed)) {
-      const amountMatches = [...trimmed.matchAll(/[$]?\s*([0-9][0-9.,]*)/g)];
-      const amountMatch = amountMatches.at(-1);
-      const amount = amountMatch ? parseLooseLocaleNumber(amountMatch[1]) : null;
-      const entityMatch = trimmed.match(definition.nounPattern);
-
-      if (!amountMatch || amount == null || !entityMatch) {
-        return {
-          mode: "clarify",
-          reply: `Pasame el ${getMetaEntityLabel(definition.entityKind)} y el presupuesto nuevo.`,
-        };
-      }
-
-      const reference = cleanMetaReferenceText(
-        trimmed.slice((entityMatch.index ?? 0) + entityMatch[0].length, amountMatch.index ?? trimmed.length)
-      );
-      if (!reference) {
-        return {
-          mode: "clarify",
-          reply: `Decime qué ${getMetaEntityLabel(definition.entityKind)} querés actualizar.`,
-        };
-      }
-
-      const budgetKey =
-        /\b(vitalicio|lifetime|por vida|total)\b/i.test(trimmed) ? "lifetime_budget" : "daily_budget";
-
-      return {
-        mode: "write",
-        command: definition.writeCommand,
-        params: {
-          [definition.refKey]: reference,
-          changes: { [budgetKey]: amount },
-        },
-      };
-    }
-  }
-
+  void text;
   return null;
 }
 

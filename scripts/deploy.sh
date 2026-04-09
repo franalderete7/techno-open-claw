@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 
 docker compose up -d postgres
 "$ROOT_DIR/scripts/migrate.sh"
-docker compose build api
-docker compose up -d api
+docker compose build api web
+docker compose up -d api web
 
 echo "Deploy complete."

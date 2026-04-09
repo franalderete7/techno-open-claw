@@ -16,7 +16,6 @@ import {
 import { calculateDerivedPricing, shouldRecalculatePricing } from "./pricing.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { n8nCompatRoutes } from "./routes/n8n-compat.js";
-import { metaAdsApiRoutes } from "./routes/meta-ads-api.js";
 import { metaCatalogApiRoutes } from "./routes/meta-catalog-api.js";
 import { storefrontAnalyticsApiRoutes } from "./routes/storefront-analytics-api.js";
 import { telegramOperatorApiRoutes } from "./routes/telegram-operator-api.js";
@@ -248,7 +247,6 @@ app.register(metaCatalogApiRoutes);
 app.register(async (protectedApp) => {
   protectedApp.addHook("preHandler", requireBearerToken);
   protectedApp.register(n8nCompatRoutes, { prefix: "/rest/v1" });
-  protectedApp.register(metaAdsApiRoutes);
   protectedApp.register(storefrontAnalyticsApiRoutes);
   protectedApp.register(telegramOperatorApiRoutes);
   protectedApp.register(conversationReviewApiRoutes);

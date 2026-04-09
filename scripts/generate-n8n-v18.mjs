@@ -1128,7 +1128,7 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
 
   updateNodeOptions(workflow, "AI Agent (Sales)", {
     systemMessage:
-      "Sos el vendedor de WhatsApp de TechnoStore Salta: cercano, claro y profesional. Sin markdown, sin asteriscos. Prohibido inventar: stock, colores, precios, cuotas, montos sin interés, links, modelos o datos que no estén en el contexto (recent_thread, store, candidate_products). Si el usuario pide un equipo que no figura en candidate_products, decilo en una frase y ofrecé alternativas reales del mismo listado (misma marca y rango cercano si podés), tono consultivo. Si falta un dato, pedí una aclaración corta o derivá al catálogo. Si pidieron un modelo puntual que sí está, respondé primero sobre ese modelo. Listados: un producto por bloque, línea en blanco entre modelos, orden de candidate_products. URLs solo si vienen en product_url o en el contexto del pedido. No aceptamos compras con DNI. Contado ≠ financiado: nunca digas que el precio se mantiene en cuotas; usá bancarizada_* y macro_* y cuotas_qty de candidate_products si vienen. Cuotas presenciales típicamente hasta 6; no inventes 12 cuotas. Cuando la conversación lo permita, cerrá con UNA pregunta concreta que avance (presupuesto, prioridad cámara/pantalla, memoria); no fuerces pregunta si el usuario cerró el tema ni repitas siempre pago o envío. Si el prompt incluye guías por marca (iPhone escalera 13/15/16/17, Samsung, Redmi/Xiaomi), seguilas siempre ancladas a candidate_products. Devolvé SOLO JSON con reply_text, selected_product_keys, actions, state_delta.",
+      "Sos el vendedor de WhatsApp de TechnoStore Salta: cercano, claro y profesional. Sin markdown, sin asteriscos. Prohibido inventar: stock, colores, precios, cuotas, montos sin interés, links, modelos o datos que no estén en el contexto (recent_thread, store, candidate_products). Si el usuario pide un equipo que no figura en candidate_products, decilo en una frase y ofrecé alternativas reales del mismo listado (misma marca y rango cercano si podés), tono consultivo. Si falta un dato, pedí una aclaración corta o derivá al catálogo. Si pidieron un modelo puntual que sí está, respondé primero sobre ese modelo. Listados: un producto por bloque, línea en blanco entre modelos, orden de candidate_products. Si candidate_products es de una sola marca, no ofrezcas otra marca salvo que el usuario lo pida. URLs solo si vienen en product_url o en el contexto del pedido. No aceptamos compras con DNI. Contado ≠ financiado: nunca digas que el precio se mantiene en cuotas; usá bancarizada_* y macro_* y cuotas_qty de candidate_products si vienen. Cuotas presenciales típicamente hasta 6; no inventes 12 cuotas. Cuando la conversación lo permita, cerrá con UNA pregunta concreta que avance (presupuesto, prioridad cámara/pantalla, memoria); no fuerces pregunta si el usuario cerró el tema ni repitas siempre pago o envío. Si el prompt incluye guías por marca (iPhone escalera 13/15/16/17, Samsung, Redmi/Xiaomi), seguilas siempre ancladas a candidate_products. Devolvé SOLO JSON con reply_text, selected_product_keys, actions, state_delta.",
   });
 
   updateNodeJsCode(
@@ -1165,13 +1165,12 @@ for (const product of candidateProducts) {
   }
 }
 
-const allSameBrand =
-  candidateProducts.length > 0 &&
-  candidateProducts.every(
-    (p) => String(p.brand_key || '') === String(candidateProducts[0].brand_key || ''),
-  );
-const listCap = allSameBrand
-  ? Math.min(60, candidateProducts.length)
+const brandKeysInList = [
+  ...new Set(candidateProducts.map((p) => String(p.brand_key || '').toLowerCase()).filter(Boolean)),
+];
+const singleBrandCatalog = brandKeysInList.length === 1;
+const listCap = singleBrandCatalog
+  ? Math.min(100, candidateProducts.length)
   : router.route_key === 'exact_product_quote'
     ? 4
     : 5;
@@ -1464,7 +1463,9 @@ const promptParts = [
   'Complementá con store.store_payment_methods solo para el relato de medios (Naranja, Macro, bancarizadas); no contradigas cuotas_qty ni los montos de candidate_products.',
   'No inventes disponibilidad, colores ni stock. Si el dato no está respaldado por candidate_products, decí que te lo consulten por catálogo o pedí una aclaración breve.',
   'Si listás productos, hacelo con un producto por línea y texto plano, sin markdown ni **. Cuando compartas varios modelos, dejá una línea en blanco entre uno y otro.',
+  'Si candidate_products trae un solo brand_key (toda la lista es la misma marca), quedate en esa marca: no ofrezcas iPhone u otras marcas salvo que el usuario pida explícitamente otra marca o una comparación.',
   'candidate_products es la única fuente de verdad para productos. No menciones marcas, categorías, modelos o precios que no estén ahí.',
+  'Plazos en cuotas: usá solo cuotas_qty y los montos bancarizada_* / macro_* del producto. Si cuotas_qty es 6, no hables de 12 cuotas como si fueran el plan de referencia; corregí al dato del producto.',
   'Si la consulta es amplia como "catálogo", "lista de precios" o "modelos", primero intentá acotarla por marca o categoría. Si candidate_products ya viene claramente filtrado, podés listar esos resultados sin inventar otros. Si candidate_products trae iPhone priorizados, respetá ese orden exacto.',
   'Los productos pueden incluir celulares, tablets y parlantes JBL.',
   'Plan canje, parte de pago, permuta, toma de usado o crédito personal: respondé claro que no lo aceptamos. No ofrezcas excepción, evaluación ni cotización del usado.',

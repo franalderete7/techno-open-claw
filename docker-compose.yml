@@ -21,14 +21,42 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    image: postgres:17
+    container_name: techno-open-claw-migrate
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./db/migrations:/migrations:ro
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        set -eu
+        until pg_isready -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+          sleep 2
+        done
+        for file in /migrations/*.sql; do
+          echo "Applying $(basename "$file")"
+          psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f "$file"
+        done
+
   api:
     build:
       context: ./apps/api
     container_name: techno-open-claw-api
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
