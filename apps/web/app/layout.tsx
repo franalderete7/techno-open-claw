@@ -45,7 +45,6 @@ const metaPixelId = process.env.META_PIXEL_ID?.trim() || "";
 const navItems = [
   ["Dashboard", "/"],
   ["Growth", "/growth"],
-  ["Reviews", "/reviews"],
   ["Products", "/products"],
   ["Stock", "/stock"],
   ["Purchases", "/purchases"],
@@ -107,7 +106,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 <span className="eyebrow">Open Claw</span>
                 <h1 className="wordmark">TechnoStore Ops</h1>
               </div>
-              <p className="masthead-meta">Catalog, growth, review QA, stock, customers, orders and workflows.</p>
+              <p className="masthead-meta">
+                Catalog, growth, stock, customers, orders and workflows. Conversation QA runs on the API and can notify you
+                via Telegram when configured.
+              </p>
             </header>
 
             <nav>

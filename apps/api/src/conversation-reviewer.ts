@@ -313,10 +313,25 @@ function buildConversationInput(conversation: ConversationRow, messages: Message
   };
 }
 
+function buildFallbackWorkflowContext(): WorkflowReviewContext {
+  const compactText = [
+    "Workflow JSONs (n8n v18) no están montados en este proceso: revisá sin el texto completo de los nodos.",
+    "Comportamiento esperable del bot TechnoStore v18: router → context builder con candidate_products del catálogo → sales/info responders → validator → state update.",
+    "Priorizá en la revisión: precios y cuotas alineados a datos del catálogo, sin inventar stock ni links, políticas (sin DNI, canje, etc.), tono y cierre.",
+  ].join("\n\n");
+
+  return {
+    repoDir: "(workflow files not mounted)",
+    repoCommitSha: null,
+    files: [],
+    compactText,
+  };
+}
+
 async function loadWorkflowReviewContext(): Promise<WorkflowReviewContext> {
   const repoDir = pickReviewRepoDir();
   if (!repoDir) {
-    throw new Error("Could not resolve conversation review repo dir with accessible v18 workflows.");
+    return buildFallbackWorkflowContext();
   }
 
   const files = await Promise.all(

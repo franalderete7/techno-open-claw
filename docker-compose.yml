@@ -67,12 +67,16 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       UPLOADS_DIR: ${UPLOADS_DIR}
       PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL}
+      # In-container repo root for n8n/v18/*.json (must match volume ./n8n → /app/review-repo/n8n)
+      CONVERSATION_REVIEW_REPO_DIR: /app/review-repo
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "${API_PORT:-4000}:4000"
     volumes:
       - ./data:/app/data
+      # Expose v18 workflow JSON to the API so conversation review can load prompts (read-only).
+      - ./n8n:/app/review-repo/n8n:ro
 
   web:
     build:

@@ -570,14 +570,45 @@ function inferColor(product: Pick<ProductRow, "title" | "description">) {
   return match ? match[1] : null;
 }
 
+function normalizeStorageValue(rawValue: number | null) {
+  if (!Number.isFinite(rawValue)) {
+    return null;
+  }
+
+  const value = Number(rawValue);
+  if (value >= 60 && value <= 70) return 64;
+  if (value >= 118 && value <= 138) return 128;
+  if (value >= 240 && value <= 270) return 256;
+  if (value >= 480 && value <= 540) return 512;
+  if (value >= 950 && value <= 1100) return 1024;
+  return null;
+}
+
+function extractStorageValueFromMessage(normalizedMessage: string) {
+  const exactMatch = normalizedMessage.match(/\b(64|128|256|512|1024)\b(?:\s*gb)?\b/);
+  if (exactMatch) {
+    return Number(exactMatch[1]);
+  }
+
+  const approximateMatch =
+    normalizedMessage.match(/\b(\d{2,4})\b(?=(?:\s*gb)?\s*(?:de\s+)?(?:memo\w*|almacen\w*|giga\w*|gb)\b)/i) ||
+    normalizedMessage.match(/(?:memo\w*|almacen\w*|giga\w*|gb)\s*(?:de\s*)?\b(\d{2,4})\b/i);
+
+  if (!approximateMatch) {
+    return null;
+  }
+
+  return normalizeStorageValue(Number(approximateMatch[1]));
+}
+
 function extractMessageBrandKeys(message: string) {
   const brandKeys = new Set<string>();
 
   if (/(^| )(iphone|apple|ipad|macbook)( |$)/.test(message)) brandKeys.add("apple");
   if (/(^| )(samsung|galaxy)( |$)/.test(message)) brandKeys.add("samsung");
   if (/(^| )(motorola|moto)( |$)/.test(message)) brandKeys.add("motorola");
-  if (/(^| )(xiaomi)( |$)/.test(message)) brandKeys.add("xiaomi");
-  if (/(^| )(redmi)( |$)/.test(message)) brandKeys.add("redmi");
+  if (/(^| )(xiaomi|xaomi|xiami)( |$)/.test(message)) brandKeys.add("xiaomi");
+  if (/(^| )(redmi|rexmi|redmy)( |$)/.test(message)) brandKeys.add("redmi");
   if (/(^| )(poco)( |$)/.test(message)) brandKeys.add("redmi");
   if (/(^| )(google|pixel)( |$)/.test(message)) brandKeys.add("google");
   if (/(^| )(jbl)( |$)/.test(message)) brandKeys.add("jbl");
@@ -633,10 +664,10 @@ function getMessageProductSignals(userMessage: string): MessageProductSignals {
   const brandKeys = extractMessageBrandKeys(normalizedMessage);
   const tierKey = extractMessageTierKey(normalizedMessage);
   const familyMatch = normalizedMessage.match(
-    /(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\s+([0-9]{1,3})/i
+    /(?:iphone|galaxy|redmi|rexmi|redmy|note|poco|moto|motorola|pixel|xiaomi|xaomi|xiami)\s+([0-9]{1,3})/i
   );
   const samsungSNumber = extractSamsungSNumberFromMessage(normalizedMessage);
-  const storageMatch = normalizedMessage.match(/\b(64|128|256|512|1024)\b(?:\s*gb)?\b/);
+  const storageValue = extractStorageValueFromMessage(normalizedMessage);
   const modelVariantMatch = normalizedMessage.match(
     /\b(?:a\d{1,3}|s\d{1,3}|g\d{1,3}|x\d{1,3}|z\s?flip\s?\d|z\s?fold\s?\d|edge\s?\d{1,3}|note\s?\d{1,3}|reno\s?\d{1,3}|find\s?x\d{1,2})\b/i
   );
@@ -653,13 +684,13 @@ function getMessageProductSignals(userMessage: string): MessageProductSignals {
     brandKeys,
     tierKey,
     familyNumber: Number.isFinite(familyNumber) ? familyNumber : null,
-    storageValue: storageMatch ? Number(storageMatch[1]) : null,
+    storageValue,
     modelVariantToken: modelVariantMatch ? normalizeText(modelVariantMatch[0]) : null,
     hasSpecificIntent:
       brandKeys.length > 0 &&
       (familyMatch != null ||
         samsungSNumber != null ||
-        storageMatch != null ||
+        storageValue != null ||
         tierKey != null ||
         modelVariantMatch != null),
   };

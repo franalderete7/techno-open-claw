@@ -861,8 +861,8 @@ const extractBrands = (text) => {
   if (/(^| )(iphone|apple|ipad|macbook)( |$)/.test(text)) brands.push('apple');
   if (/(^| )(samsung|galaxy)( |$)/.test(text)) brands.push('samsung');
   if (/(^| )(motorola|moto)( |$)/.test(text)) brands.push('motorola');
-  if (/(^| )(xiaomi)( |$)/.test(text)) brands.push('xiaomi');
-  if (/(^| )(redmi)( |$)/.test(text)) brands.push('redmi');
+  if (/(^| )(xiaomi|xaomi|xiami)( |$)/.test(text)) brands.push('xiaomi');
+  if (/(^| )(redmi|rexmi|redmy)( |$)/.test(text)) brands.push('redmi');
   if (/(^| )(poco)( |$)/.test(text)) brands.push('redmi');
   if (/(^| )(google|pixel)( |$)/.test(text)) brands.push('google');
   if (/(^| )(jbl)( |$)/.test(text)) brands.push('jbl');
@@ -885,14 +885,41 @@ const extractTier = (text) => {
   return null;
 };
 
+const normalizeStorageValue = (rawValue) => {
+  const value = Number(rawValue);
+  if (!Number.isFinite(value)) return null;
+  if (value >= 60 && value <= 70) return 64;
+  if (value >= 118 && value <= 138) return 128;
+  if (value >= 240 && value <= 270) return 256;
+  if (value >= 480 && value <= 540) return 512;
+  if (value >= 950 && value <= 1100) return 1024;
+  return null;
+};
+
+const extractStorageValue = (text) => {
+  const exactMatch = text.match(/\\b(64|128|256|512|1024)\\b(?:\\s*gb)?\\b/);
+  if (exactMatch) {
+    return Number(exactMatch[1]);
+  }
+
+  const approximateMatch =
+    text.match(/\\b(\\d{2,4})\\b(?=(?:\\s*gb)?\\s*(?:de\\s+)?(?:memo\\w*|almacen\\w*|giga\\w*|gb)\\b)/i) ||
+    text.match(/(?:memo\\w*|almacen\\w*|giga\\w*|gb)\\s*(?:de\\s*)?\\b(\\d{2,4})\\b/i);
+
+  if (!approximateMatch) {
+    return null;
+  }
+
+  return normalizeStorageValue(Number(approximateMatch[1]));
+};
+
 const looksLikeAppleKey = (value) => /(iphone|apple|ipad|macbook)/.test(String(value || '').toLowerCase());
 
 const brandKeys = extractBrands(normalized);
 const productTypeKeys = extractProductTypes(normalized);
 const tierKey = extractTier(normalized);
-const explicitFamilyMatch = normalized.match(/(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\\s+([0-9]{1,3})/i);
-const storageMatch = normalized.match(/\\b(64|128|256|512|1024)\\b(?:\\s*gb)?\\b/);
-const storageValue = storageMatch ? Number(storageMatch[1]) : null;
+const explicitFamilyMatch = normalized.match(/(?:iphone|galaxy|redmi|rexmi|redmy|note|poco|moto|motorola|pixel|xiaomi|xaomi|xiami)\\s+([0-9]{1,3})/i);
+const storageValue = extractStorageValue(normalized);
 const modelVariantMatch = normalized.match(/\\b(?:a\\d{1,3}|s\\d{1,3}|g\\d{1,3}|x\\d{1,3}|z\\s?flip\\s?\\d|z\\s?fold\\s?\\d|edge\\s?\\d{1,3}|note\\s?\\d{1,3}|reno\\s?\\d{1,3}|find\\s?x\\d{1,2})\\b/i);
 const hasModelVariantToken = Boolean(modelVariantMatch);
 const asksPriceDirectly = /(precio|cuanto sale|cu[aá]nto sale|valor|costo|cotizacion|cotizaci[oó]n)/.test(normalized);
@@ -1589,6 +1616,42 @@ const normalizeReplySpacing = (value) =>
     .replace(/\\n{3,}/g, '\\n\\n')
     .replace(/[ \\t]{2,}/g, ' ')
     .trim();
+const hasPositiveAmount = (value) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0;
+};
+const stripInstallmentMentions = (value) =>
+  normalizeReplySpacing(
+    String(value || '')
+      .replace(/(?:^|[.!?]\\s+|\\n+)[^.!?\\n]*\\b(?:cuota|cuotas|financi|bancarizada|macro|sin inter[eé]s)\\b[^.!?\\n]*[.!?]?/gi, ' ')
+      .replace(/\\n\\s*\\n/g, '\\n')
+  );
+const buildInstallmentSnippet = (product, includeTotals = false) => {
+  const cuotasQty = Number(product?.cuotas_qty);
+  if (!Number.isFinite(cuotasQty) || cuotasQty < 2) {
+    return null;
+  }
+
+  const options = [];
+
+  if (hasPositiveAmount(product?.bancarizada_cuota)) {
+    let line = cuotasQty + ' cuotas de ARS ' + formatArs(product.bancarizada_cuota) + ' con bancarizadas';
+    if (includeTotals && hasPositiveAmount(product?.bancarizada_total)) {
+      line += ' (total ARS ' + formatArs(product.bancarizada_total) + ')';
+    }
+    options.push(line);
+  }
+
+  if (hasPositiveAmount(product?.macro_cuota)) {
+    let line = cuotasQty + ' cuotas de ARS ' + formatArs(product.macro_cuota) + ' con Macro';
+    if (includeTotals && hasPositiveAmount(product?.macro_total)) {
+      line += ' (total ARS ' + formatArs(product.macro_total) + ')';
+    }
+    options.push(line);
+  }
+
+  return options.length > 0 ? options.join(' o ') : null;
+};
 const inferCatalogFamilyNumber = (product) => {
   const haystack = String([
     product?.brand_key || '',
@@ -1725,6 +1788,8 @@ const stateDelta = parsed?.state_delta && typeof parsed.state_delta === 'object'
 let replyText = normalizeReplySpacing(parsed?.reply_text || fallbackReply);
 
 const priceCandidates = Array.isArray(base.context?.candidate_products) ? base.context.candidate_products : [];
+const findCandidateByKey = (productKey) =>
+  priceCandidates.find((product) => String(product?.product_key || '') === String(productKey || ''));
 for (const product of priceCandidates) {
   for (const rawPrice of [product?.promo_price_ars, product?.price_ars]) {
     const numericPrice = Number(rawPrice);
@@ -1766,17 +1831,20 @@ if (base.router_output?.route_key === 'exact_product_quote') {
 }
 
 const asksFinancingIntent = /(cuota|cuotas|financi|tarjeta|bancarizada|macro|medio[s]? de pago|sin inter)/i.test(normalizedUserMessage);
-if (!asksFinancingIntent) {
-  replyText = replyText
-    .replace(/\\b(?:o|y)\\s+en\\s+\\d+\\s+cuotas?\\b[^.!?]*[.!?]?/gi, ' ')
-    .replace(/\\b(?:en|son|quedan|sale[n]?)\\s+\\d+\\s+cuotas?\\s+(?:de|sin|con)\\b[^.!?]*[.!?]?/gi, ' ')
-    .replace(/\\b\\d+\\s+cuotas?\\s+sin\\s+inter[eé]s[^.!?]*[.!?]?/gi, ' ')
-    .replace(/\\b\\d+\\s+cuotas?\\s+de\\s+ARS[^.!?]*[.!?]?/gi, ' ')
-    .replace(/\\bcuotas?\\s+sin\\s+inter[eé]s\\b[^.!?]*[.!?]?/gi, ' ')
-    .replace(/\\s{2,}/g, ' ')
-    .replace(/\\s+([.,!?])/g, '$1')
-    .trim();
-  replyText = normalizeReplySpacing(replyText);
+const asksTotalFinanced = /(total financiado|total en cuotas|precio final en cuotas|cu[aá]nto sale financiado en total)/i.test(normalizedUserMessage);
+const primaryFinancingProduct =
+  selectedProductKeys.map(findCandidateByKey).find(Boolean) ||
+  (base.router_output?.route_key === 'exact_product_quote' ? fallbackExactCandidate : (priceCandidates.length === 1 ? priceCandidates[0] : null));
+
+if (asksFinancingIntent && primaryFinancingProduct) {
+  const installmentSnippet = buildInstallmentSnippet(primaryFinancingProduct, asksTotalFinanced);
+  if (installmentSnippet) {
+    const cleanedReply = stripInstallmentMentions(replyText);
+    const prefix = cleanedReply ? (/[.!?]$/.test(cleanedReply) ? ' ' : '. ') : '';
+    replyText = normalizeReplySpacing(cleanedReply + prefix + 'Cuotas presenciales: ' + installmentSnippet + '.');
+  }
+} else if (!asksFinancingIntent) {
+  replyText = stripInstallmentMentions(replyText);
 }
 
 return [{

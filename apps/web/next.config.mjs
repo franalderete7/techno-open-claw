@@ -21,6 +21,12 @@ for (const envPath of envCandidates) {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  async redirects() {
+    return [
+      { source: "/reviews", destination: "/", permanent: false },
+      { source: "/reviews/:path*", destination: "/", permanent: false },
+    ];
+  },
   async rewrites() {
     return [
       {
