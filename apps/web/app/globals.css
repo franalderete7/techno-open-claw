@@ -2980,6 +2980,22 @@ nav a:hover {
   font-size: 0.88em;
 }
 
+.reviews-success-banner {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 0.5px solid rgba(98, 144, 73, 0.35);
+  background: rgba(98, 144, 73, 0.1);
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.reviews-detail-sub {
+  margin: 4px 0 0;
+  font-size: 0.88rem;
+}
+
 .reviews-cta-panel {
   display: grid;
   gap: 14px;

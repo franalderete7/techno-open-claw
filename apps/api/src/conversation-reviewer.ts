@@ -168,6 +168,12 @@ function isReviewerEnabled() {
   return config.CONVERSATION_REVIEW_ENABLED;
 }
 
+/** Manual runs from the admin UI / API (`manual_api`, `manual_selection`) work without the cron flag. */
+function isManualReviewTrigger(options: RunOptions) {
+  const t = options.triggeredBy ?? "";
+  return t === "manual_api" || t === "manual_selection";
+}
+
 function reviewerModelLabel() {
   const override = config.OLLAMA_REVIEW_MODEL.trim();
   const main = config.OLLAMA_MODEL.trim();
@@ -923,7 +929,7 @@ async function deliverBatchToTelegram(summaryText: string, logger: LoggerLike) {
 }
 
 export async function runConversationReviewCycle(logger: LoggerLike, options: RunOptions = {}): Promise<RunResult> {
-  if (!isReviewerEnabled()) {
+  if (!isReviewerEnabled() && !isManualReviewTrigger(options)) {
     return { status: "disabled", reason: "conversation_reviewer_not_configured" };
   }
 
