@@ -3483,7 +3483,7 @@ nav a:hover {
   justify-content: space-between;
   width: 100%;
   gap: 28px;
-  animation: apple-marquee-drift 7s ease-in-out infinite alternate;
+  animation: apple-marquee-drift 5.4s ease-in-out infinite alternate;
   will-change: transform;
 }
 
@@ -3714,6 +3714,16 @@ nav a:hover {
   color: var(--apple-soft);
   padding: 10px 16px;
   font-size: 0.88rem;
+}
+
+.apple-card-support {
+  width: 100%;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.82rem;
+  padding: 9px 14px;
 }
 
 .apple-product-card::after,
@@ -4525,10 +4535,12 @@ nav a:hover {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
   overflow: hidden;
+  transition: background 220ms ease, transform 220ms ease;
 }
 
 .apple-purchase-process-progress-segment.is-active {
   background: linear-gradient(90deg, rgba(37, 211, 102, 0.95), rgba(127, 235, 169, 0.55));
+  transform: scaleX(1.01);
 }
 
 .apple-purchase-process-body {
@@ -4557,7 +4569,7 @@ nav a:hover {
   display: grid;
   gap: 14px;
   align-content: start;
-  animation: apple-purchase-stage-surface-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: apple-purchase-stage-surface-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4569,12 +4581,12 @@ nav a:hover {
 @keyframes apple-purchase-stage-surface-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 8px, 0);
+    transform: translate3d(0, 10px, 0) scale(0.985);
   }
 
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
@@ -4649,13 +4661,14 @@ nav a:hover {
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.03);
   color: var(--apple-soft);
-  transition: border-color 200ms ease, box-shadow 200ms ease, background 200ms ease, opacity 200ms ease;
+  transition: border-color 200ms ease, box-shadow 200ms ease, background 200ms ease, opacity 200ms ease, transform 200ms ease;
 }
 
 .apple-purchase-process-step.is-active {
   border-color: rgba(37, 211, 102, 0.24);
   background: linear-gradient(180deg, rgba(37, 211, 102, 0.09), rgba(255, 255, 255, 0.04));
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.18);
+  transform: translateY(-1px);
 }
 
 .apple-purchase-process-step-top {
@@ -4693,6 +4706,11 @@ nav a:hover {
 
 .apple-purchase-process-step:not(.is-active) strong {
   color: rgba(244, 246, 251, 0.82);
+}
+
+.apple-purchase-process-step:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
 }
 
 .apple-storefront-footer {
@@ -4841,6 +4859,11 @@ nav a:hover {
     padding: 11px 0;
     font-size: 0.66rem;
     letter-spacing: 0.04em;
+  }
+
+  .apple-card-support {
+    font-size: 0.78rem;
+    padding: 8px 12px;
   }
 
   .apple-hero-copy,
