@@ -44,10 +44,14 @@ type ProductRow = {
   currency_code: string;
   active: boolean;
   in_stock: boolean;
+  delivery_type: string | null;
   delivery_days: number | null;
   image_url: string | null;
   color: string | null;
+  ram_gb: number | null;
   storage_gb: number | null;
+  network: string | null;
+  battery_health: string | null;
   created_at: string;
   updated_at: string;
   in_stock_units: number;
@@ -60,16 +64,23 @@ type CandidateProduct = {
   score: number;
   product_id: number;
   product_key: string;
+  slug: string;
+  model: string;
   product_name: string;
+  description: string | null;
   product_url: string | null;
   brand_key: string;
   category: string | null;
   condition: string;
   storage_gb: number | null;
+  ram_gb: number | null;
   color: string | null;
   in_stock: boolean;
   in_stock_units: number;
+  delivery_type: string | null;
   delivery_days: number | null;
+  network: string | null;
+  battery_health: string | null;
   price_ars: number | null;
   promo_price_ars: number | null;
   price_usd: number | null;
@@ -1395,10 +1406,14 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           p.currency_code,
           p.active,
           p.in_stock,
+          p.delivery_type,
           p.delivery_days,
           p.image_url,
           p.color,
+          p.ram_gb,
           p.storage_gb,
+          p.network,
+          p.battery_health,
           p.created_at,
           p.updated_at,
           coalesce(inv.in_stock_units, 0) as in_stock_units,
@@ -1445,16 +1460,23 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           score: scoreCandidate(product, retrievalScoringText) + currentIntentAdjustment + interestedProductBoost,
           product_id: product.id,
           product_key: product.sku,
+          slug: product.slug,
+          model: product.model,
           product_name: product.title,
+          description: product.description,
           product_url: null,
           brand_key: normalizeBrandKey(product.brand),
           category: product.category,
           condition: product.condition,
           storage_gb: product.storage_gb ?? inferStorageGb(product),
+          ram_gb: product.ram_gb,
           color: product.color ?? inferColor(product),
           in_stock: product.in_stock,
           in_stock_units: product.in_stock_units,
+          delivery_type: product.delivery_type,
           delivery_days: product.delivery_days,
+          network: product.network,
+          battery_health: product.battery_health,
           price_ars: product.price_amount == null ? null : Number(product.price_amount),
           promo_price_ars: product.promo_price_ars == null ? null : Number(product.promo_price_ars),
           price_usd: product.price_usd == null ? null : Number(product.price_usd),
