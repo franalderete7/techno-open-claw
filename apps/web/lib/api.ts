@@ -35,11 +35,17 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     headers,
   });
 
+  const text = await response.text();
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+    const hint = text.trim().slice(0, 500) || response.statusText;
+    throw new Error(`API ${response.status} ${path}: ${hint}`);
   }
 
-  return (await response.json()) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`API devolvió respuesta no-JSON (${path}). ¿INTERNAL_API_BASE_URL apunta al OpenClaw API?`);
+  }
 }
 
 async function apiFetch<T>(path: string): Promise<T> {
