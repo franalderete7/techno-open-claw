@@ -334,18 +334,6 @@ export function AppleStorefrontCatalog({ store, products }: AppleStorefrontCatal
       </section>
 
       <section className="apple-catalog-shell" id="modelos">
-        <div className="apple-catalog-intro">
-          <div>
-            <span className="apple-hero-kicker">Modelos listos para comparar</span>
-            <h2 className="apple-catalog-title">Elegí el iPhone que mejor te cierre hoy.</h2>
-            <p className="apple-catalog-copy">Compará rápido, mirá cuotas y abrí WhatsApp con el modelo ya cargado.</p>
-          </div>
-          <div className="apple-catalog-summary">
-            <span>{filteredProducts.length} equipos con tus filtros</span>
-            <span>{catalogStats.inStockProducts} listos para entrega rápida</span>
-          </div>
-        </div>
-
         {pagedProducts.length === 0 ? (
           <div className="apple-empty-state">
             <h3>No encontramos equipos con esos filtros.</h3>

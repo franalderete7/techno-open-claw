@@ -4955,15 +4955,17 @@ nav a:hover {
   .apple-storefront-nav {
     align-items: center;
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: space-between;
     gap: 10px;
     padding-inline: 0;
   }
 
   .apple-storefront-nav-links {
-    width: 100%;
-    justify-content: flex-start;
+    width: auto;
+    flex: 0 0 auto;
+    margin-left: auto;
+    justify-content: flex-end;
   }
 
   .apple-storefront-brand {
