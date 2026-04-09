@@ -582,6 +582,41 @@ function extractMessageTierKey(message: string) {
   return null;
 }
 
+function extractSamsungSNumberFromMessage(normalizedMessage: string): number | null {
+  if (!/(samsung|galaxy)/.test(normalizedMessage)) {
+    return null;
+  }
+
+  const direct = normalizedMessage.match(/\bsamsung(?:\s+galaxy)?\s+s\s*(\d{1,2})\b/i);
+  if (direct) {
+    const n = Number(direct[1]);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const galaxyS = normalizedMessage.match(/\bgalaxy\s+s\s*(\d{1,2})\b/i);
+  if (galaxyS) {
+    const n = Number(galaxyS[1]);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const sLine = normalizedMessage.match(/\bs\s*(\d{1,2})\s*(?:ultra|plus|fe|edge|pro(?:\s+max)?)\b/i);
+  if (sLine) {
+    const n = Number(sLine[1]);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  return null;
+}
+
+function extractSamsungSNumberFromHaystack(haystack: string): number | null {
+  const m = haystack.match(/\bs\s*(\d{1,2})\b/);
+  if (!m) {
+    return null;
+  }
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
 function getMessageProductSignals(userMessage: string): MessageProductSignals {
   const normalizedMessage = normalizeText(userMessage);
   const brandKeys = extractMessageBrandKeys(normalizedMessage);
@@ -589,21 +624,33 @@ function getMessageProductSignals(userMessage: string): MessageProductSignals {
   const familyMatch = normalizedMessage.match(
     /(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\s+([0-9]{1,3})/i
   );
+  const samsungSNumber = extractSamsungSNumberFromMessage(normalizedMessage);
   const storageMatch = normalizedMessage.match(/\b(64|128|256|512|1024)\b(?:\s*gb)?\b/);
   const modelVariantMatch = normalizedMessage.match(
     /\b(?:a\d{1,3}|s\d{1,3}|g\d{1,3}|x\d{1,3}|z\s?flip\s?\d|z\s?fold\s?\d|edge\s?\d{1,3}|note\s?\d{1,3}|reno\s?\d{1,3}|find\s?x\d{1,2})\b/i
   );
 
+  const familyNumber =
+    familyMatch != null
+      ? Number(familyMatch[1])
+      : brandKeys.includes("samsung") && samsungSNumber != null
+        ? samsungSNumber
+        : null;
+
   return {
     normalizedMessage,
     brandKeys,
     tierKey,
-    familyNumber: familyMatch ? Number(familyMatch[1]) : null,
+    familyNumber: Number.isFinite(familyNumber) ? familyNumber : null,
     storageValue: storageMatch ? Number(storageMatch[1]) : null,
     modelVariantToken: modelVariantMatch ? normalizeText(modelVariantMatch[0]) : null,
     hasSpecificIntent:
       brandKeys.length > 0 &&
-      (familyMatch != null || storageMatch != null || tierKey != null || modelVariantMatch != null),
+      (familyMatch != null ||
+        samsungSNumber != null ||
+        storageMatch != null ||
+        tierKey != null ||
+        modelVariantMatch != null),
   };
 }
 
@@ -651,11 +698,56 @@ function computeCurrentIntentAdjustment(product: ProductRow, signals: MessagePro
   }
 
   if (signals.familyNumber != null) {
-    adjustment += new RegExp(`(?:^|\\s)${signals.familyNumber}(?:\\s|$)`).test(haystack) ? 10 : -12;
+    const productSamsungS = extractSamsungSNumberFromHaystack(haystack);
+    if (signals.brandKeys.includes("samsung") && productSamsungS != null) {
+      const tierPatterns: Record<string, RegExp> = {
+        pro_max: /\bpro max\b|\bpromax\b/,
+        ultra: /\bultra\b/,
+        pro: /\bpro\b/,
+        plus: /\bplus\b/,
+      };
+      const tierMatches =
+        signals.tierKey == null ? true : (tierPatterns[signals.tierKey]?.test(haystack) ?? false);
+      if (productSamsungS === signals.familyNumber && tierMatches) {
+        adjustment += 10;
+      } else if (
+        Math.abs(productSamsungS - signals.familyNumber) === 1 &&
+        signals.tierKey != null &&
+        tierMatches &&
+        (tierPatterns[signals.tierKey]?.test(signals.normalizedMessage) ?? false)
+      ) {
+        adjustment += 8;
+      } else {
+        adjustment += -12;
+      }
+    } else {
+      adjustment += new RegExp(`(?:^|\\s)${signals.familyNumber}(?:\\s|$)`).test(haystack) ? 10 : -12;
+    }
   }
 
   if (signals.modelVariantToken) {
-    adjustment += haystack.includes(signals.modelVariantToken) ? 12 : -14;
+    if (haystack.includes(signals.modelVariantToken)) {
+      adjustment += 12;
+    } else {
+      const m = signals.modelVariantToken.match(/^s(\d{1,2})$/i);
+      const productS = extractSamsungSNumberFromHaystack(haystack);
+      const tierPatterns: Record<string, RegExp> = {
+        pro_max: /\bpro max\b|\bpromax\b/,
+        ultra: /\bultra\b/,
+        pro: /\bpro\b/,
+        plus: /\bplus\b/,
+      };
+      const samsungGenerationalSubstitute =
+        signals.brandKeys.includes("samsung") &&
+        m &&
+        productS != null &&
+        Math.abs(Number(m[1]) - productS) === 1 &&
+        signals.tierKey != null &&
+        (tierPatterns[signals.tierKey]?.test(haystack) ?? false) &&
+        (tierPatterns[signals.tierKey]?.test(signals.normalizedMessage) ?? false);
+
+      adjustment += samsungGenerationalSubstitute ? 0 : -14;
+    }
   }
 
   if (signals.tierKey) {
@@ -678,6 +770,42 @@ function computeCurrentIntentAdjustment(product: ProductRow, signals: MessagePro
   }
 
   return adjustment;
+}
+
+function buildRetrievalScoringText(
+  userMessage: string,
+  recentMessages: Array<{ direction: string; text_body: string | null; transcript: string | null }>
+) {
+  const chronological = [...recentMessages].reverse();
+  const inboundTexts = chronological
+    .filter((m) => m.direction === "inbound")
+    .map((m) => String(m.text_body ?? m.transcript ?? "").trim())
+    .filter(Boolean);
+
+  const um = userMessage.trim();
+  if (um && inboundTexts[inboundTexts.length - 1] !== um) {
+    inboundTexts.push(um);
+  }
+
+  let combined = inboundTexts.join(" ");
+  if (!combined) {
+    combined = um;
+  }
+
+  const MAX = 6000;
+  return combined.length > MAX ? combined.slice(0, MAX) : combined;
+}
+
+function candidateMatchesRetrievalBrandKeys(
+  candidate: { brand_key: string; category: string | null; product_name: string; product_key: string },
+  brandKeys: string[]
+) {
+  if (brandKeys.length === 0) {
+    return true;
+  }
+
+  const haystack = normalizeText(`${candidate.brand_key} ${candidate.category ?? ""} ${candidate.product_name} ${candidate.product_key}`);
+  return brandKeys.some((brandKey) => brandKeyMatchesText(brandKey, haystack));
 }
 
 function scoreCandidate(product: ProductRow, userMessage: string) {
@@ -1233,14 +1361,15 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     );
 
     const interestedProductKey = customerState.interestedProduct?.trim().toLowerCase() || null;
-    const currentProductSignals = getMessageProductSignals(userMessage);
+    const retrievalScoringText = buildRetrievalScoringText(userMessage, recentMessages);
+    const currentProductSignals = getMessageProductSignals(retrievalScoringText);
     const usedIphoneCandidates: UsedIphoneCandidate[] = selectUsedIphoneCandidates({
-      userMessage,
+      userMessage: retrievalScoringText,
       customerState,
       limit: Math.min(6, candidateLimit),
     });
 
-    const rankedCandidateProducts = productRows
+    let rankedCandidateProducts = productRows
       .filter((product) => !isDisallowedWorkflowProduct(product))
       .map((product) => {
         const productKey = product.sku.trim().toLowerCase();
@@ -1254,7 +1383,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
             : 0;
 
         return {
-          score: scoreCandidate(product, userMessage) + currentIntentAdjustment + interestedProductBoost,
+          score: scoreCandidate(product, retrievalScoringText) + currentIntentAdjustment + interestedProductBoost,
           product_id: product.id,
           product_key: product.sku,
           product_name: product.title,
@@ -1287,6 +1416,15 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         if (Number(right.in_stock) !== Number(left.in_stock)) return Number(right.in_stock) - Number(left.in_stock);
         return 0;
       });
+
+    if (currentProductSignals.brandKeys.length > 0) {
+      const brandFiltered = rankedCandidateProducts.filter((candidate) =>
+        candidateMatchesRetrievalBrandKeys(candidate, currentProductSignals.brandKeys)
+      );
+      if (brandFiltered.length > 0) {
+        rankedCandidateProducts = brandFiltered;
+      }
+    }
 
     const shouldPrioritizeBroadBrandCatalog =
       currentProductSignals.brandKeys.length === 1 && !currentProductSignals.hasSpecificIntent;

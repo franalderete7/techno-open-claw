@@ -1096,27 +1096,33 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
     return;
   }
 
-  const groqNode =
+  const openAiNode =
+    (workflow.nodes ?? []).find((entry) => entry?.name === "OpenAI Chat Model") ||
     (workflow.nodes ?? []).find((entry) => entry?.name === "Groq Chat Model") ||
     (workflow.nodes ?? []).find((entry) => entry?.name === "Google Gemini Chat Model");
 
-  if (groqNode) {
-    groqNode.name = "Groq Chat Model";
-    groqNode.type = "@n8n/n8n-nodes-langchain.lmChatGroq";
-    groqNode.typeVersion = 1;
-    groqNode.parameters = {
-      model: '={{ $json.responder_model_name || "qwen/qwen3-32b" }}',
+  if (openAiNode) {
+    openAiNode.name = "OpenAI Chat Model";
+    openAiNode.type = "@n8n/n8n-nodes-langchain.lmChatOpenAi";
+    openAiNode.typeVersion = 1;
+    openAiNode.parameters = {
+      model: '={{ $json.responder_model_name || "gpt-5.4-mini" }}',
       options: {},
     };
-    groqNode.credentials = {
-      groqApi: {
-        name: "Groq account",
+    openAiNode.credentials = {
+      openAiApi: {
+        name: "OpenAI account",
       },
     };
   }
 
+  if (workflow.connections?.["Groq Chat Model"]) {
+    workflow.connections["OpenAI Chat Model"] = workflow.connections["Groq Chat Model"];
+    delete workflow.connections["Groq Chat Model"];
+  }
+
   if (workflow.connections?.["Google Gemini Chat Model"]) {
-    workflow.connections["Groq Chat Model"] = workflow.connections["Google Gemini Chat Model"];
+    workflow.connections["OpenAI Chat Model"] = workflow.connections["Google Gemini Chat Model"];
     delete workflow.connections["Google Gemini Chat Model"];
   }
 
@@ -1197,7 +1203,15 @@ const promptPayload = {
   candidate_products: curatedCandidates,
 };
 
-const userNorm = String(data.user_message || '')
+const mergedThreadForNorm = recentThread
+  .filter((entry) => entry.role === 'user')
+  .map((entry) => String(entry.message || '').trim())
+  .filter(Boolean)
+  .concat([String(data.user_message || '').trim()])
+  .join(' ')
+  .trim();
+
+const userNorm = String(mergedThreadForNorm || data.user_message || '')
   .toLowerCase()
   .normalize('NFD')
   .replace(/[\\u0300-\\u036f]/g, '')
@@ -1423,6 +1437,7 @@ const promptParts = [
   'Usá recent_thread y focused_product_key para sostener el contexto del hilo.',
   'Si el usuario hace referencia a "ese", "el anterior", "y en cuotas?", "y la entrega?" o similares, continuá sobre el último producto relevante del hilo.',
   'Si el usuario nombra un modelo concreto y ese equipo (o esa variante memoria/color) no está en candidate_products, decilo en una frase y ofrecé de inmediato alternativas reales del mismo listado: priorizá misma marca y precio cercano; si no hay de la marca, explicá brevemente por qué otra opción del listado podría servir. Tono consultivo, sin presión. Si candidate_products está vacío, usá store.store_website_url sin inventar SKUs.',
+  'Si en candidate_products hay un modelo de la misma marca y misma gama (por ejemplo otra generación S Ultra o otra memoria) que sirve como reemplazo, presentalo como alternativa real: no digas que el producto pedido "no figura en el catálogo de este turno" si ya estás ofreciendo un equipo sustituto que sí está en la lista. Reservá "no figura en este turno" para cuando no haya ningún sustituto razonable en candidate_products.',
   'Formateá todos los precios en ARS con separadores argentinos, por ejemplo ARS 1.165.080.',
   'Los precios en candidate_products son de contado o promo final; esos datos no incluyen cuota mensual, cantidad de cuotas ni tasa de interés.',
   'No calcules ni menciones montos por cuota dividiendo el precio. No digas sin interés ni promos bancarias inventadas.',
@@ -1489,7 +1504,7 @@ const prompt = promptParts.join('\\n\\n');
 return [{
   json: {
     ...data,
-    responder_model_name: String($env.GROQ_MODEL_SALES || 'qwen/qwen3-32b'),
+    responder_model_name: String($env.OPENAI_MODEL_SALES || 'gpt-5.4-mini'),
     chatInput: prompt,
   }
 }];`
@@ -1745,8 +1760,8 @@ return [{
       actions,
       state_delta: stateDelta,
     },
-    responder_provider_name: 'groq',
-    responder_model_name: base.responder_model_name || 'qwen/qwen3-32b',
+    responder_provider_name: 'openai',
+    responder_model_name: base.responder_model_name || 'gpt-5.4-mini',
     responder_raw_text: rawText,
   }
 }];`

@@ -30,14 +30,14 @@ This is the safest migration path because the existing workflow logic stays inta
   Example: `http://api:4000`
 - `OPENCLAW_API_TOKEN`
   Example: your API bearer token
-- `GROQ_MODEL_SALES`
-  Example: `llama3-8b-8192`
+- `OPENAI_MODEL_SALES`
+  Example: `gpt-5.4-mini`
 
 ## Required n8n credentials
 
 - `ManyChat API`
 - `Groq Whisper`
-- `Groq account` chat model credential used by the sales responder
+- `OpenAI account` chat model credential used by the sales responder
 
 ## Import order
 
