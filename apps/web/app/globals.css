@@ -3646,9 +3646,9 @@ nav a:hover {
   width: 100%;
   min-width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(280px, 1.08fr);
+  grid-template-columns: minmax(0, 0.88fr) minmax(320px, 1.12fr);
   align-items: center;
-  gap: 12px;
+  gap: clamp(24px, 4vw, 56px);
   padding: clamp(24px, 4vw, 44px);
 }
 
@@ -3657,6 +3657,9 @@ nav a:hover {
   gap: 14px;
   align-content: center;
   min-width: 0;
+  padding-left: clamp(12px, 2vw, 38px);
+  padding-right: clamp(12px, 1.6vw, 24px);
+  max-width: 560px;
 }
 
 .apple-hero-slide-kicker {
@@ -3726,6 +3729,7 @@ nav a:hover {
   display: grid;
   place-items: center;
   min-height: clamp(260px, 42vw, 480px);
+  padding-right: clamp(8px, 1vw, 18px);
 }
 
 .apple-hero-slide-visual::before {
@@ -3762,7 +3766,7 @@ nav a:hover {
   display: flex;
   justify-content: space-between;
   width: 100%;
-  padding: 0 12px;
+  padding: 0 18px;
   pointer-events: none;
 }
 
@@ -5103,6 +5107,12 @@ nav a:hover {
     padding: 20px 20px 54px;
   }
 
+  .apple-hero-slide-copy {
+    padding-left: 0;
+    padding-right: 0;
+    max-width: none;
+  }
+
   .apple-hero-slide-title {
     max-width: none;
   }
@@ -5110,6 +5120,7 @@ nav a:hover {
   .apple-hero-slide-visual {
     order: -1;
     min-height: 220px;
+    padding-right: 0;
   }
 
   .apple-hero-slide-image {
