@@ -76,7 +76,7 @@ export function ApplePurchaseProcess({ variant = "hero", inStock = true, deliver
 
     const timer = window.setInterval(() => {
       setActiveStep((current) => (current + 1) % steps.length);
-    }, 2200);
+    }, 3200);
 
     return () => window.clearInterval(timer);
   }, [steps]);
@@ -118,16 +118,13 @@ export function ApplePurchaseProcess({ variant = "hero", inStock = true, deliver
       <div className="apple-purchase-process-body">
         <article className="apple-purchase-process-stage">
           <div className="apple-purchase-process-stage-glow" aria-hidden="true" />
-          <div
-            key={`${mode}-${activeStep}`}
-            className="apple-purchase-process-stage-surface"
-          >
-            <div className="apple-purchase-process-stage-top">
+          <div key={`${mode}-${activeStep}`} className="apple-purchase-process-stage-surface">
+            <div className="apple-purchase-process-stage-top apple-purchase-process-stage-line apple-purchase-process-stage-line--1">
               <span>{activeStep + 1}</span>
               <small>{activeStepData.label}</small>
             </div>
-            <strong>{activeStepData.title}</strong>
-            <p>{activeStepData.body}</p>
+            <strong className="apple-purchase-process-stage-line apple-purchase-process-stage-line--2">{activeStepData.title}</strong>
+            <p className="apple-purchase-process-stage-line apple-purchase-process-stage-line--3">{activeStepData.body}</p>
           </div>
         </article>
 

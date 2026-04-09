@@ -3476,6 +3476,8 @@ nav a:hover {
 .apple-announcement-marquee {
   overflow: hidden;
   width: 100%;
+  /* Seamless loop needs a fixed gap token: half of translate(-50%) must equal one full period */
+  --apple-announcement-gap: clamp(28px, 5vw, 52px);
 }
 
 .apple-announcement-marquee-track {
@@ -3484,9 +3486,20 @@ nav a:hover {
   flex-wrap: nowrap;
   align-items: center;
   width: max-content;
-  gap: clamp(28px, 5vw, 52px);
-  animation: apple-announcement-marquee-scroll 12s linear infinite;
+  animation: apple-announcement-marquee-scroll 17s linear infinite;
   will-change: transform;
+}
+
+/* One group = phrases + internal gaps + trailing gap before the duplicate (exact loop period) */
+.apple-announcement-marquee-group {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: var(--apple-announcement-gap);
+  padding-right: var(--apple-announcement-gap);
+  box-sizing: content-box;
 }
 
 .apple-announcement-message {
@@ -3508,13 +3521,23 @@ nav a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .apple-announcement-marquee {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .apple-announcement-marquee::-webkit-scrollbar {
+    display: none;
+  }
+
   .apple-announcement-marquee-track {
     animation: none;
     width: max-content;
     margin-inline: auto;
   }
 
-  .apple-announcement-message--repeat {
+  .apple-announcement-marquee-group--repeat {
     display: none;
   }
 }
@@ -4554,7 +4577,6 @@ nav a:hover {
 
 .apple-purchase-process-progress-segment.is-active {
   background: linear-gradient(90deg, rgba(37, 211, 102, 0.95), rgba(127, 235, 169, 0.55));
-  transform: scaleX(1.01);
 }
 
 .apple-purchase-process-body {
@@ -4583,24 +4605,42 @@ nav a:hover {
   display: grid;
   gap: 14px;
   align-content: start;
-  animation: apple-purchase-stage-surface-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Staggered fade / lift (no scale — avoids “breathing” layout) */
+.apple-purchase-process-stage-line {
+  opacity: 0;
+  animation: apple-purchase-stage-line-in 0.48s cubic-bezier(0.33, 1, 0.68, 1) forwards;
+}
+
+.apple-purchase-process-stage-line--1 {
+  animation-delay: 0ms;
+}
+
+.apple-purchase-process-stage-line--2 {
+  animation-delay: 0.06s;
+}
+
+.apple-purchase-process-stage-line--3 {
+  animation-delay: 0.12s;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .apple-purchase-process-stage-surface {
+  .apple-purchase-process-stage-line {
     animation: none;
+    opacity: 1;
   }
 }
 
-@keyframes apple-purchase-stage-surface-in {
+@keyframes apple-purchase-stage-line-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.985);
+    transform: translate3d(0, 12px, 0);
   }
 
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: translate3d(0, 0, 0);
   }
 }
 
