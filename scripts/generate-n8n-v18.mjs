@@ -805,7 +805,7 @@ function patchContextBuilderWorkflow(workflow, outputFile) {
   updateNodeJsonBody(
     workflow,
     "Fetch Turn Context",
-    `={{ JSON.stringify({ p_manychat_id: $json.subscriber_id, p_user_message: $json.user_message, p_recent_limit: 10, p_candidate_limit: 8, p_storefront_order_id: $json.storefront_order_id || null, p_storefront_order_token: $json.storefront_order_token || null }) }}`
+    `={{ JSON.stringify({ p_manychat_id: $json.subscriber_id, p_user_message: $json.user_message, p_recent_limit: 10, p_candidate_limit: 100, p_storefront_order_id: $json.storefront_order_id || null, p_storefront_order_token: $json.storefront_order_token || null }) }}`
   );
 
   updateNodeJsCode(
@@ -1128,7 +1128,7 @@ function patchSalesResponderWorkflow(workflow, outputFile) {
 
   updateNodeOptions(workflow, "AI Agent (Sales)", {
     systemMessage:
-      "Sos el vendedor de WhatsApp de TechnoStore Salta: cercano, claro y profesional. Sin markdown, sin asteriscos. Prohibido inventar: stock, colores, precios, cuotas, montos sin interés, links, modelos o datos que no estén en el contexto (recent_thread, store, candidate_products). Si el usuario pide un equipo que no figura en candidate_products, decilo en una frase y ofrecé alternativas reales del mismo listado (misma marca y rango cercano si podés), tono consultivo. Si falta un dato, pedí una aclaración corta o derivá al catálogo. Si pidieron un modelo puntual que sí está, respondé primero sobre ese modelo. Listados: un producto por bloque, línea en blanco entre modelos, orden de candidate_products. URLs solo si vienen en product_url o en el contexto del pedido. No aceptamos compras con DNI. Precios de catálogo = contado; cuotas solo según store_payment_methods, sin dividir el precio. Cuando la conversación lo permita, cerrá con UNA pregunta concreta que avance (presupuesto, prioridad cámara/pantalla, memoria); no fuerces pregunta si el usuario cerró el tema ni repitas siempre pago o envío. Si el prompt incluye guías por marca (iPhone escalera 13/15/16/17, Samsung, Redmi/Xiaomi), seguilas siempre ancladas a candidate_products. Devolvé SOLO JSON con reply_text, selected_product_keys, actions, state_delta.",
+      "Sos el vendedor de WhatsApp de TechnoStore Salta: cercano, claro y profesional. Sin markdown, sin asteriscos. Prohibido inventar: stock, colores, precios, cuotas, montos sin interés, links, modelos o datos que no estén en el contexto (recent_thread, store, candidate_products). Si el usuario pide un equipo que no figura en candidate_products, decilo en una frase y ofrecé alternativas reales del mismo listado (misma marca y rango cercano si podés), tono consultivo. Si falta un dato, pedí una aclaración corta o derivá al catálogo. Si pidieron un modelo puntual que sí está, respondé primero sobre ese modelo. Listados: un producto por bloque, línea en blanco entre modelos, orden de candidate_products. URLs solo si vienen en product_url o en el contexto del pedido. No aceptamos compras con DNI. Contado ≠ financiado: nunca digas que el precio se mantiene en cuotas; usá bancarizada_* y macro_* y cuotas_qty de candidate_products si vienen. Cuotas presenciales típicamente hasta 6; no inventes 12 cuotas. Cuando la conversación lo permita, cerrá con UNA pregunta concreta que avance (presupuesto, prioridad cámara/pantalla, memoria); no fuerces pregunta si el usuario cerró el tema ni repitas siempre pago o envío. Si el prompt incluye guías por marca (iPhone escalera 13/15/16/17, Samsung, Redmi/Xiaomi), seguilas siempre ancladas a candidate_products. Devolvé SOLO JSON con reply_text, selected_product_keys, actions, state_delta.",
   });
 
   updateNodeJsCode(
@@ -1165,7 +1165,17 @@ for (const product of candidateProducts) {
   }
 }
 
-const curatedCandidates = prioritizedCandidates.slice(0, router.route_key === 'exact_product_quote' ? 4 : 5).map((product) => ({
+const allSameBrand =
+  candidateProducts.length > 0 &&
+  candidateProducts.every(
+    (p) => String(p.brand_key || '') === String(candidateProducts[0].brand_key || ''),
+  );
+const listCap = allSameBrand
+  ? Math.min(60, candidateProducts.length)
+  : router.route_key === 'exact_product_quote'
+    ? 4
+    : 5;
+const curatedCandidates = prioritizedCandidates.slice(0, listCap).map((product) => ({
   product_key: product.product_key,
   product_name: product.product_name,
   brand_key: product.brand_key,
@@ -1178,6 +1188,13 @@ const curatedCandidates = prioritizedCandidates.slice(0, router.route_key === 'e
   price_ars: product.price_ars,
   promo_price_ars: product.promo_price_ars,
   price_usd: product.price_usd,
+  cuotas_qty: product.cuotas_qty ?? null,
+  bancarizada_total: product.bancarizada_total ?? null,
+  bancarizada_cuota: product.bancarizada_cuota ?? null,
+  bancarizada_interest: product.bancarizada_interest ?? null,
+  macro_total: product.macro_total ?? null,
+  macro_cuota: product.macro_cuota ?? null,
+  macro_interest: product.macro_interest ?? null,
   image_url: product.image_url,
   product_url: product.product_url || null,
 }));
@@ -1371,7 +1388,7 @@ if (iphoneLadderCase && !iphoneAskedButNoAppleInList) {
     '(F) Nuevo / garantía: usá condition de candidate_products y store.store_warranty_new si existe; sin inventar políticas.',
     '(G) Catálogo / links: store.store_website_url + links directos product_url de los candidatos que menciones.',
     '(H) Cómo comprar / medios: web + link de pago por WhatsApp + transferencia al alias del link; complementá con store.store_payment_methods.',
-    '(I) Cuotas: precio es contado; cuotas y bancos solo según store.store_payment_methods, sin cifras inventadas.',
+    '(I) Cuotas: contado vs total financiado; solo cifras de candidate_products (bancarizada_*, macro_*, cuotas_qty) o aclarar en local; nunca "el precio se mantiene" en cuotas.',
     'Si el usuario nombró un número de línea (11–17) que NO está en candidate_products, aclaralo al inicio y ofrecé igual la escalera 13→15→16→17 con lo que SÍ figure, explicando en una frase por qué son alternativas razonables (precio, generación cercana, stock real).',
   ].join('\\n');
 }
@@ -1439,9 +1456,12 @@ const promptParts = [
   'Si el usuario nombra un modelo concreto y ese equipo (o esa variante memoria/color) no está en candidate_products, decilo en una frase y ofrecé de inmediato alternativas reales del mismo listado: priorizá misma marca y precio cercano; si no hay de la marca, explicá brevemente por qué otra opción del listado podría servir. Tono consultivo, sin presión. Si candidate_products está vacío, usá store.store_website_url sin inventar SKUs.',
   'Si en candidate_products hay un modelo de la misma marca y misma gama (por ejemplo otra generación S Ultra o otra memoria) que sirve como reemplazo, presentalo como alternativa real: no digas que el producto pedido "no figura en el catálogo de este turno" si ya estás ofreciendo un equipo sustituto que sí está en la lista. Reservá "no figura en este turno" para cuando no haya ningún sustituto razonable en candidate_products.',
   'Formateá todos los precios en ARS con separadores argentinos, por ejemplo ARS 1.165.080.',
-  'Los precios en candidate_products son de contado o promo final; esos datos no incluyen cuota mensual, cantidad de cuotas ni tasa de interés.',
-  'No calcules ni menciones montos por cuota dividiendo el precio. No digas sin interés ni promos bancarias inventadas.',
-  'Si el usuario pregunta por cuotas o financiación: repetí el precio de contado y resumí solo lo que diga store.store_payment_methods, sin cifras de cuota que no estén en ese texto. Si está vacío, ofrecé aclararlo al coordinar el pago.',
+  'Contado: usá promo_price_ars si viene; si no, price_ars. Eso NO es el total en cuotas.',
+  'Cuotas presenciales en sucursal: solo lo que permita este negocio por datos del producto — típicamente hasta 6 cuotas (cuotas_qty) con financiación bancarizada o Macro. Si el usuario pide 8, 12, 18 cuotas o más, aclarar que por acá la referencia es hasta 6 cuotas presenciales con esos medios, no inventes otros plazos.',
+  'PROHIBIDO decir que "el precio se mantiene" o que en cuotas queda igual que de contado: con interés el total financiado es otro. Si candidate_products trae bancarizada_total / bancarizada_cuota / bancarizada_interest o macro_total / macro_cuota / macro_interest, citá solo esos números (formateados en ARS). Si esos campos son null, no inventes totales ni cuotas: decí precio de contado y que confirmen financiación al coordinar el pago en el local.',
+  'No calcules cuota dividiendo el precio de contado. No digas sin interés ni promos bancarias inventadas.',
+  'Si el usuario nombra un banco o tarjeta concreta (ej. Visa ICBC): no inventes tasa ni cuota por banco; si hay datos bancarizada_* o macro_* en candidate_products para ese equipo, usalos como referencia general; si no, decí que el detalle lo confirman al pagar.',
+  'Complementá con store.store_payment_methods solo para el relato de medios (Naranja, Macro, bancarizadas); no contradigas cuotas_qty ni los montos de candidate_products.',
   'No inventes disponibilidad, colores ni stock. Si el dato no está respaldado por candidate_products, decí que te lo consulten por catálogo o pedí una aclaración breve.',
   'Si listás productos, hacelo con un producto por línea y texto plano, sin markdown ni **. Cuando compartas varios modelos, dejá una línea en blanco entre uno y otro.',
   'candidate_products es la única fuente de verdad para productos. No menciones marcas, categorías, modelos o precios que no estén ahí.',

@@ -2564,6 +2564,53 @@ nav a:hover {
   gap: 16px;
 }
 
+.growth-spotlight-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.growth-insight-card {
+  display: grid;
+  gap: 8px;
+  min-height: 158px;
+  padding: 18px;
+  border: 0.5px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: var(--shadow);
+}
+
+.growth-insight-card.is-accent {
+  background:
+    radial-gradient(circle at top right, rgba(191, 111, 77, 0.12), transparent 38%),
+    rgba(255, 255, 255, 0.88);
+}
+
+.growth-insight-card.is-good {
+  background:
+    radial-gradient(circle at top right, rgba(98, 144, 73, 0.12), transparent 38%),
+    rgba(255, 255, 255, 0.88);
+}
+
+.growth-insight-card.is-warn {
+  background:
+    radial-gradient(circle at top right, rgba(180, 120, 30, 0.13), transparent 40%),
+    rgba(255, 255, 255, 0.88);
+}
+
+.growth-insight-value {
+  font-size: clamp(1.8rem, 2.7vw, 2.4rem);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.growth-insight-note {
+  margin: 0;
+  color: var(--soft-text);
+  line-height: 1.55;
+}
+
 .growth-kpi-grid .stat-card {
   min-height: 132px;
 }
@@ -2858,6 +2905,124 @@ nav a:hover {
 
 .ads-note-line {
   margin: 0;
+}
+
+.reviews-layout {
+  display: grid;
+  gap: 18px;
+}
+
+.reviews-action-panel,
+.reviews-detail-panel,
+.reviews-batch-list-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.reviews-action-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.reviews-action-card,
+.reviews-summary-card,
+.reviews-finding-card,
+.reviews-batch-list-item {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 0.5px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.reviews-candidate-head,
+.reviews-batch-header,
+.reviews-finding-head,
+.reviews-batch-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.reviews-candidate-list,
+.reviews-batch-list,
+.reviews-finding-list,
+.reviews-recommendation-list,
+.reviews-evidence-list {
+  display: grid;
+  gap: 12px;
+}
+
+.reviews-candidate-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 0.5px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.reviews-candidate-card input {
+  margin-top: 3px;
+}
+
+.reviews-candidate-body,
+.reviews-recommendation-card {
+  display: grid;
+  gap: 8px;
+}
+
+.reviews-candidate-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.reviews-candidate-snippet,
+.reviews-list {
+  margin: 0;
+}
+
+.reviews-summary-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.reviews-markdown {
+  white-space: pre-wrap;
+}
+
+.reviews-finding-card p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.reviews-evidence-quote {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 3px solid rgba(191, 111, 77, 0.45);
+  border-radius: 0 12px 12px 0;
+  background: rgba(191, 111, 77, 0.08);
+  color: var(--muted);
+}
+
+.reviews-batch-list-item {
+  text-decoration: none;
+  color: inherit;
+}
+
+.reviews-batch-list-item.is-active {
+  border-color: rgba(191, 111, 77, 0.35);
+  background:
+    radial-gradient(circle at top right, rgba(191, 111, 77, 0.1), transparent 36%),
+    rgba(255, 255, 255, 0.86);
 }
 
 .ads-warning-list {
@@ -3232,6 +3397,13 @@ nav a:hover {
     align-items: flex-start;
   }
 
+  .reviews-candidate-head,
+  .reviews-batch-header,
+  .reviews-finding-head,
+  .reviews-batch-list-head {
+    flex-direction: column;
+  }
+
   .growth-section-meta {
     justify-content: flex-start;
   }
@@ -3360,6 +3532,16 @@ nav a:hover {
   }
 
   .growth-table-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reviews-layout {
+    grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+    align-items: start;
+  }
+
+  .reviews-action-grid,
+  .reviews-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

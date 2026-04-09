@@ -45,10 +45,10 @@ const metaPixelId = process.env.META_PIXEL_ID?.trim() || "";
 const navItems = [
   ["Dashboard", "/"],
   ["Growth", "/growth"],
+  ["Reviews", "/reviews"],
   ["Products", "/products"],
   ["Stock", "/stock"],
   ["Purchases", "/purchases"],
-  ["Ads", "/ads"],
   ["Orders", "/orders"],
   ["Customers", "/customers"],
   ["Conversations", "/conversations"],
@@ -107,7 +107,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 <span className="eyebrow">Open Claw</span>
                 <h1 className="wordmark">TechnoStore Ops</h1>
               </div>
-              <p className="masthead-meta">Catalog, growth, purchases, ads, stock, customers, orders, workflows.</p>
+              <p className="masthead-meta">Catalog, growth, review QA, stock, customers, orders and workflows.</p>
             </header>
 
             <nav>

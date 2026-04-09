@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { query } from "../db.js";
-import { runConversationReviewCycle } from "../conversation-reviewer.js";
+import { getConversationReviewCandidates, runConversationReviewCycle } from "../conversation-reviewer.js";
 
 const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -10,6 +10,7 @@ const listQuerySchema = z.object({
 const runBodySchema = z.object({
   force: z.boolean().optional().default(false),
   limit: z.coerce.number().int().min(1).max(50).optional(),
+  conversation_ids: z.array(z.coerce.number().int().positive()).max(50).optional().default([]),
 });
 
 const batchParamsSchema = z.object({
@@ -17,6 +18,12 @@ const batchParamsSchema = z.object({
 });
 
 export const conversationReviewApiRoutes: FastifyPluginAsync = async (app) => {
+  app.get("/v1/conversation-reviews/candidates", async (request) => {
+    const params = listQuerySchema.parse(request.query);
+    const items = await getConversationReviewCandidates(params.limit);
+    return { items };
+  });
+
   app.get("/v1/conversation-reviews", async (request) => {
     const params = listQuerySchema.parse(request.query);
     const rows = await query(
@@ -114,9 +121,10 @@ export const conversationReviewApiRoutes: FastifyPluginAsync = async (app) => {
   app.post("/v1/conversation-reviews/run", async (request) => {
     const body = runBodySchema.parse(request.body ?? {});
     return runConversationReviewCycle(app.log, {
-      triggeredBy: "manual_api",
+      triggeredBy: body.conversation_ids.length > 0 ? "manual_selection" : "manual_api",
       force: body.force,
       limit: body.limit,
+      conversationIds: body.conversation_ids,
     });
   });
 };

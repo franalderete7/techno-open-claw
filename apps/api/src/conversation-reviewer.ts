@@ -124,6 +124,7 @@ type RunOptions = {
   triggeredBy?: string;
   force?: boolean;
   limit?: number;
+  conversationIds?: number[];
 };
 
 type RunResult =
@@ -667,6 +668,107 @@ async function fetchEligibleConversations(
   return rows.map((row) => buildConversationInput(row, groupedMessages.get(row.id) || []));
 }
 
+async function fetchConversationsByIds(client: PoolClient, conversationIds: number[]) {
+  if (conversationIds.length === 0) {
+    return [];
+  }
+
+  const rows = (
+    await client.query<ConversationRow>(
+      `
+        select
+          c.id,
+          c.channel_thread_key,
+          c.status,
+          c.title,
+          c.created_at,
+          c.updated_at,
+          c.last_message_at,
+          cu.id as customer_id,
+          cu.first_name,
+          cu.last_name,
+          cu.phone,
+          count(*) filter (where m.direction = 'inbound' and m.sender_kind = 'customer')::int as inbound_count,
+          count(*) filter (where m.direction = 'outbound' and m.sender_kind in ('tool', 'agent', 'admin'))::int as outbound_count
+        from public.conversations c
+        join public.messages m on m.conversation_id = c.id
+        left join public.customers cu on cu.id = c.customer_id
+        where c.id = any($1::bigint[])
+          and c.channel = 'manychat'
+        group by c.id, cu.id
+        having
+          count(*) filter (where m.direction = 'inbound' and m.sender_kind = 'customer') > 0
+          and count(*) filter (where m.direction = 'outbound' and m.sender_kind in ('tool', 'agent', 'admin')) > 0
+        order by array_position($1::bigint[], c.id::bigint) asc
+      `,
+      [conversationIds]
+    )
+  ).rows;
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const messageRows = (
+    await client.query<MessageRow>(
+      `
+        select
+          conversation_id,
+          id,
+          direction,
+          sender_kind,
+          message_type,
+          text_body,
+          transcript,
+          payload,
+          created_at
+        from public.messages
+        where conversation_id = any($1::bigint[])
+        order by conversation_id asc, created_at asc, id asc
+      `,
+      [conversationIds]
+    )
+  ).rows;
+
+  const groupedMessages = new Map<number, MessageRow[]>();
+  for (const row of messageRows) {
+    const list = groupedMessages.get(row.conversation_id) || [];
+    list.push(row);
+    groupedMessages.set(row.conversation_id, list);
+  }
+
+  return rows.map((row) => buildConversationInput(row, groupedMessages.get(row.id) || []));
+}
+
+export async function getConversationReviewCandidates(limit: number) {
+  const client = await pool.connect();
+
+  try {
+    const safeLimit = Math.max(1, Math.min(100, limit));
+    const items = await fetchEligibleConversations(client, safeLimit, config.CONVERSATION_REVIEW_IDLE_MINUTES, false);
+    return items.map((item) => {
+      const lastCustomerMessage = [...item.messages].reverse().find((message) => message.role === "customer");
+      const lastBotMessage = [...item.messages].reverse().find((message) => message.role === "bot");
+
+      return {
+        conversation_id: item.conversation_id,
+        customer_name: item.customer_name,
+        customer_phone: item.customer_phone,
+        started_at: item.started_at,
+        last_message_at: item.last_message_at,
+        inbound_count: item.inbound_count,
+        outbound_count: item.outbound_count,
+        auto_flags: item.auto_flags,
+        route_keys_seen: item.route_keys_seen,
+        last_customer_message: lastCustomerMessage?.text ?? "",
+        last_bot_message: lastBotMessage?.text ?? "",
+      };
+    });
+  } finally {
+    client.release();
+  }
+}
+
 async function createBatchRecord(client: PoolClient, params: {
   triggeredBy: string;
   workflowContext: WorkflowReviewContext;
@@ -842,18 +944,17 @@ export async function runConversationReviewCycle(logger: LoggerLike, options: Ru
 
     const workflowContext = await loadWorkflowReviewContext();
     const limit = Math.max(1, options.limit ?? config.CONVERSATION_REVIEW_BATCH_SIZE);
-    const conversations = await fetchEligibleConversations(
-      client,
-      limit,
-      config.CONVERSATION_REVIEW_IDLE_MINUTES,
-      options.force === true
-    );
+    const requestedConversationIds = [...new Set((options.conversationIds || []).map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
+    const conversations =
+      requestedConversationIds.length > 0
+        ? await fetchConversationsByIds(client, requestedConversationIds)
+        : await fetchEligibleConversations(client, limit, config.CONVERSATION_REVIEW_IDLE_MINUTES, options.force === true);
 
     if (conversations.length === 0) {
       return { status: "skipped", reason: "no_eligible_conversations", available: 0 };
     }
 
-    if (!options.force && conversations.length < limit) {
+    if (requestedConversationIds.length === 0 && !options.force && conversations.length < limit) {
       return { status: "skipped", reason: "not_enough_unreviewed_conversations", available: conversations.length };
     }
 

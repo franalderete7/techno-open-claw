@@ -368,6 +368,26 @@ function GrowthTableCard({
   );
 }
 
+function InsightCard({
+  title,
+  value,
+  note,
+  tone = "accent",
+}: {
+  title: string;
+  value: string;
+  note: string;
+  tone?: "accent" | "good" | "warn";
+}) {
+  return (
+    <article className={`growth-insight-card is-${tone}`}>
+      <span className="stat-label">{title}</span>
+      <strong className="growth-insight-value">{value}</strong>
+      <p className="growth-insight-note">{note}</p>
+    </article>
+  );
+}
+
 function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
   const productUrls = snapshot.products
     .filter((product) => product.url_path)
@@ -382,6 +402,12 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
     .reduce((sum, device) => sum + device.sessions, 0);
   const deviceSessions = snapshot.devices.reduce((sum, device) => sum + device.sessions, 0);
   const deviceCoveragePct = deviceSessions > 0 ? (knownDeviceSessions / deviceSessions) * 100 : null;
+  const productViewStep = snapshot.journey.find((step) => step.key === "view_content");
+  const intentStep = snapshot.journey.find((step) => step.key === "engaged");
+  const purchaseStep = snapshot.journey.find((step) => step.key === "purchase");
+  const topSource = snapshot.sources[0] ?? null;
+  const topProduct = snapshot.products[0] ?? null;
+  const topSearch = snapshot.searches[0] ?? null;
 
   return (
     <div className="page-stack">
@@ -403,42 +429,69 @@ function GrowthExplorer({ snapshot, days }: GrowthExplorerProps) {
         </section>
       ) : null}
 
+      <section className="growth-spotlight-grid">
+        <InsightCard
+          title="Tráfico útil"
+          value={`${formatNumber(snapshot.totals.sessions)} sesiones`}
+          note={`${formatNumber(snapshot.totals.visitors)} visitantes y ${formatDuration(snapshot.totals.avg_session_duration_seconds)} de permanencia promedio.`}
+          tone="accent"
+        />
+        <InsightCard
+          title="Interés real"
+          value={formatPct(productViewStep?.conversion_from_sessions_pct)}
+          note={`${formatNumber(snapshot.totals.view_contents)} vistas de producto. ${topProduct ? `El producto más visto fue ${topProduct.title}.` : "Todavía sin producto líder."}`}
+          tone="good"
+        />
+        <InsightCard
+          title="Señal de intención"
+          value={formatPct(intentStep?.conversion_from_sessions_pct ?? snapshot.totals.contact_rate_pct)}
+          note={`${formatNumber(snapshot.totals.contacts)} WhatsApp y ${formatNumber(snapshot.totals.checkout_starts)} checkouts. ${topSource ? `La fuente más fuerte fue ${sourceLabel(topSource.source)}.` : "Todavía sin fuente dominante."}`}
+          tone="accent"
+        />
+        <InsightCard
+          title="Compra final"
+          value={formatPct(purchaseStep?.conversion_from_sessions_pct ?? snapshot.totals.purchase_rate_pct)}
+          note={`${formatNumber(snapshot.totals.purchases)} compras y ${formatMoney(snapshot.totals.revenue_ars)} de revenue. ${topSearch ? `Búsqueda líder: “${topSearch.query}”.` : "Todavía sin búsqueda dominante."}`}
+          tone={snapshot.totals.purchases > 0 ? "good" : "warn"}
+        />
+      </section>
+
       <section className="stats-grid growth-kpi-grid">
         <article className="stat-card">
           <span className="stat-label">Visitantes</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.visitors)}</strong>
-          <span className="stat-note">{formatNumber(snapshot.totals.sessions)} sesiones</span>
+          <span className="stat-note">{formatNumber(snapshot.totals.sessions)} sesiones reales</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Vistas producto</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.view_contents)}</strong>
-          <span className="stat-note">{formatNumber(snapshot.totals.page_views)} page views</span>
+          <span className="stat-note">{formatPct(productViewStep?.conversion_from_sessions_pct)} de sesiones llegan a una PDP</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Búsquedas</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.searches)}</strong>
-          <span className="stat-note">{formatDuration(snapshot.totals.avg_session_duration_seconds)} promedio por sesión</span>
+          <span className="stat-note">{topSearch ? `Top query: ${topSearch.query}` : `${formatDuration(snapshot.totals.avg_session_duration_seconds)} promedio por sesión`}</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">WhatsApp</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.contacts)}</strong>
-          <span className="stat-note">{formatPct(snapshot.totals.contact_rate_pct)} de sesiones</span>
+          <span className="stat-note">{formatPct(snapshot.totals.contact_rate_pct)} de sesiones dejan contacto</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Checkout</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.checkout_starts)}</strong>
-          <span className="stat-note">{formatPct(snapshot.totals.checkout_rate_pct)} de sesiones</span>
+          <span className="stat-note">{formatPct(snapshot.totals.checkout_rate_pct)} de sesiones llegan a checkout</span>
         </article>
         <article className="stat-card">
           <span className="stat-label">Compras</span>
           <strong className="stat-value">{formatNumber(snapshot.totals.purchases)}</strong>
-          <span className="stat-note">{formatMoney(snapshot.totals.revenue_ars)} revenue</span>
+          <span className="stat-note">{formatMoney(snapshot.totals.revenue_ars)} revenue total</span>
         </article>
       </section>
 
       <GrowthSection
-        title="Overview"
-        copy="La vista principal ahora usa un journey ordenado y un gráfico con intervalo controlable."
+        title="Panorama"
+        copy="Primero leé ritmo e intención. Después bajás a fuentes, productos y recorridos finos."
         badges={[
           { label: `${formatNumber(snapshot.totals.events)} eventos`, tone: "accent" },
           { label: `${days} días` },

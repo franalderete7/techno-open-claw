@@ -808,6 +808,46 @@ function candidateMatchesRetrievalBrandKeys(
   return brandKeys.some((brandKey) => brandKeyMatchesText(brandKey, haystack));
 }
 
+/** Postgres ~* patterns: match brand/category/model/title haystack for catalog filtering */
+const BRAND_ROW_REGEX: Record<string, string> = {
+  apple: "apple|iphone|ipad|macbook",
+  samsung: "samsung|galaxy",
+  motorola: "motorola|\\bmoto\\b",
+  xiaomi: "xiaomi",
+  redmi: "redmi|poco|xiaomi",
+  google: "google|pixel",
+  jbl: "jbl",
+};
+
+function buildBrandFilterSql(brandKeys: string[]): { fragment: string; params: string[] } | null {
+  const uniq = [...new Set(brandKeys.map((k) => String(k).trim().toLowerCase()).filter(Boolean))];
+  if (uniq.length === 0) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  const params: string[] = [];
+
+  for (const bk of uniq) {
+    const pattern = BRAND_ROW_REGEX[bk];
+    const hay =
+      "(coalesce(p.brand,'') || ' ' || coalesce(p.category,'') || ' ' || coalesce(p.model,'') || ' ' || coalesce(p.title,''))";
+    if (pattern) {
+      params.push(pattern);
+      parts.push(`${hay} ~* $${params.length}`);
+    } else {
+      params.push(`%${bk}%`);
+      parts.push(`${hay} ilike $${params.length}`);
+    }
+  }
+
+  if (parts.length === 0) {
+    return null;
+  }
+
+  return { fragment: ` AND (${parts.join(" OR ")})`, params };
+}
+
 function scoreCandidate(product: ProductRow, userMessage: string) {
   const message = normalizeText(userMessage);
   if (!message) {
@@ -1243,7 +1283,6 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     const manychatId = String(body.p_manychat_id ?? body.manychat_id ?? "").trim();
     const userMessage = String(body.p_user_message ?? body.user_message ?? "").trim();
     const recentLimit = Math.max(1, Math.min(20, Number(body.p_recent_limit ?? 10) || 10));
-    const candidateLimit = Math.max(1, Math.min(20, Number(body.p_candidate_limit ?? 8) || 8));
     const storefrontOrderId = Number(body.p_storefront_order_id ?? body.storefront_order_id ?? 0) || null;
     const storefrontOrderToken = String(body.p_storefront_order_token ?? body.storefront_order_token ?? "")
       .trim()
@@ -1308,6 +1347,28 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         )
       : [];
 
+    const interestedProductKey = customerState.interestedProduct?.trim().toLowerCase() || null;
+    const retrievalScoringText = buildRetrievalScoringText(userMessage, recentMessages);
+    const currentProductSignals = getMessageProductSignals(retrievalScoringText);
+
+    const requestedCap = Number(body.p_candidate_limit);
+    const hasBrandIntent = currentProductSignals.brandKeys.length > 0;
+    const candidateLimit = hasBrandIntent
+      ? Math.max(1, Math.min(120, Number.isFinite(requestedCap) && requestedCap > 0 ? requestedCap : 100))
+      : Math.max(1, Math.min(20, Number.isFinite(requestedCap) && requestedCap > 0 ? requestedCap : 8));
+
+    const brandSql = buildBrandFilterSql(currentProductSignals.brandKeys);
+    const rawBrandFetch = Number(body.p_brand_fetch_limit ?? body.p_brand_catalog_max);
+    const sqlFetchLimit = hasBrandIntent
+      ? Math.min(400, Math.max(1, Number.isFinite(rawBrandFetch) && rawBrandFetch > 0 ? rawBrandFetch : 300))
+      : 120;
+    const orderClause = hasBrandIntent
+      ? "order by p.in_stock desc, p.price_amount asc nulls last, p.updated_at desc, p.id desc"
+      : "order by p.updated_at desc, p.id desc";
+
+    const brandParams = brandSql?.params ?? [];
+    const limitParamIndex = brandParams.length + 1;
+
     const productRows = await query<ProductRow>(
       `
         select
@@ -1355,14 +1416,12 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           where su.product_id = p.id
         ) inv on true
         where p.active = true
-        order by p.updated_at desc, p.id desc
-        limit 120
-      `
+        ${brandSql?.fragment ?? ""}
+        ${orderClause}
+        limit $${limitParamIndex}
+      `,
+      [...brandParams, sqlFetchLimit]
     );
-
-    const interestedProductKey = customerState.interestedProduct?.trim().toLowerCase() || null;
-    const retrievalScoringText = buildRetrievalScoringText(userMessage, recentMessages);
-    const currentProductSignals = getMessageProductSignals(retrievalScoringText);
     const usedIphoneCandidates: UsedIphoneCandidate[] = selectUsedIphoneCandidates({
       userMessage: retrievalScoringText,
       customerState,
