@@ -64,7 +64,8 @@ const configSchema = z.object({
   CONVERSATION_REVIEW_TELEGRAM_CHAT_IDS: csvStringArray,
   TELEGRAM_WEBHOOK_SECRET: z.string().default(""),
   TELEGRAM_WEBHOOK_BASE_URL: z.string().default(""),
-  CONVERSATION_REVIEW_ENABLED: envBoolean.default(false),
+  /** Always on: scheduler ignores `CONVERSATION_REVIEW_ENABLED` env. */
+  CONVERSATION_REVIEW_ENABLED: z.preprocess(() => true, z.literal(true)),
   CONVERSATION_REVIEW_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(30),
   CONVERSATION_REVIEW_BATCH_SIZE: z.coerce.number().int().min(1).max(50).default(10),
   CONVERSATION_REVIEW_IDLE_MINUTES: z.coerce.number().int().min(1).max(1440).default(20),
