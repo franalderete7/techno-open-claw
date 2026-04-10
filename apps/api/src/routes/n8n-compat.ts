@@ -998,8 +998,26 @@ function selectUsedIphoneCandidates(params: {
   return [];
 }
 
-function isDisallowedWorkflowProduct(product: Pick<ProductRow, "brand" | "condition">) {
-  return normalizeText(product.brand) === "apple" && normalizeText(product.condition) !== "new";
+function isDisallowedWorkflowProduct(
+  product: Pick<ProductRow, "brand" | "condition" | "sku" | "slug" | "model" | "title" | "description">
+) {
+  const searchableText = normalizeText(
+    [
+      product.brand,
+      product.condition,
+      product.sku,
+      product.slug,
+      product.model,
+      product.title,
+      product.description ?? "",
+    ].join(" ")
+  );
+
+  if (normalizeText(product.brand) === "apple" && normalizeText(product.condition) !== "new") {
+    return true;
+  }
+
+  return /\b(test|random|placeholder|dummy|demo|sample)\b/.test(searchableText);
 }
 
 function asRecord(value: unknown) {

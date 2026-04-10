@@ -73,9 +73,11 @@ type ConversationReviewInput = {
   inbound_count: number;
   outbound_count: number;
   auto_flags: string[];
+  auto_flag_details: string[];
   route_keys_seen: string[];
   workflow_summaries_seen: string[];
   validation_errors_seen: string[];
+  validation_warnings_seen: string[];
   messages: Array<{
     message_id: number;
     created_at: string;
@@ -206,8 +208,63 @@ function normalizeMessageText(value: string | null | undefined) {
     .trim();
 }
 
+function extractUrls(value: string | null | undefined) {
+  return String(value || "").match(/https?:\/\/\S+/gi) || [];
+}
+
+function detectBrands(value: string | null | undefined) {
+  const text = normalizeMessageText(value);
+  const brands = new Set<string>();
+  if (/(^| )(iphone|apple|ipad|macbook)( |$)/.test(text)) brands.add("apple");
+  if (/(^| )(samsung|galaxy)( |$)/.test(text)) brands.add("samsung");
+  if (/(^| )(motorola|moto)( |$)/.test(text)) brands.add("motorola");
+  if (/(^| )(xiaomi|xaomi|xiami)( |$)/.test(text)) brands.add("xiaomi");
+  if (/(^| )(redmi|rexmi|redmy|poco)( |$)/.test(text)) brands.add("redmi");
+  if (/(^| )(google|pixel)( |$)/.test(text)) brands.add("google");
+  if (/(^| )(jbl)( |$)/.test(text)) brands.add("jbl");
+  return [...brands];
+}
+
+function extractRequestedStorage(value: string | null | undefined) {
+  const text = normalizeMessageText(value);
+  const exactMatch = text.match(/\b(64|128|256|512|1024)\b(?:\s*gb)?\b/);
+  if (exactMatch) {
+    return Number(exactMatch[1]);
+  }
+
+  const approximateMatch =
+    text.match(/\b(\d{2,4})\b(?=(?:\s*gb)?\s*(?:de\s+)?(?:memo\w*|almacen\w*|giga\w*|gb)\b)/i) ||
+    text.match(/(?:memo\w*|almacen\w*|giga\w*|gb)\s*(?:de\s*)?\b(\d{2,4})\b/i);
+
+  if (!approximateMatch) {
+    return null;
+  }
+
+  const valueNum = Number(approximateMatch[1]);
+  if (!Number.isFinite(valueNum)) {
+    return null;
+  }
+  if (valueNum >= 60 && valueNum <= 70) return 64;
+  if (valueNum >= 118 && valueNum <= 138) return 128;
+  if (valueNum >= 240 && valueNum <= 270) return 256;
+  if (valueNum >= 480 && valueNum <= 540) return 512;
+  if (valueNum >= 950 && valueNum <= 1100) return 1024;
+  return null;
+}
+
+function extractRequestedRam(value: string | null | undefined) {
+  const text = normalizeMessageText(value);
+  const ramMatch =
+    text.match(/\b(4|6|8|12|16)\b(?=(?:\s*gb)?\s*(?:de\s+)?ram\b)/i) ||
+    text.match(/\bram\s*(?:de\s*)?\b(4|6|8|12|16)\b(?:\s*gb)?/i) ||
+    text.match(/\b(4|6|8|12|16)\s*gb\s*ram\b/i);
+
+  return ramMatch ? Number(ramMatch[1]) : null;
+}
+
 function detectConversationFlags(messages: MessageRow[]) {
   const flags = new Set<string>();
+  const details: string[] = [];
 
   for (let index = 1; index < messages.length; index += 1) {
     const prev = messages[index - 1];
@@ -226,6 +283,9 @@ function detectConversationFlags(messages: MessageRow[]) {
     const currentAt = Date.parse(current.created_at);
     if (Number.isFinite(prevAt) && Number.isFinite(currentAt) && currentAt - prevAt <= 8000) {
       flags.add("possible_duplicate_bot_send");
+      details.push(
+        `Possible duplicate bot send: outbound messages ${prev.id} and ${current.id} are identical within ${Math.round((currentAt - prevAt) / 1000)}s.`
+      );
     }
   }
 
@@ -237,24 +297,127 @@ function detectConversationFlags(messages: MessageRow[]) {
     const text = String(message.text_body ?? message.transcript ?? "");
     if (/(bancarizada|macro|naranja)[^.\n]{0,40}:\s*\d{2,4}(?![.\d])/i.test(text)) {
       flags.add("possible_broken_financing_amount");
+      details.push(`Broken financing amount pattern in outbound message ${message.id}.`);
     }
 
     if (/(plan canje|permuta|parte de pago|toma de usado)/i.test(text) && /(caso a caso|lo vemos|se evalua|se evalúa)/i.test(text)) {
       flags.add("possible_trade_in_policy_violation");
+      details.push(`Possible trade-in policy violation in outbound message ${message.id}.`);
     }
 
     if (text.length > 1100) {
       flags.add("bot_message_over_length_limit");
+      details.push(`Outbound message ${message.id} exceeds 1100 characters.`);
+    }
+
+    if (
+      !extractUrls(text).length &&
+      /(?:m[aá]s\s+info|m[aá]s\s+detalles|link|pod[eé]s\s+verlo|lo\s+pod[eé]s\s+ver|ver\s+todos\s+sus\s+detalles|toda\s+la\s+informaci[oó]n|foto|fotos)\s*:?/i.test(
+        text
+      )
+    ) {
+      flags.add("possible_missing_url_after_cta");
+      details.push(`Missing URL after CTA in outbound message ${message.id}.`);
+    }
+
+    if (extractUrls(text).some((url) => /(?:test|random|placeholder|dummy|demo|sample)/i.test(url))) {
+      flags.add("possible_test_or_placeholder_url");
+      details.push(`Unsafe catalog URL detected in outbound message ${message.id}.`);
+    }
+
+    if (/(bitcoin|usdt|crypto|criptomon)/i.test(text)) {
+      flags.add("possible_unsupported_crypto_claim");
+      details.push(`Unsupported crypto/payment mention in outbound message ${message.id}.`);
     }
   }
 
-  return [...flags];
+  for (let index = 0; index < messages.length; index += 1) {
+    const inbound = messages[index];
+    const outbound = messages[index + 1];
+    if (!inbound || !outbound) {
+      continue;
+    }
+    if (inbound.direction !== "inbound" || outbound.direction !== "outbound") {
+      continue;
+    }
+
+    const inboundText = String(inbound.text_body ?? inbound.transcript ?? "");
+    const outboundText = String(outbound.text_body ?? outbound.transcript ?? "");
+    const inboundNormalized = normalizeMessageText(inboundText);
+    const outboundNormalized = normalizeMessageText(outboundText);
+    const requestedBrands = detectBrands(inboundText);
+    const answeredBrands = detectBrands(outboundText);
+
+    if (
+      requestedBrands.length > 0 &&
+      answeredBrands.length > 0 &&
+      !requestedBrands.some((brand) => answeredBrands.includes(brand)) &&
+      /(https?:\/\/|lo pod[eé]s ver ac[aá]|link)/i.test(outboundText)
+    ) {
+      flags.add("possible_brand_mismatch");
+      details.push(
+        `Brand mismatch risk: inbound ${inbound.id} asks for ${requestedBrands.join(", ")} but outbound ${outbound.id} points to ${answeredBrands.join(", ")}.`
+      );
+    }
+
+    const requestedStorage = extractRequestedStorage(inboundText);
+    const requestedRam = extractRequestedRam(inboundText);
+    if (requestedStorage != null && !new RegExp(`\\b${requestedStorage}\\s*gb\\b`, "i").test(outboundNormalized)) {
+      if (/(no|sin|no hay|no veo|no está|no esta)/i.test(outboundNormalized) === false) {
+        flags.add("possible_storage_variant_mismatch");
+        details.push(
+          `Storage mismatch risk: inbound ${inbound.id} asks for ${requestedStorage}GB but outbound ${outbound.id} does not mention that variant.`
+        );
+      }
+    }
+    if (requestedRam != null && !new RegExp(`(?:\\b${requestedRam}\\s*gb\\s*ram\\b|\\bram\\s*${requestedRam}\\b)`, "i").test(outboundNormalized)) {
+      if (/(no|sin|no hay|no veo|no está|no esta)/i.test(outboundNormalized) === false) {
+        flags.add("possible_ram_variant_mismatch");
+        details.push(
+          `RAM mismatch risk: inbound ${inbound.id} asks for ${requestedRam}GB RAM but outbound ${outbound.id} does not mention that variant.`
+        );
+      }
+    }
+
+    if (/(cuota|cuotas|financi|naranja|macro|tarjeta)/i.test(inboundNormalized)) {
+      const hasConcreteFinancing =
+        /cuotas?\s+de\s+ars/i.test(outboundText) || /(bancarizada|macro)/i.test(outboundText);
+      const soundsEvasive = /(sucursal|confirman|te confirman|te dicen|lo vemos|al pagar)/i.test(outboundText);
+      if (!hasConcreteFinancing && soundsEvasive) {
+        flags.add("possible_evasive_financing_answer");
+        details.push(
+          `Financing question may have been answered evasively: inbound ${inbound.id}, outbound ${outbound.id}.`
+        );
+      }
+    }
+
+    if (/(foto|fotos|imagen|imagenes|como se ve|mostrame|mandame foto|mandame imagen)/i.test(inboundNormalized)) {
+      if (!extractUrls(outboundText).length) {
+        flags.add("possible_image_request_not_fulfilled");
+        details.push(`Image/photo request in inbound ${inbound.id} answered without URL or asset in outbound ${outbound.id}.`);
+      }
+    }
+
+    if (/(gracias|muchas gracias|perfecto|listo|joya)/i.test(inboundNormalized)) {
+      if (normalizeMessageText(outboundText) && extractUrls(outboundText).length > 0) {
+        flags.add("possible_redundant_followup_after_close");
+        details.push(`Outbound message ${outbound.id} repeats a URL/link right after a user closing signal in inbound ${inbound.id}.`);
+      }
+    }
+  }
+
+  return {
+    flags: [...flags],
+    details,
+  };
 }
 
 function buildConversationInput(conversation: ConversationRow, messages: MessageRow[]): ConversationReviewInput {
   const routeKeys = new Set<string>();
   const summaries = new Set<string>();
   const validationErrors = new Set<string>();
+  const validationWarnings = new Set<string>();
+  const conversationDiagnostics = detectConversationFlags(messages);
 
   for (const message of messages) {
     if (message.direction !== "outbound" || !message.payload || typeof message.payload !== "object") {
@@ -278,6 +441,17 @@ function buildConversationInput(conversation: ConversationRow, messages: Message
         validationErrors.add(next);
       }
     }
+
+    const rawWarnings = Array.isArray(message.payload.validation_warnings) ? message.payload.validation_warnings : [];
+    for (const item of rawWarnings) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const next = String((item as { code?: unknown }).code ?? "").trim();
+      if (next) {
+        validationWarnings.add(next);
+      }
+    }
   }
 
   const customerName =
@@ -294,10 +468,12 @@ function buildConversationInput(conversation: ConversationRow, messages: Message
     last_message_at: conversation.last_message_at,
     inbound_count: Number(conversation.inbound_count || 0),
     outbound_count: Number(conversation.outbound_count || 0),
-    auto_flags: detectConversationFlags(messages),
+    auto_flags: conversationDiagnostics.flags,
+    auto_flag_details: conversationDiagnostics.details.slice(0, 12),
     route_keys_seen: [...routeKeys],
     workflow_summaries_seen: [...summaries].slice(0, 5),
     validation_errors_seen: [...validationErrors],
+    validation_warnings_seen: [...validationWarnings],
     messages: messages.map((message) => ({
       message_id: message.id,
       created_at: message.created_at,
@@ -317,7 +493,7 @@ function buildFallbackWorkflowContext(): WorkflowReviewContext {
   const compactText = [
     "Workflow JSONs (n8n v18) no están montados en este proceso: revisá sin el texto completo de los nodos.",
     "Comportamiento esperable del bot TechnoStore v18: router → context builder con candidate_products del catálogo → sales/info responders → validator → state update.",
-    "Priorizá en la revisión: precios y cuotas alineados a datos del catálogo, sin inventar stock ni links, políticas (sin DNI, canje, etc.), tono y cierre.",
+    "Priorizá en la revisión: precios y cuotas alineados a datos del catálogo, sin inventar stock ni links, políticas (sin DNI, canje, crypto, etc.), tono, cierre, exactitud de variante (RAM/memoria/color) y manejo de pedidos de imagen/foto.",
   ].join("\n\n");
 
   return {
@@ -428,9 +604,12 @@ function buildReviewerMessages(params: {
   const systemPrompt = [
     "Sos el reviewer QA del bot comercial de TechnoStore.",
     "Evaluás conversaciones reales contra el comportamiento esperado de los workflows v18.",
-    "Priorizá errores concretos: precio, cuotas, políticas, producto equivocado, duplicados, alucinaciones, tono flojo, cierre flojo, mala ruta, fallas del validator o timing.",
+    "Priorizá errores concretos: precio, cuotas, políticas, producto equivocado, variante equivocada (RAM/memoria/color), links rotos, pedidos de imagen mal resueltos, duplicados, alucinaciones, tono flojo, cierre flojo, mala ruta, fallas del validator o timing.",
     "No seas complaciente: si algo está mal, marcá el problema aunque la venta parezca razonable.",
     "Si un problema parece venir de políticas del negocio, prompt del sales responder, normalización, routing, validator, timing del workflow o datos de catálogo, decilo explícitamente en root_cause_area.",
+    "Tomá los auto_flags y auto_flag_details como señales de alto valor. No los copies ciegamente: confirmalos contra los mensajes antes de usarlos.",
+    "Si auto_flags marca possible_missing_url_after_cta, possible_test_or_placeholder_url, possible_brand_mismatch, possible_ram_variant_mismatch, possible_storage_variant_mismatch, possible_evasive_financing_answer o possible_duplicate_bot_send, investigalo con prioridad.",
+    "En suggested_fix, proponé el cambio más probable y accionable: routing, validator, sales_prompt, workflow_timing, catalog_data o policy_copy.",
     "Respondé SOLO JSON válido.",
   ].join(" ");
 
@@ -474,6 +653,13 @@ function buildReviewerMessages(params: {
     ),
     "Issue types válidos sugeridos: pricing_error, financing_error, policy_error, wrong_product_match, duplicate_send, tone_problem, weak_closing, hallucination, routing_error, validator_gap, workflow_timing, catalog_data_gap.",
     "Root cause areas válidas sugeridas: routing, sales_prompt, sales_normalizer, info_responder, validator, workflow_timing, catalog_data, policy_copy, unknown.",
+    "Reglas extra de evaluación:",
+    "- Si el usuario pide cuotas y el bot no da cuotas concretas pese a que la conversación sugiere que debería poder hacerlo, considerá financing_error o validator_gap.",
+    "- Si el usuario pide foto/imagen y el bot manda home/storefront cuando ya había producto puntual, eso es weak_closing o validator_gap, y a veces wrong_product_match si además desvía el producto.",
+    "- Si el usuario pide una variante concreta (ej. 8GB, 512GB, color) y el bot responde otra sin aclararlo, marcá wrong_product_match.",
+    "- Si el bot promete 'Más info', 'Link', 'Lo podés ver acá' o similar sin URL real, marcá validator_gap.",
+    "- Si aparece una URL test/random/placeholder, marcá catalog_data_gap y probablemente hallucination o validator_gap según corresponda.",
+    "- Si hay respuestas casi iguales dentro de pocos segundos o justo después de un 'gracias', marcá duplicate_send o workflow_timing.",
     "Marcá una conversación como good solo si está realmente bien resuelta.",
     "Workflow context:",
     params.workflowContext.compactText,
@@ -575,7 +761,10 @@ function buildTelegramSummary(batchId: number, summary: ReviewerBatchSummary, it
   const worstItems = [...items]
     .sort((left, right) => left.score_0_100 - right.score_0_100)
     .slice(0, 3)
-    .map((item) => `- Conv ${item.conversation_id}: ${item.score_0_100}/100 · ${item.issue_types.join(", ") || "sin issue_types"}`)
+    .map(
+      (item) =>
+        `- Conv ${item.conversation_id}: ${item.score_0_100}/100 · ${item.issue_types.join(", ") || "sin issue_types"} · ${String(item.root_cause_area || "unknown")} · ${String(item.suggested_fix || "sin fix").trim()}`
+    )
     .join("\n");
 
   const recommendedChanges = (summary.recommended_changes || [])
