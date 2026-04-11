@@ -1414,13 +1414,13 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     const requestedCap = Number(body.p_candidate_limit);
     const hasBrandIntent = currentProductSignals.brandKeys.length > 0;
     const candidateLimit = hasBrandIntent
-      ? Math.max(1, Math.min(120, Number.isFinite(requestedCap) && requestedCap > 0 ? requestedCap : 100))
+      ? Math.max(1, Math.min(400, Number.isFinite(requestedCap) && requestedCap > 0 ? requestedCap : 300))
       : Math.max(1, Math.min(20, Number.isFinite(requestedCap) && requestedCap > 0 ? requestedCap : 8));
 
     const brandSql = buildBrandFilterSql(currentProductSignals.brandKeys);
     const rawBrandFetch = Number(body.p_brand_fetch_limit ?? body.p_brand_catalog_max);
     const sqlFetchLimit = hasBrandIntent
-      ? Math.min(400, Math.max(1, Number.isFinite(rawBrandFetch) && rawBrandFetch > 0 ? rawBrandFetch : 300))
+      ? Math.min(800, Math.max(1, Number.isFinite(rawBrandFetch) && rawBrandFetch > 0 ? rawBrandFetch : 400))
       : 120;
     const orderClause = hasBrandIntent
       ? "order by p.in_stock desc, p.price_amount asc nulls last, p.updated_at desc, p.id desc"
@@ -1562,7 +1562,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
       ? prioritizeBrandBrowseCandidates(
           rankedCandidateProducts,
           currentProductSignals.brandKeys[0],
-          candidateLimit
+          rankedCandidateProducts.length
         )
       : rankedCandidateProducts.slice(0, candidateLimit);
 

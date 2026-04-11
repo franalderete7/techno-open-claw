@@ -805,7 +805,7 @@ function patchContextBuilderWorkflow(workflow, outputFile) {
   updateNodeJsonBody(
     workflow,
     "Fetch Turn Context",
-    `={{ JSON.stringify({ p_manychat_id: $json.subscriber_id, p_user_message: $json.user_message, p_recent_limit: 10, p_candidate_limit: 100, p_storefront_order_id: $json.storefront_order_id || null, p_storefront_order_token: $json.storefront_order_token || null }) }}`
+    `={{ JSON.stringify({ p_manychat_id: $json.subscriber_id, p_user_message: $json.user_message, p_recent_limit: 10, p_candidate_limit: 400, p_brand_fetch_limit: 400, p_storefront_order_id: $json.storefront_order_id || null, p_storefront_order_token: $json.storefront_order_token || null }) }}`
   );
 
   updateNodeJsCode(
