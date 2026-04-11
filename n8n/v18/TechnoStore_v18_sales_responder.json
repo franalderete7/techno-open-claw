@@ -28,46 +28,7 @@
     },
     {
       "parameters": {
-        "options": {
-          "systemMessage": "Sos el vendedor de WhatsApp de TechnoStore Salta: cercano, claro y profesional. Sin markdown, sin asteriscos. Prohibido inventar: stock, colores, precios, cuotas, montos sin interés, links, modelos o datos que no estén en el contexto (recent_thread, store, candidate_products). Si el usuario nombra un modelo concreto y está en candidate_products, respondé SOLO de ese equipo en ese turno: no ofrezcas otro modelo ni “también te paso la ficha de…” salvo que el usuario pida alternativas, comparar, “qué más tenés” o una consulta genérica de marca sin modelo. Si el usuario especifica RAM, memoria o color, respetá esa variante exacta; si no está, decilo claramente antes de sugerir otra. Si pide un equipo que no figura en candidate_products, decilo en una frase y ofrecé alternativas del mismo listado. Si falta un dato, aclaración corta o catálogo. Si pide foto, imagen o cómo se ve, usá image_url solo si viene en candidate_products y acompañalo con el product_url exacto; no mandes la web general si ya tenés ficha del producto. Listados: un producto por bloque, orden de candidate_products. Una sola marca en la lista: no cruces con otra marca salvo que lo pidan. URLs solo si vienen en product_url. No aceptamos compras con DNI. No ofrezcas crypto, Bitcoin, USDT ni frases de pago fuera del proceso estándar del negocio. Contado ≠ financiado. Por defecto con cuotas comunicá el monto POR CUOTA (bancarizada_cuota, macro_cuota) y cuotas_qty; no muestres bancarizada_total ni macro_total salvo que el usuario pida explícitamente total financiado o precio final en cuotas. Nunca digas que el precio se mantiene en cuotas. Cuotas presenciales típicamente hasta 6. Si el usuario ya cerró con 'gracias', 'perfecto', 'listo' o similar, no repitas links ni cierres de venta. Cerrá con UNA pregunta solo si suma; no fuerces. Guías de marca (iPhone escalera, Samsung amplio, etc.) solo cuando aplique consulta genérica. Devolvé SOLO JSON con reply_text, selected_product_keys, actions, state_delta.",
-          "maxIterations": 1
-        },
-        "promptType": "define",
-        "text": "={{ $json.chatInput }}"
-      },
-      "id": "e39c94c3-3fc2-e442-0f1b-30f8f20a8251",
-      "name": "AI Agent (Sales)",
-      "type": "@n8n/n8n-nodes-langchain.agent",
-      "typeVersion": 1.7,
-      "position": [
-        860,
-        300
-      ],
-      "disabled": true
-    },
-    {
-      "parameters": {
-        "model": "={{ $json.responder_model_name || \"gpt-5.4-mini\" }}",
-        "options": {}
-      },
-      "id": "3f61f723-8d23-8e91-f1d3-2254a6aa7233",
-      "name": "OpenAI Chat Model",
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1,
-      "position": [
-        860,
-        520
-      ],
-      "credentials": {
-        "openAiApi": {
-          "name": "OpenAI account"
-        }
-      },
-      "disabled": true
-    },
-    {
-      "parameters": {
-        "jsCode": "const base = $input.first().json || {};\nconst responder = base.responder_output && typeof base.responder_output === 'object'\n  ? base.responder_output\n  : {\n      route_key: base.router_output?.route_key || 'generic_sales',\n      reply_text: 'Decime qué marca querés ver y te paso solo productos reales con precio correcto.',\n      selected_product_keys: [],\n      actions: [],\n      state_delta: {\n        intent_key: 'greeting',\n        funnel_stage: 'browsing',\n        lead_score_delta: 3,\n        share_store_location: false,\n        selected_product_keys: [],\n        tags_to_add: [],\n        tags_to_remove: [],\n        payment_method_key: null,\n        summary: 'Fallback determinístico por falta de respuesta.',\n      },\n    };\n\nreturn [{\n  json: {\n    ...base,\n    responder_output: responder,\n    responder_provider_name: 'deterministic',\n    responder_model_name: 'deterministic-brand-sales',\n    responder_raw_text: String(responder.reply_text || ''),\n  }\n}];"
+        "jsCode": "const base = $input.first().json || {};\nconst responder = base.responder_output && typeof base.responder_output === 'object'\n  ? base.responder_output\n  : {\n      route_key: base.router_output?.route_key || 'generic_sales',\n      reply_text: 'Decime qué marca querés ver y te paso solo los precios de esa marca.',\n      selected_product_keys: [],\n      actions: [],\n      state_delta: {\n        intent_key: 'greeting',\n        funnel_stage: 'browsing',\n        lead_score_delta: 3,\n        share_store_location: false,\n        selected_product_keys: [],\n        tags_to_add: [],\n        tags_to_remove: [],\n        payment_method_key: null,\n        summary: 'Fallback determinístico por falta de respuesta.',\n      },\n    };\n\nreturn [{\n  json: {\n    ...base,\n    responder_output: responder,\n    responder_provider_name: 'deterministic',\n    responder_model_name: 'deterministic-brand-sales',\n    responder_raw_text: String(responder.reply_text || ''),\n  }\n}];"
       },
       "id": "e37a882b-5655-5d84-8e3d-7450e70690da",
       "name": "Normalize Sales Response",
