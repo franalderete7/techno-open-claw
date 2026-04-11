@@ -61,17 +61,8 @@ const configSchema = z.object({
   OPENAI_API_KEY: z.string().default(""),
   TELEGRAM_BOT_TOKEN: z.string().default(""),
   TELEGRAM_ALLOWED_CHAT_IDS: csvStringArray,
-  CONVERSATION_REVIEW_TELEGRAM_CHAT_IDS: csvStringArray,
   TELEGRAM_WEBHOOK_SECRET: z.string().default(""),
   TELEGRAM_WEBHOOK_BASE_URL: z.string().default(""),
-  /** Always on: scheduler ignores `CONVERSATION_REVIEW_ENABLED` env. */
-  CONVERSATION_REVIEW_ENABLED: z.preprocess(() => true, z.literal(true)),
-  CONVERSATION_REVIEW_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(30),
-  CONVERSATION_REVIEW_BATCH_SIZE: z.coerce.number().int().min(1).max(50).default(10),
-  CONVERSATION_REVIEW_IDLE_MINUTES: z.coerce.number().int().min(1).max(1440).default(20),
-  CONVERSATION_REVIEW_REPO_DIR: z.string().default(""),
-  /** Optional override for reviewer; if empty, uses `OLLAMA_MODEL` (same runtime as sales agent). */
-  OLLAMA_REVIEW_MODEL: z.string().default(""),
   MANYCHAT_API_KEY: z.string().default(""),
   MANYCHAT_ACCOUNT_ID: z.string().default(""),
   STORE_WHATSAPP_PHONE: z.string().default("543875319940"),

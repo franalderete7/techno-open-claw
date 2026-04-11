@@ -404,71 +404,6 @@ export type SchemaResponse = {
   relationships: SchemaRelationshipRecord[];
 };
 
-export type ConversationReviewBatchRecord = {
-  id: number;
-  status: string;
-  triggered_by: string;
-  workflow_version: string | null;
-  model_name: string | null;
-  repo_dir: string | null;
-  repo_commit_sha: string | null;
-  conversation_count: number;
-  conversation_ids: number[];
-  overall_score: number | null;
-  failure_message: string | null;
-  telegram_chat_ids: string[];
-  telegram_delivered_at: string | null;
-  created_at: string;
-  reviewed_at: string | null;
-};
-
-export type ConversationReviewBatchDetailRecord = ConversationReviewBatchRecord & {
-  workflow_context: Record<string, unknown> | null;
-  summary_markdown: string | null;
-  summary_json: Record<string, unknown> | null;
-};
-
-export type ConversationReviewItemRecord = {
-  id: number;
-  batch_id: number;
-  conversation_id: number;
-  score: number | null;
-  verdict: string | null;
-  severity: string | null;
-  issue_types: string[];
-  root_cause_area: string | null;
-  what_went_wrong: string | null;
-  suggested_fix: string | null;
-  evidence: Array<{ message_id?: number; quote?: string }>;
-  raw_analysis: Record<string, unknown> | null;
-  created_at: string;
-};
-
-export type ConversationReviewDetailResponse = {
-  batch: ConversationReviewBatchDetailRecord;
-  items: ConversationReviewItemRecord[];
-};
-
-export type ConversationReviewCandidateRecord = {
-  conversation_id: number;
-  customer_name: string;
-  customer_phone: string | null;
-  started_at: string;
-  last_message_at: string | null;
-  inbound_count: number;
-  outbound_count: number;
-  auto_flags: string[];
-  route_keys_seen: string[];
-  last_customer_message: string;
-  last_bot_message: string;
-};
-
-export type ConversationReviewRunResponse =
-  | { status: "disabled"; reason: string }
-  | { status: "busy" }
-  | { status: "skipped"; reason: string; available?: number }
-  | { status: "completed"; batchId: number; conversationCount: number };
-
 export type StorefrontPaymentIntentCreateResponse = {
   order_id: number;
   token: string;
@@ -693,29 +628,6 @@ export async function getSettings() {
 
 export async function getSchema() {
   return apiFetch<SchemaResponse>("/v1/schema");
-}
-
-export async function getConversationReviewBatches(limit = 20) {
-  return apiFetch<ListResponse<ConversationReviewBatchRecord>>(`/v1/conversation-reviews?limit=${limit}`);
-}
-
-export async function getConversationReviewBatch(batchId: number) {
-  return apiFetch<ConversationReviewDetailResponse>(`/v1/conversation-reviews/${batchId}`);
-}
-
-export async function getConversationReviewCandidates(limit = 20) {
-  return apiFetch<ListResponse<ConversationReviewCandidateRecord>>(`/v1/conversation-reviews/candidates?limit=${limit}`);
-}
-
-export async function runConversationReview(payload?: {
-  force?: boolean;
-  limit?: number;
-  conversation_ids?: number[];
-}) {
-  return apiRequest<ConversationReviewRunResponse>("/v1/conversation-reviews/run", {
-    method: "POST",
-    body: JSON.stringify(payload ?? {}),
-  });
 }
 
 export async function getStorefrontAnalyticsOverview(options?: {

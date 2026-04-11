@@ -67,8 +67,6 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       UPLOADS_DIR: ${UPLOADS_DIR}
       PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL}
-      # In-container repo root for n8n/v18/*.json (must match volume ./n8n → /app/review-repo/n8n)
-      CONVERSATION_REVIEW_REPO_DIR: /app/review-repo
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
