@@ -237,12 +237,19 @@ function normalizeBrandKey(value: string) {
   return normalizeText(value).replace(/\s+/g, "_");
 }
 
+function normalizeCatalogBrandKey(value: string) {
+  const normalized = normalizeBrandKey(value);
+  if (["xiaomi", "redmi", "poco"].includes(normalized)) {
+    return "xiaomi_family";
+  }
+  return normalized;
+}
+
 const BRAND_SIGNAL_RULES: Array<{ key: string; pattern: RegExp }> = [
   { key: "apple", pattern: /(?:^|\s)(?:iphone|apple|ipad|macbook)(?=\s|\d|$)/i },
   { key: "samsung", pattern: /(?:^|\s)(?:samsung|samsumg|samgung|sansung|galaxy)(?=\s|\d|$)/i },
   { key: "motorola", pattern: /(?:^|\s)(?:motorola|moto)(?=\s|\d|$)/i },
-  { key: "xiaomi", pattern: /(?:^|\s)(?:xiaomi|xaomi|xiami|xioami)(?=\s|\d|$)/i },
-  { key: "redmi", pattern: /(?:^|\s)(?:redmi|redmy|rexmi|redim|remdi|poco)(?=\s|\d|$)/i },
+  { key: "xiaomi_family", pattern: /(?:^|\s)(?:xiaomi|xaomi|xiami|xioami|redmi|redmy|rexmi|redim|remdi|poco)(?=\s|\d|$)/i },
   { key: "google", pattern: /(?:^|\s)(?:google|pixel)(?=\s|\d|$)/i },
   { key: "jbl", pattern: /(?:^|\s)(?:jbl)(?=\s|\d|$)/i },
 ];
@@ -350,7 +357,7 @@ function prioritizeBrandBrowseCandidates<
     score: number;
   },
 >(products: T[], brandKey: string, limit: number) {
-  const matchingProducts = products.filter((product) => product.brand_key === brandKey);
+  const matchingProducts = products.filter((product) => normalizeCatalogBrandKey(product.brand_key) === brandKey);
   if (matchingProducts.length === 0) {
     return products.slice(0, limit);
   }
@@ -709,8 +716,7 @@ function brandKeyMatchesText(brandKey: string, text: string) {
     apple: ["apple", "iphone", "ipad", "macbook"],
     samsung: ["samsung", "samsumg", "samgung", "sansung", "galaxy"],
     motorola: ["motorola", "moto"],
-    xiaomi: ["xiaomi", "xaomi", "xiami", "xioami"],
-    redmi: ["redmi", "redmy", "rexmi", "redim", "remdi", "poco"],
+    xiaomi_family: ["xiaomi", "xaomi", "xiami", "xioami", "redmi", "redmy", "rexmi", "redim", "remdi", "poco"],
     google: ["google", "pixel"],
     jbl: ["jbl", "parlante", "parlantes", "speaker", "speakers"],
   };
@@ -863,8 +869,7 @@ const BRAND_ROW_REGEX: Record<string, string> = {
   apple: "apple|iphone|ipad|macbook",
   samsung: "samsung|galaxy",
   motorola: "motorola|\\bmoto\\b",
-  xiaomi: "xiaomi",
-  redmi: "redmi|poco",
+  xiaomi_family: "xiaomi|redmi|poco",
   google: "google|pixel",
   jbl: "jbl",
 };
@@ -1522,7 +1527,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
           product_name: product.title,
           description: product.description,
           product_url: null,
-          brand_key: normalizeBrandKey(product.brand),
+          brand_key: normalizeCatalogBrandKey(product.brand),
           category: product.category,
           condition: product.condition,
           storage_gb: product.storage_gb ?? inferStorageGb(product),

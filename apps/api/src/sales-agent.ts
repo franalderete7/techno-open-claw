@@ -177,8 +177,7 @@ const BRAND_ALIASES: Record<string, string[]> = {
   apple: ["apple", "iphone", "ipad", "ios"],
   samsung: ["samsung", "samsumg", "samgung", "sansung", "galaxy"],
   motorola: ["motorola", "moto"],
-  xiaomi: ["xiaomi", "xaomi", "xiami", "xioami", "mi"],
-  redmi: ["redmi", "redmy", "rexmi", "redim", "remdi", "poco"],
+  xiaomi_family: ["xiaomi", "xaomi", "xiami", "xioami", "mi", "redmi", "redmy", "rexmi", "redim", "remdi", "poco"],
   google: ["google", "pixel"],
   jbl: ["jbl", "parlante", "parlantes", "speaker", "speakers"],
 };
@@ -294,7 +293,18 @@ function isAppleBrand(value: string) {
   return normalized === "apple" || normalized === "iphone";
 }
 
+function normalizeCatalogBrand(value: string) {
+  const normalized = normalizeMessageText(value);
+  if (["xiaomi", "redmi", "poco"].includes(normalized)) {
+    return "xiaomi_family";
+  }
+  return normalized;
+}
+
 function formatBrandLabel(brand: string) {
+  if (normalizeCatalogBrand(brand) === "xiaomi_family") {
+    return "Xiaomi / Redmi / Poco";
+  }
   return isAppleBrand(brand) ? "iPhone" : brand.trim();
 }
 
@@ -345,7 +355,7 @@ function getDistinctBrands(products: Product[]) {
   const counters = new Map<string, { brand: string; count: number }>();
 
   for (const product of products) {
-    const key = normalizeMessageText(product.brand);
+    const key = normalizeCatalogBrand(product.brand);
     const current = counters.get(key);
     if (current) {
       current.count += 1;
@@ -362,7 +372,7 @@ function detectBrandMention(text: string, products: Product[]) {
   const brands = getDistinctBrands(products);
 
   for (const entry of brands) {
-    const brandKey = normalizeMessageText(entry.brand);
+    const brandKey = normalizeCatalogBrand(entry.brand);
     const aliases = BRAND_ALIASES[brandKey] ?? [brandKey];
     if (aliases.some((alias) => normalized.includes(alias))) {
       return entry.brand;
@@ -430,8 +440,8 @@ function findSpecificProductMatches(text: string, products: Product[]) {
 }
 
 function filterProductsByBrand(products: Product[], brand: string) {
-  const brandKey = normalizeMessageText(brand);
-  return products.filter((product) => normalizeMessageText(product.brand) === brandKey);
+  const brandKey = normalizeCatalogBrand(brand);
+  return products.filter((product) => normalizeCatalogBrand(product.brand) === brandKey);
 }
 
 function isDisallowedWorkflowProduct(product: Pick<Product, "brand" | "condition">) {
