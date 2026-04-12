@@ -1209,8 +1209,9 @@ const appendUrl = (text, productUrl) => {
 const stripInstallmentMentions = (value) =>
   normalizeReplySpacing(
     String(value || '')
-      .replace(/(?:^|[.!?]\\s+|\\n+)[^.!?\\n]*\\b(?:cuota|cuotas|financi|bancarizada|macro|sin inter[eé]s)\\b[^.!?\\n]*[.!?]?/gi, ' ')
-      .replace(/\\n\\s*\\n/g, '\\n')
+      .split('\\n')
+      .filter((line) => !/\\b(?:cuota|cuotas|financi|bancarizada|macro|sin inter[eé]s)\\b/i.test(line))
+      .join('\\n')
   );
 const buildInstallmentSnippet = (product, includeTotals = false) => {
   const cuotasQty = Number(product?.cuotas_qty);
@@ -1237,6 +1238,122 @@ const buildInstallmentSnippet = (product, includeTotals = false) => {
   }
 
   return options.length > 0 ? options.join(' o ') : null;
+};
+const splitLongMessage = (text, maxLength = 900) => {
+  const normalized = normalizeReplySpacing(text);
+  if (!normalized) return [];
+  if (normalized.length <= maxLength) return [normalized];
+
+  const lines = normalized.split('\\n').map((line) => line.trim()).filter(Boolean);
+  const chunks = [];
+  let current = '';
+
+  const pushCurrent = () => {
+    const chunk = normalizeReplySpacing(current);
+    if (chunk) chunks.push(chunk);
+    current = '';
+  };
+
+  for (const line of lines) {
+    if (line.length > maxLength) {
+      if (current) pushCurrent();
+      for (let index = 0; index < line.length; index += maxLength) {
+        const piece = line.slice(index, index + maxLength).trim();
+        if (piece) chunks.push(piece);
+      }
+      continue;
+    }
+
+    const candidate = current ? current + '\\n' + line : line;
+    if (candidate.length > maxLength && current) {
+      pushCurrent();
+      current = line;
+      continue;
+    }
+
+    current = candidate;
+  }
+
+  if (current) pushCurrent();
+  return chunks;
+};
+const isCatalogProductBlock = (section) =>
+  /(?:^|\\n)Contado:\\s+/i.test(section) || /(?:^|\\n)Link:\\s*https?:\\/\\//i.test(section);
+const splitCatalogReplyIntoMessages = (text, maxLength = 900) => {
+  const normalized = String(text || '').replace(/\\r\\n/g, '\\n').trim();
+  if (!normalized) return [];
+  if (normalized.length <= maxLength) return [normalizeReplySpacing(normalized)];
+
+  const sections = normalized.split(/\\n{2,}/).map((section) => section.trim()).filter(Boolean);
+  if (!sections.length) return [];
+
+  let intro = '';
+  let outro = '';
+  const productSections = [];
+
+  for (const section of sections) {
+    if (isCatalogProductBlock(section)) {
+      productSections.push(section);
+    } else if (!intro) {
+      intro = section;
+    } else {
+      outro = outro ? outro + '\\n\\n' + section : section;
+    }
+  }
+
+  if (!productSections.length) {
+    return splitLongMessage(normalized, maxLength);
+  }
+
+  const chunks = [];
+  let current = intro || '';
+
+  const pushCurrent = () => {
+    const chunk = normalizeReplySpacing(current);
+    if (chunk) chunks.push(chunk);
+    current = '';
+  };
+
+  const appendSection = (section) => {
+    const candidate = current ? current + '\\n\\n' + section : section;
+    if (candidate.length <= maxLength) {
+      current = candidate;
+      return;
+    }
+
+    if (current) {
+      pushCurrent();
+    }
+
+    if (section.length <= maxLength) {
+      current = section;
+      return;
+    }
+
+    const subChunks = splitLongMessage(section, maxLength);
+    if (!subChunks.length) return;
+    if (subChunks.length === 1) {
+      current = subChunks[0];
+      return;
+    }
+
+    chunks.push(...subChunks.slice(0, -1));
+    current = subChunks[subChunks.length - 1];
+  };
+
+  for (const productSection of productSections) {
+    appendSection(productSection);
+  }
+
+  if (outro) {
+    appendSection(outro);
+  }
+
+  if (current) {
+    pushCurrent();
+  }
+
+  return chunks;
 };
 const isUnsafeCatalogUrl = (url) =>
   /(?:test|random|placeholder|dummy|demo|sample)/i.test(String(url || ''));
@@ -1584,8 +1701,6 @@ if (asksFinancingIntent && primaryProduct) {
     const prefix = cleanedReply ? (/[.!?]$/.test(cleanedReply) ? ' ' : '. ') : '';
     replyText = normalizeReplySpacing(cleanedReply + prefix + 'En sucursal te confirman la cuota exacta de este equipo.');
   }
-} else if (!asksFinancingIntent) {
-  replyText = stripInstallmentMentions(replyText);
 }
 
 if (asksBuyingStep && router.route_key !== 'storefront_order' && !/link de pago por WhatsApp/i.test(replyText)) {
@@ -1616,7 +1731,7 @@ replyText = normalizeReplySpacing(
         .replace(/(?:si queres|si querés)?\\s*(?:tamb[ié]en\\s*)?(?:pod[eé]s|ten[eé]s)\\s+(?:ver|mirar)\\s+todo\\s+el\\s+cat[aá]logo(?:\\s+en)?\\s*\\.?/gi, router.route_key === 'exact_product_quote' ? '' : '$&')
     )
   )
-).slice(0, 1100).trim();
+).trim();
 
 if (userClosedTurn && recentBotMessages.some((message) => normalizeForDuplicateCheck(message.text) === normalizeForDuplicateCheck(replyText))) {
   actionList = unique([...actionList, 'no_reply']);
@@ -1642,8 +1757,12 @@ if (!actionList.includes('no_reply') && asksImageRequest && primaryImageUrl) {
   actionList = unique([...actionList, 'attach_product_images']);
   replyMessages.push({ type: 'image', image_url: primaryImageUrl, url: primaryImageUrl });
 }
-if (replyText) {
-  replyMessages.push({ type: 'text', text: replyText });
+const textMessages =
+  router.route_key === 'brand_catalog'
+    ? splitCatalogReplyIntoMessages(replyText)
+    : splitLongMessage(replyText);
+for (const textMessage of textMessages) {
+  replyMessages.push({ type: 'text', text: textMessage });
 }
 
 const shouldSend = !actionList.includes('no_reply');
