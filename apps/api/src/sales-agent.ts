@@ -175,10 +175,10 @@ const DEFAULT_STAGE_BY_ROUTE: Record<string, string> = {
 
 const BRAND_ALIASES: Record<string, string[]> = {
   apple: ["apple", "iphone", "ipad", "ios"],
-  samsung: ["samsung", "galaxy"],
+  samsung: ["samsung", "samsumg", "samgung", "sansung", "galaxy"],
   motorola: ["motorola", "moto"],
-  xiaomi: ["xiaomi", "mi"],
-  redmi: ["redmi", "poco"],
+  xiaomi: ["xiaomi", "xaomi", "xiami", "xioami", "mi"],
+  redmi: ["redmi", "redmy", "rexmi", "redim", "remdi", "poco"],
   google: ["google", "pixel"],
   jbl: ["jbl", "parlante", "parlantes", "speaker", "speakers"],
 };
@@ -463,12 +463,12 @@ function sortProductsForCatalog(products: Product[]) {
 function buildBrandChooserReply(products: Product[]) {
   const brands = getDistinctBrands(products).slice(0, 8);
   const lines = [
-    "Si, te paso el catalogo mejor filtrado por marca para que quede claro.",
+    "Si, te ayudo a elegir rapido.",
     "",
-    "Decime cual queres ver:",
+    "Decime la marca que mas te guste y te mando opciones con precio de contado y cuotas:",
     ...brands.map((entry) => `- ${formatBrandLabel(entry.brand)} (${entry.count})`),
     "",
-    "Si queres, tambien te lo filtro por memoria o presupuesto.",
+    "Si queres, tambien te armo algo mas puntual por memoria o presupuesto.",
   ];
 
   return lines.join("\n");
@@ -503,7 +503,7 @@ function buildCatalogListReply(params: {
     message += `\n\nCatalogo completo: ${params.catalogUrl}`;
   }
 
-  return `${message}\n\nSi queres, te filtro la lista por memoria, precio o color.`;
+  return `${message}\n\nSi queres, te ayudo a elegir el que mas te conviene por memoria, precio o color.`;
 }
 
 function buildExactProductReply(products: Product[], storefrontUrl: string) {
@@ -514,14 +514,14 @@ function buildExactProductReply(products: Product[], storefrontUrl: string) {
   if (products.length === 1) {
     const product = products[0];
     return [
-      "Si, lo tengo publicado:",
+      "Si, esta es una muy buena opcion:",
       "",
       product.title,
       `Precio: ${formatMoney(product.price_amount, product.currency_code)}`,
       `Estado: ${formatAvailability(product)}`,
       `Link: ${buildStorefrontProductUrl(storefrontUrl, product.sku)}`,
       "",
-      "Si queres, tambien te paso otras variantes de ese modelo.",
+      "Si queres, tambien te paso otras variantes o te explico como avanzar con la compra.",
     ].join("\n");
   }
 
@@ -709,12 +709,12 @@ export async function generateResponse(context: TurnContext, router: RouterOutpu
       if (brandProducts.length === 0) {
         rawText = `No veo productos activos de ${formatBrandLabel(
           router.matched_brand
-        )} en este momento. Si queres, te paso otra marca o te filtro por presupuesto.`;
+        )} en este momento. Si queres, te muestro otra marca y te paso opciones con contado y cuotas.`;
         break;
       }
 
       rawText = buildCatalogListReply({
-        intro: `Te paso algunos ${formatBrandLabel(router.matched_brand)} publicados ahora:`,
+        intro: `Te paso algunos ${formatBrandLabel(router.matched_brand)} que hoy salen muy bien:`,
         products: brandProducts,
         storefrontUrl,
         catalogUrl: buildBrandCatalogUrl(storefrontUrl, router.matched_brand),
@@ -737,8 +737,8 @@ export async function generateResponse(context: TurnContext, router: RouterOutpu
         .map((entry) => formatBrandLabel(entry.brand))
         .join(", ");
       rawText = isGreetingMessage(context.user_message)
-        ? `Si, estamos atendiendo.\n\nSi queres catalogo o lista de precios, te lo filtro por marca o categoria para que quede prolijo.\n\nDecime que queres ver: ${brands}.`
-        : `Contame que marca, categoria o modelo buscas y te paso solo opciones publicadas.\n\nSi queres, te lo filtro por marca, tablet, parlante, memoria o presupuesto.`;
+        ? `Si, estamos atendiendo.\n\nContame que marca o modelo te interesa y te paso opciones lindas con precio de contado y cuotas.\n\nHoy estamos trabajando mucho ${brands}.`
+        : `Contame que marca, categoria o modelo buscas y te paso opciones publicadas con precio de contado y cuotas.\n\nSi queres, te ayudo a encontrar algo bueno por marca, memoria o presupuesto.`;
       break;
     }
     case "store_info": {
@@ -751,12 +751,12 @@ export async function generateResponse(context: TurnContext, router: RouterOutpu
     }
     case "storefront_order": {
       rawText =
-        "Decime que modelo queres comprar y te paso el link correcto.\n\nSi preferis, tambien te puedo mostrar la lista por marca para elegir mas rapido.";
+        "Decime que modelo queres comprar y te paso el link correcto.\n\nSi preferis, tambien te muestro opciones por marca con contado y cuotas para elegir mas rapido.";
       actions.push("attach_store_url");
       break;
     }
     default: {
-      rawText = "Contame que modelo o marca buscas y te paso precio y opciones publicadas.";
+      rawText = "Contame que modelo o marca buscas y te paso precio, cuotas y opciones publicadas.";
       break;
     }
   }

@@ -237,6 +237,16 @@ function normalizeBrandKey(value: string) {
   return normalizeText(value).replace(/\s+/g, "_");
 }
 
+const BRAND_SIGNAL_RULES: Array<{ key: string; pattern: RegExp }> = [
+  { key: "apple", pattern: /(?:^|\s)(?:iphone|apple|ipad|macbook)(?=\s|\d|$)/i },
+  { key: "samsung", pattern: /(?:^|\s)(?:samsung|samsumg|samgung|sansung|galaxy)(?=\s|\d|$)/i },
+  { key: "motorola", pattern: /(?:^|\s)(?:motorola|moto)(?=\s|\d|$)/i },
+  { key: "xiaomi", pattern: /(?:^|\s)(?:xiaomi|xaomi|xiami|xioami)(?=\s|\d|$)/i },
+  { key: "redmi", pattern: /(?:^|\s)(?:redmi|redmy|rexmi|redim|remdi|poco)(?=\s|\d|$)/i },
+  { key: "google", pattern: /(?:^|\s)(?:google|pixel)(?=\s|\d|$)/i },
+  { key: "jbl", pattern: /(?:^|\s)(?:jbl)(?=\s|\d|$)/i },
+];
+
 function hostFromUrl(value: string | null | undefined) {
   try {
     return value ? new URL(value).host || null : null;
@@ -267,7 +277,7 @@ function extractCatalogFamilyNumberFromText(value: string) {
   }
 
   const familyMatch = normalized.match(
-    /(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\s+([0-9]{1,3})/i
+    /(?:iphone|galaxy|redmi|note|poco|moto|motorola|pixel|xiaomi)\s*([0-9]{1,3})/i
   );
   if (familyMatch) {
     return Number(familyMatch[1]);
@@ -602,16 +612,14 @@ function extractStorageValueFromMessage(normalizedMessage: string) {
 }
 
 function extractMessageBrandKeys(message: string) {
+  const normalizedMessage = normalizeText(message);
   const brandKeys = new Set<string>();
 
-  if (/(^| )(iphone|apple|ipad|macbook)( |$)/.test(message)) brandKeys.add("apple");
-  if (/(^| )(samsung|galaxy)( |$)/.test(message)) brandKeys.add("samsung");
-  if (/(^| )(motorola|moto)( |$)/.test(message)) brandKeys.add("motorola");
-  if (/(^| )(xiaomi|xaomi|xiami)( |$)/.test(message)) brandKeys.add("xiaomi");
-  if (/(^| )(redmi|rexmi|redmy)( |$)/.test(message)) brandKeys.add("redmi");
-  if (/(^| )(poco)( |$)/.test(message)) brandKeys.add("redmi");
-  if (/(^| )(google|pixel)( |$)/.test(message)) brandKeys.add("google");
-  if (/(^| )(jbl)( |$)/.test(message)) brandKeys.add("jbl");
+  for (const rule of BRAND_SIGNAL_RULES) {
+    if (rule.pattern.test(normalizedMessage)) {
+      brandKeys.add(rule.key);
+    }
+  }
 
   return [...brandKeys];
 }
@@ -664,7 +672,7 @@ function getMessageProductSignals(userMessage: string): MessageProductSignals {
   const brandKeys = extractMessageBrandKeys(normalizedMessage);
   const tierKey = extractMessageTierKey(normalizedMessage);
   const familyMatch = normalizedMessage.match(
-    /(?:iphone|galaxy|redmi|rexmi|redmy|note|poco|moto|motorola|pixel|xiaomi|xaomi|xiami)\s+([0-9]{1,3})/i
+    /(?:iphone|galaxy|redmi|rexmi|redmy|redim|remdi|note|poco|moto|motorola|pixel|xiaomi|xaomi|xiami|xioami)\s*([0-9]{1,3})/i
   );
   const samsungSNumber = extractSamsungSNumberFromMessage(normalizedMessage);
   const storageValue = extractStorageValueFromMessage(normalizedMessage);
@@ -699,10 +707,10 @@ function getMessageProductSignals(userMessage: string): MessageProductSignals {
 function brandKeyMatchesText(brandKey: string, text: string) {
   const tokensByBrand: Record<string, string[]> = {
     apple: ["apple", "iphone", "ipad", "macbook"],
-    samsung: ["samsung", "galaxy"],
+    samsung: ["samsung", "samsumg", "samgung", "sansung", "galaxy"],
     motorola: ["motorola", "moto"],
-    xiaomi: ["xiaomi"],
-    redmi: ["redmi", "poco"],
+    xiaomi: ["xiaomi", "xaomi", "xiami", "xioami"],
+    redmi: ["redmi", "redmy", "rexmi", "redim", "remdi", "poco"],
     google: ["google", "pixel"],
     jbl: ["jbl", "parlante", "parlantes", "speaker", "speakers"],
   };
@@ -856,7 +864,7 @@ const BRAND_ROW_REGEX: Record<string, string> = {
   samsung: "samsung|galaxy",
   motorola: "motorola|\\bmoto\\b",
   xiaomi: "xiaomi",
-  redmi: "redmi|poco|xiaomi",
+  redmi: "redmi|poco",
   google: "google|pixel",
   jbl: "jbl",
 };
