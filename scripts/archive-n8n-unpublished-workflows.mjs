@@ -6,9 +6,10 @@
  * - n8n 2.15+ exposes POST /api/v1/workflows/{id}/archive (and /unarchive).
  *   Ref: https://github.com/n8n-io/n8n/issues/27513
  * - There is no `n8n archive:workflow` CLI; this script uses HTTP.
- * - Public API PUT /workflows/{id} does NOT allow extra fields (additionalProperties: false)
- *   and marks isArchived as read-only — do not use PUT to archive. Use POST .../archive
- *   or REST PATCH .../rest/workflows/{id} as fallback.
+ * - Public API PUT /workflows/{id} lists isArchived as read-only — use POST .../archive when available.
+ * - If POST /archive returns 405, your n8n is older than the archive routes: upgrade n8n, or use
+ *   the Docker CLI fallback (export → set isArchived → import:workflow), which runs inside the container.
+ * - REST /rest/workflows PATCH often returns 401 with API keys (session/JWT only on some setups).
  *
  * Discovery: exports all workflows from the n8n container (same pattern as
  * scripts/cleanup-n8n-v18-unpublished.mjs), then filters client-side.
@@ -24,6 +25,7 @@
  *   N8N_CONTAINER_NAME — optional docker container name
  *   N8N_CONTAINER_TMP_DIR — default /tmp/techno-open-claw-n8n-archive-unpublished
  *   N8N_ARCHIVE_UNPUBLISHED_SKIP_NAMES — comma-separated exact workflow names to skip
+ *   N8N_ARCHIVE_SKIP_CLI — if "1", do not use docker exec + n8n import fallback (default: CLI tried after HTTP fails)
  *
  * @see https://docs.n8n.io/api/
  */
@@ -222,12 +224,6 @@ async function tryPostArchive(auth, workflowId) {
 
     lastStatus = res.status;
     errors.push(`${url} -> ${res.status} ${res.text.slice(0, 240)}`);
-
-    if (res.status === 401 || res.status === 403) {
-      const err = new Error(`POST ${url} -> ${res.status} ${res.text}`.trim());
-      err.status = res.status;
-      throw err;
-    }
   }
 
   const err = new Error(`POST archive failed (last ${lastStatus}): ${errors.join(" | ")}`);
@@ -245,45 +241,120 @@ async function fetchJson(auth, method, url, body) {
   return res.text ? JSON.parse(res.text) : null;
 }
 
+function restAuthVariants() {
+  const key = process.env.N8N_API_KEY;
+  const basic = buildAuth();
+  const out = [];
+
+  if (key) {
+    out.push({
+      headers: { ...basic.headers },
+      basic: basic.basic,
+    });
+    out.push({
+      headers: { Authorization: `Bearer ${key}` },
+      basic: basic.basic,
+    });
+    out.push({
+      headers: { ...basic.headers, Authorization: `Bearer ${key}` },
+      basic: basic.basic,
+    });
+  } else {
+    out.push(basic);
+  }
+
+  return out;
+}
+
 /**
  * Internal editor API (same family as DELETE /rest/workflows/:id in cleanup script).
- * May work when public POST /archive is unavailable or mis-routed.
+ * Often 401 if the instance only accepts session cookies for /rest/.
  */
-async function tryRestPatchArchive(auth, workflowId) {
+async function tryRestPatchArchive(workflowId) {
   const url = `${instanceRootUrl()}/rest/workflows/${workflowId}`;
   let lastError = null;
 
-  for (const body of [{ isArchived: true }, { archived: true }]) {
-    try {
-      await fetchJson(auth, "PATCH", url, body);
-      return { method: "REST PATCH", url };
-    } catch (error) {
-      lastError = error;
+  for (const auth of restAuthVariants()) {
+    for (const body of [{ isArchived: true }, { archived: true }]) {
+      try {
+        await fetchJson(auth, "PATCH", url, body);
+        return { method: "REST PATCH", url };
+      } catch (error) {
+        lastError = error;
+      }
     }
   }
 
   throw lastError || new Error(`REST PATCH failed for ${workflowId}`);
 }
 
-async function archiveOne(auth, workflowId) {
+/**
+ * Works without HTTP archive/PATCH: export JSON, set isArchived, re-import (upserts by id).
+ * Safe for inactive workflows (import deactivates; these are already inactive).
+ */
+function archiveViaContainerCli(container, workflowId) {
+  const safeId = String(workflowId).replace(/[^a-zA-Z0-9_-]/g, "");
+  if (safeId !== String(workflowId)) {
+    throw new Error(`Refusing CLI archive: unexpected workflow id shape (${workflowId})`);
+  }
+
+  const containerPath = `${CONTAINER_TMP_DIR}/cli-archive-${safeId}.json`;
+
+  containerSh(
+    container,
+    `mkdir -p '${CONTAINER_TMP_DIR}' && rm -f '${containerPath}' && n8n export:workflow --id='${safeId}' --output='${containerPath}'`,
+  );
+
+  containerSh(
+    container,
+    `node -e "` +
+      `const fs=require('fs');` +
+      `const p='${containerPath}';` +
+      `const raw=fs.readFileSync(p,'utf8');` +
+      `const original=JSON.parse(raw);` +
+      `const wasArray=Array.isArray(original);` +
+      `const arr=wasArray?original:[original];` +
+      `for(const w of arr){w.isArchived=true;}` +
+      `fs.writeFileSync(p,JSON.stringify(wasArray?arr:arr[0]));` +
+      `"`,
+  );
+
+  containerSh(container, `n8n import:workflow --input='${containerPath}'`);
+  containerSh(container, `rm -f '${containerPath}'`);
+
+  return { method: "CLI import (docker exec)", url: containerPath };
+}
+
+async function archiveOne(auth, workflowId, container) {
   let postErrMsg = null;
   try {
     return await tryPostArchive(auth, workflowId);
   } catch (postErr) {
     postErrMsg = postErr.message || String(postErr);
-    if (postErr.status === 401 || postErr.status === 403) {
-      throw postErr;
-    }
   }
 
   try {
-    return await tryRestPatchArchive(auth, workflowId);
+    return await tryRestPatchArchive(workflowId);
   } catch (restErr) {
+    const skipCli = String(process.env.N8N_ARCHIVE_SKIP_CLI || "").trim() === "1";
+    if (!skipCli && container) {
+      try {
+        return archiveViaContainerCli(container, workflowId);
+      } catch (cliErr) {
+        const hint =
+          "HTTP: POST /api/v1/workflows/{id}/archive returned 405 on your n8n — upgrade n8n (archive API) or rely on CLI fallback. " +
+          "REST PATCH often needs UI session auth, not only API keys. " +
+          "CLI: ensure the script runs on the Docker host with access to the n8n container.";
+        throw new Error(
+          `${postErrMsg}\nREST fallback: ${restErr.message || restErr}\nCLI fallback: ${cliErr.message || cliErr}\n${hint}`,
+        );
+      }
+    }
+
     const hint =
-      "Tips: (1) n8n 2.15+ exposes POST /api/v1/workflows/{id}/archive. " +
-      "(2) Scoped API keys need permission to delete/archive workflows. " +
-      "(3) Set N8N_API_BASE_URL to the instance origin (e.g. https://n8n.technostoresalta.com) — not only /api/v1. " +
-      "(4) Public PUT cannot include isArchived/versionId/meta; this script no longer uses that path.";
+      "Tips: (1) Upgrade n8n so POST /api/v1/workflows/{id}/archive exists (not 405). " +
+      "(2) Or run without N8N_ARCHIVE_SKIP_CLI=1 so the script can use docker exec + n8n import inside the container. " +
+      "(3) API keys with workflow:delete scope for archive; /rest/ may need owner session instead of API key.";
     throw new Error(`${postErrMsg}\nREST fallback: ${restErr.message || restErr}\n${hint}`);
   }
 }
@@ -326,7 +397,7 @@ async function main() {
     for (const r of candidates) {
       process.stdout.write(`Archiving ${r.name} (${r.id})... `);
       try {
-        const result = await archiveOne(auth, r.id);
+        const result = await archiveOne(auth, r.id, container);
         console.log(`ok (${result.method})`);
       } catch (error) {
         console.log(`FAILED: ${error.message || error}`);

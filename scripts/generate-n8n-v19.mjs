@@ -4,7 +4,13 @@
  * follow-up question, then Groq Qwen chat for specs & tienda (requires last_intent on API customer).
  * Run: node ./scripts/generate-n8n-v19.mjs
  *
- * Env (n8n): GROQ_CHAT_MODEL optional — default qwen/qwen3-32b (Groq “Qwen3”; override if they ship 3.5).
+ * Groq model is stored as a fixed ID on the Groq Chat Model node (e.g. qwen/qwen3-32b). Change it in the n8n UI
+ * dropdown after credentials load — do not use $env in the Model field; the editor cannot preview that and shows
+ * “not accessible via UI, please run node”.
+ * Optional when generating JSON: N8N_GROQ_CHAT_MODEL_ID=baked-model-id
+ * LangChain: AI Agent + lmChatGroq (Groq Chat Model).
+ *   Create n8n credentials type “Groq API” (not HTTP Header). Optional when generating JSON:
+ *   N8N_GROQ_LM_CREDENTIAL_ID, N8N_GROQ_LM_CREDENTIAL_NAME
  */
 
 import { randomUUID } from "node:crypto";
@@ -63,7 +69,15 @@ if (!buildUpdateNode) throw new Error("Build Update Payload not found in v18 sta
 const buildUpdateJs = buildUpdateNode.parameters.jsCode.replaceAll("workflow_version: 'v18'", "workflow_version: 'v19'");
 
 const manyChatCred = entry.nodes.find((n) => n.name === "Send to WhatsApp")?.credentials;
-const groqCred = entry.nodes.find((n) => n.name === "Groq Whisper Transcribe")?.credentials;
+
+const groqLmCredId = String(process.env.N8N_GROQ_LM_CREDENTIAL_ID || "").trim();
+const groqLmCredName = String(process.env.N8N_GROQ_LM_CREDENTIAL_NAME || "Groq API").trim();
+const groqLmCredentials =
+  groqLmCredId !== ""
+    ? { groqApi: { id: groqLmCredId, name: groqLmCredName } }
+    : { groqApi: { id: "REPLACE_GROQ_API_CREDENTIAL", name: "Groq API" } };
+
+const groqChatModelId = String(process.env.N8N_GROQ_CHAT_MODEL_ID || "qwen/qwen3-32b").trim();
 
 const catalogNodes = [
   {
@@ -302,24 +316,38 @@ const history = recent
   .filter(Boolean)
   .join('\\n');
 const firstName = String(row.first_name || 'ahí').trim() || 'ahí';
-const system = [
-  'Sos el asistente de TechnoStore (celulares y tecnología).',
-  'Respondé en español rioplatense, simple, cordial y natural (como WhatsApp). Mensajes cortos salvo que pidan detalle.',
-  'Especificaciones de modelos (pantalla, cámara, batería, etc.): podés usar conocimiento general de productos; si no estás seguro, decilo sin inventar.',
-  'Precios, stock, cuotas, reservas o cierre de venta: no inventes. Decí que los valores del catálogo que enviamos son la referencia y que pueden confirmar en el local o con un asesor humano.',
-  'Datos del local (horario, dirección, teléfono): usá SOLO el bloque TIENDA de abajo. Si falta algo, decí que no tenés el dato.',
-  'No hagas listas enormes; si piden comparar, resumí en 3-4 viñetas.',
-  \`Tratá al cliente como "\${firstName}".\`,
+const agent_system_message = [
+  'Sos el asistente virtual de TechnoStore en WhatsApp. La tienda vende celulares, accesorios y tecnología.',
   '',
-  'TIENDA:',
+  '## Cómo comunicarte',
+  '- Español rioplatense, natural y simple, como una persona del equipo (no robótico).',
+  '- Mensajes cortos por defecto; si piden detalle técnico o comparación, podés extender un poco.',
+  '- No uses markdown pesado ni listas enormes; si comparan modelos, máximo 3–4 bullets o párrafos cortos.',
+  '',
+  '## Qué podés responder bien',
+  '- Especificaciones y uso típico de celulares (pantalla, cámara, batería, rendimiento, ecosistema): usá conocimiento general del mercado.',
+  '- Si hay duda (variantes de modelo, cambios de ficha técnica), decilo honestamente; no inventes números ni fechas.',
+  '- Preguntas sobre el local: SOLO usá datos del bloque TIENDA más abajo. Si algo no figura ahí, decí que no tenés el dato y ofrecé que un humano lo confirme o que pasen por el local.',
+  '',
+  '## Qué no podés inventar',
+  '- Precio al contado, cuotas, promociones, stock, reservas, garantías, envíos o “lo último que sale”: no afirmes nada concreto.',
+  '- Decí que los valores y disponibilidad los acaban de ver en el catálogo que enviamos por este chat y que para cerrar o casos puntuales conviene hablar con la tienda o un asesor humano.',
+  '',
+  '## Contexto',
+  '- No digas que buscaste en internet en tiempo real ni que tenés acceso a la web.',
+  '- Si el mensaje es off-topic, respondé muy breve y redirigí amablemente a celulares o a la tienda.',
+  '',
+  \`## Trato al cliente\\nUsá un tono amable; podés tratar de “vos”. Nombre de referencia: \${firstName}.\`,
+  '',
+  '## TIENDA (única fuente de hechos sobre el local)',
   storeBlock,
 ].join('\\n');
-const groq_messages = [
-  { role: 'system', content: system },
-  ...(history ? [{ role: 'user', content: \`Historial reciente:\\n\${history}\` }] : []),
-  { role: 'user', content: String(row.user_message || '').trim().slice(0, 2000) || '(sin texto)' },
-];
-return [{ json: { ...row, groq_messages, groq_model: 'qwen/qwen3-32b' } }];`,
+const userLine = String(row.user_message || '').trim().slice(0, 2000) || '(sin texto)';
+const agent_user_prompt = [
+  history ? \`## Historial reciente (resumen del chat)\\n\${history}\` : '',
+  \`## Mensaje actual del cliente\\n\${userLine}\`,
+].filter(Boolean).join('\\n\\n');
+return [{ json: { ...row, agent_system_message, agent_user_prompt, groq_model: ${JSON.stringify(groqChatModelId)} } }];`,
     },
     id: randomUUID(),
     name: "Build Groq Chat Request",
@@ -329,35 +357,51 @@ return [{ json: { ...row, groq_messages, groq_model: 'qwen/qwen3-32b' } }];`,
   },
   {
     parameters: {
-      method: "POST",
-      url: "https://api.groq.com/openai/v1/chat/completions",
-      authentication: "genericCredentialType",
-      genericAuthType: "httpHeaderAuth",
-      sendHeaders: true,
-      headerParameters: {
-        parameters: [{ name: "Content-Type", value: "application/json" }],
+      model: groqChatModelId,
+      options: {
+        maxTokensToSample: 900,
+        temperature: 0.45,
       },
-      sendBody: true,
-      specifyBody: "json",
-      jsonBody:
-        "={{ JSON.stringify({ model: $env.GROQ_CHAT_MODEL || $json.groq_model || 'qwen/qwen3-32b', messages: $json.groq_messages, temperature: 0.45, max_tokens: 900 }) }}",
-      options: { timeout: 45000 },
     },
     id: randomUUID(),
-    name: "Groq Chat (Qwen)",
-    type: "n8n-nodes-base.httpRequest",
-    typeVersion: 4.2,
-    position: [4160, 420],
-    credentials: groqCred || {
-      httpHeaderAuth: { id: "mw4ftZwdAxSdWFjU", name: "Groq Whisper" },
+    name: "Groq Chat Model (TechnoStore)",
+    type: "@n8n/n8n-nodes-langchain.lmChatGroq",
+    typeVersion: 1,
+    position: [4200, 560],
+    credentials: groqLmCredentials,
+  },
+  {
+    parameters: {
+      promptType: "define",
+      text: "={{ $json.agent_user_prompt }}",
+      hasOutputParser: false,
+      needsFallback: false,
+      options: {
+        systemMessage: "={{ $json.agent_system_message }}",
+        maxIterations: 3,
+        returnIntermediateSteps: false,
+        enableStreaming: false,
+        passthroughBinaryImages: false,
+      },
     },
+    id: randomUUID(),
+    name: "TechnoStore Assistant (AI Agent)",
+    type: "@n8n/n8n-nodes-langchain.agent",
+    typeVersion: 3.1,
+    position: [4200, 420],
   },
   {
     parameters: {
       jsCode: `const raw = $input.first().json || {};
 const row = $('Build Groq Chat Request').first().json || {};
 const ctx = row.context || {};
-const text = String(raw.choices?.[0]?.message?.content || '').trim() || 'Perdón, ahora no pude responder. ¿Podés repetir en una frase qué necesitás?';
+const text = String(
+  raw.output ??
+    raw.text ??
+    (raw.json && typeof raw.json === 'object' ? raw.json.output : '') ??
+    raw.choices?.[0]?.message?.content ??
+    '',
+).trim() || 'Perdón, ahora no pude responder. ¿Podés repetir en una frase qué necesitás?';
 const chunkManyChat = (t, limit) => {
   const s = String(t || '').trim();
   if (!s) return [];
@@ -376,7 +420,7 @@ const chunkManyChat = (t, limit) => {
 const parts = chunkManyChat(text, 1800);
 const wa_messages = parts.map((p) => ({ type: 'text', text: p }));
 const botMessageText = wa_messages.map((m) => m.text).join('\\n\\n────────\\n\\n');
-const model = String(raw.model || row.groq_model || 'qwen/qwen3-32b');
+const model = String(raw.model || row.groq_model || 'qwen/qwen3-32b').trim();
 const router_output = {
   route_key: 'v19_groq_chat',
   confidence: 1,
@@ -385,7 +429,7 @@ const router_output = {
   detected_city: null,
   detected_budget_range: null,
   detected_payment_method: null,
-  rationale: 'v19 asistente Groq',
+  rationale: 'v19 AI Agent (Groq)',
 };
 const responder_output = {
   selected_product_keys: [],
@@ -583,9 +627,14 @@ const tailConnections = {
     main: [[{ node: "Claim Reply Send (RPC)", type: "main", index: 0 }]],
   },
   "Build Groq Chat Request": {
-    main: [[{ node: "Groq Chat (Qwen)", type: "main", index: 0 }]],
+    main: [[{ node: "TechnoStore Assistant (AI Agent)", type: "main", index: 0 }]],
   },
-  "Groq Chat (Qwen)": {
+  "Groq Chat Model (TechnoStore)": {
+    ai_languageModel: [
+      [{ node: "TechnoStore Assistant (AI Agent)", type: "ai_languageModel", index: 0 }],
+    ],
+  },
+  "TechnoStore Assistant (AI Agent)": {
     main: [[{ node: "Build Groq Assistant Reply", type: "main", index: 0 }]],
   },
   "Build Groq Assistant Reply": {
