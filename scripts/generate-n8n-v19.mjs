@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
- * Generates n8n/v19/TechnoStore_v19_catalog_only.json — single-workflow v19 (catalog list only).
+ * Generates n8n/v19/TechnoStore_v19_catalog_only.json — v19: full catalog (Samsung→Xiaomi→iPhone→rest),
+ * follow-up question, then Groq Qwen chat for specs & tienda (requires last_intent on API customer).
  * Run: node ./scripts/generate-n8n-v19.mjs
+ *
+ * Env (n8n): GROQ_CHAT_MODEL optional — default qwen/qwen3-32b (Groq “Qwen3”; override if they ship 3.5).
  */
 
 import { randomUUID } from "node:crypto";
@@ -101,6 +104,39 @@ const catalogNodes = [
   },
   {
     parameters: {
+      jsCode:
+        "const row = $input.first().json || {};\nconst ctx = row.context || {};\nconst cust = ctx.customer || {};\nconst lastIntent = cust.last_intent != null ? String(cust.last_intent) : '';\nconst msg = String(row.user_message || '').trim();\nconst refresh = /\\b(cat[aá]logo|lista\\s+completa|precios\\s+de\\s+todo|mostr[aá]me\\s+todo|mand[aá]me\\s+(el\\s+)?cat|env[ií]ame\\s+el\\s+cat)/i.test(msg);\nconst chatIntents = new Set(['catalog_list', 'v19_chat']);\nconst v19_use_catalog = refresh || !chatIntents.has(lastIntent);\nreturn [{ json: { ...row, v19_use_catalog } }];",
+    },
+    id: randomUUID(),
+    name: "Decide v19 Path",
+    type: "n8n-nodes-base.code",
+    typeVersion: 2,
+    position: [3600, 280],
+  },
+  {
+    parameters: {
+      conditions: {
+        options: { caseSensitive: true, typeValidation: "strict", version: 2 },
+        conditions: [
+          {
+            id: randomUUID(),
+            leftValue: "={{ $json.v19_use_catalog }}",
+            rightValue: true,
+            operator: { type: "boolean", operation: "equals" },
+          },
+        ],
+        combinator: "and",
+      },
+      options: {},
+    },
+    id: randomUUID(),
+    name: "Catalog or Chat?",
+    type: "n8n-nodes-base.if",
+    typeVersion: 2.2,
+    position: [3740, 280],
+  },
+  {
+    parameters: {
       jsCode: `const row = $input.first().json || {};
 const ctx = row.context || {};
 const products = Array.isArray(ctx.candidate_products) ? ctx.candidate_products : [];
@@ -127,10 +163,23 @@ const line = (p) => {
   const contado = c ? \`ARS \${c}\` : '—';
   return \`🔥 \${name} | \${contado} | \${banc} | \${macro}\`;
 };
+const brandOrder = (bk) => {
+  const k = String(bk || '').trim().toLowerCase();
+  if (k === 'samsung') return 0;
+  if (k === 'xiaomi') return 1;
+  if (k === 'apple' || k === 'iphone') return 2;
+  return 3;
+};
+const sortedProducts = [...products].sort((a, b) => {
+  const d = brandOrder(a.brand_key) - brandOrder(b.brand_key);
+  if (d !== 0) return d;
+  const na = String(a.product_name || a.title || a.model || '');
+  const nb = String(b.product_name || b.title || b.model || '');
+  return na.localeCompare(nb, 'es', { sensitivity: 'base' });
+});
 const colLegend = 'Nombre | Contado | Bancarizadas | Macro';
-const header = \`🚢 TechnoStore · catálogo completo (\${products.length} ítems) 🔥\\n\${colLegend}\`;
-const lineStrings = products.length ? products.map(line) : ['(Sin productos activos por ahora.)'];
-// ManyChat sendContent: each text bubble must be ≤ 2000 characters (validation error otherwise).
+const header = \`🚢 TechnoStore · catálogo completo (\${sortedProducts.length} ítems) 🔥\\n\${colLegend}\`;
+const lineStrings = sortedProducts.length ? sortedProducts.map(line) : ['(Sin productos activos por ahora.)'];
 const MANYCHAT_TEXT_LIMIT = 1900;
 const prefixFirst = \`\${header}\\n\\n\`;
 const worstContinuationPrefix = \`🚢 Parte 99/99\\n\${colLegend}\\n\\n\`;
@@ -149,14 +198,24 @@ for (const ln of lineStrings) {
 }
 if (curLines.length > 0) blocks.push(curLines.join('\\n'));
 const totalParts = blocks.length;
-const wa_messages = blocks.map((block, i) => ({
+let wa_messages = blocks.map((block, i) => ({
   type: 'text',
   text:
     i === 0
       ? \`\${header}\\n\\n\${block}\`
       : \`🚢 Parte \${i + 1}/\${totalParts}\\n\${colLegend}\\n\\n\${block}\`,
 }));
-const botMessageText = wa_messages.map((m) => m.text).join('\\n\\n────────\\n\\n');
+const closing = '\\n\\n¿Qué modelo en particular te interesa?';
+if (wa_messages.length > 0) {
+  const li = wa_messages.length - 1;
+  const t = wa_messages[li].text;
+  if (t.length + closing.length <= MANYCHAT_TEXT_LIMIT) {
+    wa_messages[li] = { type: 'text', text: t + closing };
+  } else {
+    wa_messages.push({ type: 'text', text: '¿Qué modelo en particular te interesa?' });
+  }
+}
+let botMessageText = wa_messages.map((m) => m.text).join('\\n\\n────────\\n\\n');
 const router_output = {
   route_key: 'catalog_broadcast',
   confidence: 1,
@@ -212,7 +271,168 @@ return [{
     name: "Build Catalog Reply",
     type: "n8n-nodes-base.code",
     typeVersion: 2,
-    position: [3740, 280],
+    position: [3920, 160],
+  },
+  {
+    parameters: {
+      jsCode: `const row = $input.first().json || {};
+const ctx = row.context || {};
+const store = ctx.store || {};
+const storeBits = [
+  store.name ? \`Nombre: \${store.name}\` : '',
+  store.store_address || store.address ? \`Dirección: \${store.store_address || store.address}\` : '',
+  store.store_phone || store.phone ? \`Tel: \${store.store_phone || store.phone}\` : '',
+  store.store_hours || store.hours ? \`Horarios: \${store.store_hours || store.hours}\` : '',
+  store.store_website_url ? \`Web: \${store.store_website_url}\` : '',
+].filter(Boolean);
+const storeBlock = storeBits.length ? storeBits.join('\\n') : '(Sin datos de tienda en contexto; decí que no tenés el dato exacto y ofrecé pasar con un humano.)';
+const recent = Array.isArray(ctx.recent_messages) ? ctx.recent_messages.slice(-6) : [];
+const history = recent
+  .map((m) => {
+    const role = m.role === 'bot' ? 'Asistente' : 'Cliente';
+    let txt = String(m.message || '').trim();
+    if (!txt) return '';
+    if (m.role === 'bot' && (txt.includes('catálogo completo') || txt.includes('TechnoStore · catálogo') || txt.includes('Parte 2/'))) {
+      txt = '[Ya te enviamos el catálogo completo por acá]';
+    } else if (txt.length > 900) {
+      txt = txt.slice(0, 700) + '…';
+    }
+    return \`\${role}: \${txt}\`;
+  })
+  .filter(Boolean)
+  .join('\\n');
+const firstName = String(row.first_name || 'ahí').trim() || 'ahí';
+const system = [
+  'Sos el asistente de TechnoStore (celulares y tecnología).',
+  'Respondé en español rioplatense, simple, cordial y natural (como WhatsApp). Mensajes cortos salvo que pidan detalle.',
+  'Especificaciones de modelos (pantalla, cámara, batería, etc.): podés usar conocimiento general de productos; si no estás seguro, decilo sin inventar.',
+  'Precios, stock, cuotas, reservas o cierre de venta: no inventes. Decí que los valores del catálogo que enviamos son la referencia y que pueden confirmar en el local o con un asesor humano.',
+  'Datos del local (horario, dirección, teléfono): usá SOLO el bloque TIENDA de abajo. Si falta algo, decí que no tenés el dato.',
+  'No hagas listas enormes; si piden comparar, resumí en 3-4 viñetas.',
+  \`Tratá al cliente como "\${firstName}".\`,
+  '',
+  'TIENDA:',
+  storeBlock,
+].join('\\n');
+const groq_messages = [
+  { role: 'system', content: system },
+  ...(history ? [{ role: 'user', content: \`Historial reciente:\\n\${history}\` }] : []),
+  { role: 'user', content: String(row.user_message || '').trim().slice(0, 2000) || '(sin texto)' },
+];
+return [{ json: { ...row, groq_messages, groq_model: 'qwen/qwen3-32b' } }];`,
+    },
+    id: randomUUID(),
+    name: "Build Groq Chat Request",
+    type: "n8n-nodes-base.code",
+    typeVersion: 2,
+    position: [3920, 420],
+  },
+  {
+    parameters: {
+      method: "POST",
+      url: "https://api.groq.com/openai/v1/chat/completions",
+      authentication: "genericCredentialType",
+      genericAuthType: "httpHeaderAuth",
+      sendHeaders: true,
+      headerParameters: {
+        parameters: [{ name: "Content-Type", value: "application/json" }],
+      },
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody:
+        "={{ JSON.stringify({ model: $env.GROQ_CHAT_MODEL || $json.groq_model || 'qwen/qwen3-32b', messages: $json.groq_messages, temperature: 0.45, max_tokens: 900 }) }}",
+      options: { timeout: 45000 },
+    },
+    id: randomUUID(),
+    name: "Groq Chat (Qwen)",
+    type: "n8n-nodes-base.httpRequest",
+    typeVersion: 4.2,
+    position: [4160, 420],
+    credentials: groqCred || {
+      httpHeaderAuth: { id: "mw4ftZwdAxSdWFjU", name: "Groq Whisper" },
+    },
+  },
+  {
+    parameters: {
+      jsCode: `const raw = $input.first().json || {};
+const row = $('Build Groq Chat Request').first().json || {};
+const ctx = row.context || {};
+const text = String(raw.choices?.[0]?.message?.content || '').trim() || 'Perdón, ahora no pude responder. ¿Podés repetir en una frase qué necesitás?';
+const chunkManyChat = (t, limit) => {
+  const s = String(t || '').trim();
+  if (!s) return [];
+  const out = [];
+  let rest = s;
+  while (rest.length > limit) {
+    let cut = rest.lastIndexOf('\\n\\n', limit);
+    if (cut < limit * 0.4) cut = rest.lastIndexOf('. ', limit);
+    if (cut < limit * 0.4) cut = limit;
+    out.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) out.push(rest);
+  return out;
+};
+const parts = chunkManyChat(text, 1800);
+const wa_messages = parts.map((p) => ({ type: 'text', text: p }));
+const botMessageText = wa_messages.map((m) => m.text).join('\\n\\n────────\\n\\n');
+const model = String(raw.model || row.groq_model || 'qwen/qwen3-32b');
+const router_output = {
+  route_key: 'v19_groq_chat',
+  confidence: 1,
+  matched_product_keys: [],
+  matched_brand: null,
+  detected_city: null,
+  detected_budget_range: null,
+  detected_payment_method: null,
+  rationale: 'v19 asistente Groq',
+};
+const responder_output = {
+  selected_product_keys: [],
+  actions: [],
+  state_delta: { intent_key: 'v19_chat', funnel_stage: 'engaged', lead_score_delta: 1 },
+  reply_text: botMessageText,
+  raw_text: botMessageText,
+};
+const validator_output = {
+  approved: true,
+  reply_messages: wa_messages,
+  selected_product_keys: [],
+  actions: [],
+  final_state_delta: {
+    intent_key: 'v19_chat',
+    funnel_stage: 'engaged',
+    lead_score_delta: 1,
+    selected_product_keys: [],
+    share_store_location: false,
+    tags_to_add: [],
+    tags_to_remove: [],
+    summary: 'Chat v19',
+  },
+  validation_errors: [],
+  validation_warnings: [],
+  fallback_reason: null,
+};
+return [{
+  json: {
+    ...row,
+    context: ctx,
+    router_output,
+    responder_output,
+    validator_output,
+    should_send: true,
+    bot_message_text: botMessageText,
+    wa_messages,
+    responder_provider_name: 'groq',
+    responder_model_name: model,
+  },
+}];`,
+    },
+    id: randomUUID(),
+    name: "Build Groq Assistant Reply",
+    type: "n8n-nodes-base.code",
+    typeVersion: 2,
+    position: [4400, 420],
   },
   {
     parameters: {
@@ -235,7 +455,7 @@ return [{
     name: "Claim Reply Send (RPC)",
     type: "n8n-nodes-base.httpRequest",
     typeVersion: 4.2,
-    position: [4020, 280],
+    position: [4680, 280],
     continueOnFail: false,
     alwaysOutputData: false,
   },
@@ -259,18 +479,18 @@ return [{
     name: "Reply Claimed?",
     type: "n8n-nodes-base.if",
     typeVersion: 2.2,
-    position: [4300, 280],
+    position: [4960, 280],
   },
   {
     parameters: {
       jsCode:
-        "const data = $('Build Catalog Reply').first().json || {};\nconst messages = Array.isArray(data.wa_messages)\n  ? data.wa_messages\n  : [{ type: 'text', text: data.bot_message_text || '' }];\nconst wa = [];\nfor (const m of messages) {\n  if (m.type === 'image' && (m.image_url || m.url)) {\n    const url = m.image_url || m.url;\n    wa.push({ type: 'image', url, image_url: url });\n    continue;\n  }\n  const t = String(m.text || '').trim();\n  if (t) wa.push({ type: 'text', text: t });\n}\nreturn [{\n  json: {\n    ...data,\n    payload: {\n      subscriber_id: data.subscriber_id,\n      data: {\n        version: 'v2',\n        content: {\n          type: 'whatsapp',\n          messages: wa,\n        },\n      },\n    },\n  }\n}];",
+        "const catalog = $('Build Catalog Reply').all();\nconst groq = $('Build Groq Assistant Reply').all();\nconst data = catalog.length ? catalog[0].json : groq[0].json;\nconst messages = Array.isArray(data.wa_messages)\n  ? data.wa_messages\n  : [{ type: 'text', text: data.bot_message_text || '' }];\nconst wa = [];\nfor (const m of messages) {\n  if (m.type === 'image' && (m.image_url || m.url)) {\n    const url = m.image_url || m.url;\n    wa.push({ type: 'image', url, image_url: url });\n    continue;\n  }\n  const t = String(m.text || '').trim();\n  if (t) wa.push({ type: 'text', text: t });\n}\nreturn [{\n  json: {\n    ...data,\n    payload: {\n      subscriber_id: data.subscriber_id,\n      data: {\n        version: 'v2',\n        content: {\n          type: 'whatsapp',\n          messages: wa,\n        },\n      },\n    },\n  }\n}];",
     },
     id: randomUUID(),
     name: "Prepare WhatsApp Payload",
     type: "n8n-nodes-base.code",
     typeVersion: 2,
-    position: [4580, 120],
+    position: [5240, 120],
   },
   {
     parameters: {
@@ -287,7 +507,7 @@ return [{
     name: "Send to WhatsApp",
     type: "n8n-nodes-base.httpRequest",
     typeVersion: 4.2,
-    position: [4860, 120],
+    position: [5520, 120],
     credentials: manyChatCred || {
       httpHeaderAuth: { id: "dTDdJWgAz1yrPfPe", name: "ManyChat API" },
     },
@@ -301,18 +521,18 @@ return [{
     name: "Build Sent State Input",
     type: "n8n-nodes-base.code",
     typeVersion: 2,
-    position: [5140, 120],
+    position: [5800, 120],
   },
   {
     parameters: {
       jsCode:
-        "const data = $('Build Catalog Reply').first().json || {};\nreturn [{\n  json: {\n    ...data,\n    should_send: false,\n    send_result: {\n      attempted: false,\n      skipped: true,\n      reason: 'reply_send_not_claimed',\n      sent_at: new Date().toISOString(),\n    },\n  }\n}];",
+        "const catalog = $('Build Catalog Reply').all();\nconst groq = $('Build Groq Assistant Reply').all();\nconst data = catalog.length ? catalog[0].json : groq[0].json;\nreturn [{\n  json: {\n    ...data,\n    should_send: false,\n    send_result: {\n      attempted: false,\n      skipped: true,\n      reason: 'reply_send_not_claimed',\n      sent_at: new Date().toISOString(),\n    },\n  }\n}];",
     },
     id: randomUUID(),
     name: "Build Skipped State Input",
     type: "n8n-nodes-base.code",
     typeVersion: 2,
-    position: [4580, 440],
+    position: [5240, 440],
   },
   {
     parameters: { jsCode: buildUpdateJs },
@@ -320,7 +540,7 @@ return [{
     name: "Build Update Payload",
     type: "n8n-nodes-base.code",
     typeVersion: 2,
-    position: [5420, 280],
+    position: [6080, 280],
   },
   ...["Update Customer", "Should Save Bot Message?", "Save Bot Message", "Log AI Turn", "Return Result"].map(
     (name) => {
@@ -348,9 +568,27 @@ const tailConnections = {
     main: [[{ node: "Normalize Catalog Context", type: "main", index: 0 }]],
   },
   "Normalize Catalog Context": {
-    main: [[{ node: "Build Catalog Reply", type: "main", index: 0 }]],
+    main: [[{ node: "Decide v19 Path", type: "main", index: 0 }]],
+  },
+  "Decide v19 Path": {
+    main: [[{ node: "Catalog or Chat?", type: "main", index: 0 }]],
+  },
+  "Catalog or Chat?": {
+    main: [
+      [{ node: "Build Catalog Reply", type: "main", index: 0 }],
+      [{ node: "Build Groq Chat Request", type: "main", index: 0 }],
+    ],
   },
   "Build Catalog Reply": {
+    main: [[{ node: "Claim Reply Send (RPC)", type: "main", index: 0 }]],
+  },
+  "Build Groq Chat Request": {
+    main: [[{ node: "Groq Chat (Qwen)", type: "main", index: 0 }]],
+  },
+  "Groq Chat (Qwen)": {
+    main: [[{ node: "Build Groq Assistant Reply", type: "main", index: 0 }]],
+  },
+  "Build Groq Assistant Reply": {
     main: [[{ node: "Claim Reply Send (RPC)", type: "main", index: 0 }]],
   },
   "Claim Reply Send (RPC)": {

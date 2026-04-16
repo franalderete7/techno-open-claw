@@ -1802,6 +1802,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
               email: customer.email,
               lead_score: customerState.leadScore,
               funnel_stage: customerState.funnelStage,
+              last_intent: customerState.lastIntent,
               tags: customerState.tags,
               interested_product: customerState.interestedProduct,
               brands_mentioned: customerState.brandsMentioned,
