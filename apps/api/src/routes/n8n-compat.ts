@@ -1421,23 +1421,54 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
       : [];
 
     const interestedProductKey = customerState.interestedProduct?.trim().toLowerCase() || null;
-    const retrievalScoringText = buildRetrievalScoringText(userMessage, recentMessages);
+
+    const fullCatalogRaw =
+      body.p_full_catalog ?? body.p_v19_catalog_all ?? body.p_catalog_broadcast ?? body.p_catalog_all;
+    const fullCatalog =
+      fullCatalogRaw === true ||
+      fullCatalogRaw === 1 ||
+      String(fullCatalogRaw ?? "")
+        .trim()
+        .toLowerCase() === "true" ||
+      String(fullCatalogRaw ?? "").trim() === "1";
+
+    const retrievalScoringText = fullCatalog ? "" : buildRetrievalScoringText(userMessage, recentMessages);
     const currentProductSignals = getMessageProductSignals(retrievalScoringText);
 
     const requestedCap = Number(body.p_candidate_limit);
-    const hasBrandIntent = currentProductSignals.brandKeys.length > 0;
-    const candidateLimit = hasBrandIntent
-      ? Math.max(1, Math.min(400, Number.isFinite(requestedCap) && requestedCap > 0 ? requestedCap : 300))
-      : Math.max(1, Math.min(20, Number.isFinite(requestedCap) && requestedCap > 0 ? requestedCap : 8));
+    const rawFullCatalogMax = Number(body.p_full_catalog_max ?? body.p_catalog_max);
+    const fullCatalogMax = Math.max(
+      50,
+      Math.min(
+        5000,
+        Number.isFinite(rawFullCatalogMax) && rawFullCatalogMax > 0
+          ? rawFullCatalogMax
+          : Number.isFinite(requestedCap) && requestedCap > 0
+            ? requestedCap
+            : 3500,
+      ),
+    );
 
-    const brandSql = buildBrandFilterSql(currentProductSignals.brandKeys);
+    const effectiveBrandKeys = fullCatalog ? [] : currentProductSignals.brandKeys;
+    const hasBrandIntent = effectiveBrandKeys.length > 0;
+    const candidateLimit = fullCatalog
+      ? fullCatalogMax
+      : hasBrandIntent
+        ? Math.max(1, Math.min(400, Number.isFinite(requestedCap) && requestedCap > 0 ? requestedCap : 300))
+        : Math.max(1, Math.min(20, Number.isFinite(requestedCap) && requestedCap > 0 ? requestedCap : 8));
+
+    const brandSql = buildBrandFilterSql(effectiveBrandKeys);
     const rawBrandFetch = Number(body.p_brand_fetch_limit ?? body.p_brand_catalog_max);
-    const sqlFetchLimit = hasBrandIntent
-      ? Math.min(800, Math.max(1, Number.isFinite(rawBrandFetch) && rawBrandFetch > 0 ? rawBrandFetch : 400))
-      : 120;
-    const orderClause = hasBrandIntent
-      ? "order by p.in_stock desc, p.price_amount asc nulls last, p.updated_at desc, p.id desc"
-      : "order by p.updated_at desc, p.id desc";
+    const sqlFetchLimit = fullCatalog
+      ? fullCatalogMax
+      : hasBrandIntent
+        ? Math.min(800, Math.max(1, Number.isFinite(rawBrandFetch) && rawBrandFetch > 0 ? rawBrandFetch : 400))
+        : 120;
+    const orderClause = fullCatalog
+      ? "order by p.in_stock desc, p.title asc nulls last, p.id asc"
+      : hasBrandIntent
+        ? "order by p.in_stock desc, p.price_amount asc nulls last, p.updated_at desc, p.id desc"
+        : "order by p.updated_at desc, p.id desc";
 
     const brandParams = brandSql?.params ?? [];
     const limitParamIndex = brandParams.length + 1;
@@ -1502,17 +1533,20 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     const usedIphoneCandidates: UsedIphoneCandidate[] = selectUsedIphoneCandidates({
       userMessage: retrievalScoringText,
       customerState,
-      limit: Math.min(6, candidateLimit),
+      limit: fullCatalog ? 0 : Math.min(6, candidateLimit),
     });
 
     let rankedCandidateProducts = productRows
       .filter((product) => !isDisallowedWorkflowProduct(product))
       .map((product) => {
         const productKey = product.sku.trim().toLowerCase();
-        const currentIntentAdjustment = computeCurrentIntentAdjustment(product, currentProductSignals);
-        const isBrandCompatible = productMatchesRequestedBrands(product, currentProductSignals.brandKeys);
-        const interestedProductBoost =
-          interestedProductKey && productKey === interestedProductKey && isBrandCompatible
+        const currentIntentAdjustment = fullCatalog ? 0 : computeCurrentIntentAdjustment(product, currentProductSignals);
+        const isBrandCompatible = fullCatalog
+          ? true
+          : productMatchesRequestedBrands(product, currentProductSignals.brandKeys);
+        const interestedProductBoost = fullCatalog
+          ? 0
+          : interestedProductKey && productKey === interestedProductKey && isBrandCompatible
             ? currentProductSignals.hasSpecificIntent
               ? Math.max(0, 12 + currentIntentAdjustment)
               : 14
@@ -1560,7 +1594,15 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
         return 0;
       });
 
-    if (currentProductSignals.brandKeys.length > 0) {
+    if (fullCatalog) {
+      rankedCandidateProducts.sort((left, right) =>
+        String(left.product_name || "").localeCompare(String(right.product_name || ""), "es", {
+          sensitivity: "base",
+        }),
+      );
+    }
+
+    if (!fullCatalog && currentProductSignals.brandKeys.length > 0) {
       const brandFiltered = rankedCandidateProducts.filter((candidate) =>
         candidateMatchesRetrievalBrandKeys(candidate, currentProductSignals.brandKeys)
       );
@@ -1570,7 +1612,9 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const shouldPrioritizeBroadBrandCatalog =
-      currentProductSignals.brandKeys.length === 1 && !currentProductSignals.hasSpecificIntent;
+      !fullCatalog &&
+      currentProductSignals.brandKeys.length === 1 &&
+      !currentProductSignals.hasSpecificIntent;
     const shortlistedCandidateProducts = shouldPrioritizeBroadBrandCatalog
       ? prioritizeBrandBrowseCandidates(
           rankedCandidateProducts,
