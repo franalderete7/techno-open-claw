@@ -8,7 +8,7 @@
         "path": "techno-sales-v19",
         "options": {}
       },
-      "id": "49f15d64-3344-4d8d-9195-5cfefc29920a",
+      "id": "2a58ad4b-6dc1-4e94-953c-b6b50fd93d87",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -22,7 +22,7 @@
       "parameters": {
         "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw || {};\n\nconst toBool = (value) => {\n  if (typeof value === 'boolean') return value;\n  const normalized = String(value ?? '').trim().toLowerCase();\n  return ['true', '1', 'yes', 'si', 'sí', 'y'].includes(normalized);\n};\n\nconst getCustomField = (fields, key) => {\n  if (Array.isArray(fields)) {\n    const hit = fields.find((item) => item?.name === key || item?.key === key || item?.field_name === key);\n    return hit?.value ?? '';\n  }\n  if (fields && typeof fields === 'object') {\n    return fields[key] ?? '';\n  }\n  return '';\n};\n\nconst subscriberId = String(body.subscriber_id || body.id || '');\nconst message = String(body.message || body.last_input_text || '').trim();\nconst customFields = body.custom_fields || {};\nconst storefrontOrderMatch = message.match(/pedido\\s+web\\s*#?\\s*(\\d+)[^\\n]*?\\btoken\\b\\s*([a-z0-9_-]{8,64})/i) || message.match(/#(\\d+)[^\\n]*?\\btoken\\b\\s*([a-z0-9_-]{8,64})/i);\nconst storefrontOrderId = storefrontOrderMatch ? Number(storefrontOrderMatch[1]) : null;\nconst storefrontOrderToken = storefrontOrderMatch ? String(storefrontOrderMatch[2] || '').trim().toLowerCase() : '';\n\nreturn [{\n  json: {\n    subscriber_id: subscriberId,\n    first_name: body.first_name || 'amigo',\n    last_name: body.last_name || '',\n    phone: body.whatsapp_phone || body.phone || '',\n    timezone: body.timezone || '',\n    channel: 'manychat',\n    city: getCustomField(customFields, 'city'),\n    funnel_stage: getCustomField(customFields, 'funnel_stage'),\n    interested_product: getCustomField(customFields, 'interested_product'),\n    is_human_active: toBool(getCustomField(customFields, 'is_human_active')),\n    raw_message: message,\n    is_audio: message.startsWith('https://') && (message.includes('fbsbx.com') || message.includes('fbcdn.net') || message.includes('manybot-files.s3')),\n    is_empty: !message,\n    storefront_order_id: Number.isFinite(storefrontOrderId) ? storefrontOrderId : null,\n    storefront_order_token: storefrontOrderToken || '',\n  }\n}];"
       },
-      "id": "02e0c7e3-6838-45bf-810f-83818548cddd",
+      "id": "7f1c4ec0-fd58-4a50-a2fd-e57fa7d3fc53",
       "name": "Parse Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -54,7 +54,7 @@
         },
         "options": {}
       },
-      "id": "5a4f31d2-fba9-4076-b48b-45f59c914f1a",
+      "id": "c5995a8a-3f69-4546-ab8e-fb65003308b6",
       "name": "Is Audio?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -74,7 +74,7 @@
           "timeout": 15000
         }
       },
-      "id": "c3a00246-6bcd-4a5a-bb1b-bfa6232d9774",
+      "id": "9cf35ff9-85c8-4d9b-9eb6-4b58757fb1fe",
       "name": "Download Audio",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -117,7 +117,7 @@
           "timeout": 15000
         }
       },
-      "id": "9f26f0c9-ed71-4c9e-83e2-c869ccce12bc",
+      "id": "92475888-f8e0-4ba2-9f76-1e4646f13e19",
       "name": "Groq Whisper Transcribe",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -137,7 +137,7 @@
       "parameters": {
         "jsCode": "const parsed = $('Parse Input').first().json;\nlet userMessage = String(parsed.raw_message || '');\nlet wasAudio = false;\n\ntry {\n  const whisper = $('Groq Whisper Transcribe').first().json;\n  if (whisper && typeof whisper === 'object' && whisper.text) {\n    userMessage = String(whisper.text).trim();\n    wasAudio = true;\n  }\n} catch (error) {\n  wasAudio = false;\n}\n\nreturn [{\n  json: {\n    ...parsed,\n    user_message: userMessage.trim() || '(vacío)',\n    was_audio: wasAudio,\n  }\n}];"
       },
-      "id": "a42b5183-4687-4c47-bdaf-38f925ecdd9e",
+      "id": "3db66264-7554-4cb6-b84b-d57d262f9b8e",
       "name": "Merge Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -174,7 +174,7 @@
           "timeout": 5000
         }
       },
-      "id": "048df277-b874-4249-aa4c-4247be8a0a80",
+      "id": "dc161a5e-9df8-449c-a786-e690e10befa7",
       "name": "Upsert Customer",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -189,7 +189,7 @@
       "parameters": {
         "jsCode": "const base = $('Merge Input').first().json || {};\nconst raw = $input.first().json;\n\nconst pickId = (value) => {\n  if (value == null || value === '') return null;\n  const num = Number(value);\n  return Number.isFinite(num) && num > 0 ? num : null;\n};\n\nconst candidates = [];\n\nif (Array.isArray(raw)) {\n  candidates.push(...raw);\n}\n\nif (raw && typeof raw === 'object') {\n  candidates.push(raw);\n\n  for (const key of ['body', 'data', 'result']) {\n    const nested = raw[key];\n    if (Array.isArray(nested)) {\n      candidates.push(...nested);\n    } else if (nested && typeof nested === 'object') {\n      candidates.push(nested);\n    }\n  }\n}\n\nlet customerId = null;\n\nfor (const candidate of candidates) {\n  if (!candidate || typeof candidate !== 'object') continue;\n  customerId = pickId(candidate.upsert_customer ?? candidate.customer_id ?? candidate.id);\n  if (customerId != null) break;\n}\n\nreturn [{\n  json: {\n    ...base,\n    customer_id: customerId,\n  }\n}];"
       },
-      "id": "a3749fba-53dc-4a86-8454-5194ec0cbc4a",
+      "id": "7e237648-66a5-4e3e-97ff-5f3534a1cc69",
       "name": "Attach Customer Id",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -226,7 +226,7 @@
           "timeout": 5000
         }
       },
-      "id": "c494d2d8-c2a1-46a6-a2f5-e74224d13afb",
+      "id": "a223ff09-5479-4816-831c-66b41e88f89e",
       "name": "Save Incoming Message",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -241,7 +241,7 @@
       "parameters": {
         "jsCode": "const base = $('Attach Customer Id').first().json || {};\nconst raw = $input.first().json;\n\nconst pickId = (value) => {\n  if (value == null || value === '') return null;\n  const num = Number(value);\n  return Number.isFinite(num) && num > 0 ? num : null;\n};\nconst pickBool = (value) => value === true || value === 'true';\n\nconst candidates = [];\n\nif (Array.isArray(raw)) {\n  candidates.push(...raw);\n}\n\nif (raw && typeof raw === 'object') {\n  candidates.push(raw);\n\n  for (const key of ['body', 'data', 'result']) {\n    const nested = raw[key];\n    if (Array.isArray(nested)) {\n      candidates.push(...nested);\n    } else if (nested && typeof nested === 'object') {\n      candidates.push(nested);\n    }\n  }\n}\n\nlet savedMessageId = null;\nlet savedMessageDuplicate = false;\n\nfor (const candidate of candidates) {\n  if (!candidate || typeof candidate !== 'object') continue;\n  savedMessageId = pickId(candidate.id ?? candidate.message_id ?? candidate.saved_message_id);\n  savedMessageDuplicate = pickBool(candidate.duplicate);\n  if (savedMessageId != null) break;\n}\n\nreturn [{\n  json: {\n    ...base,\n    saved_message_id: savedMessageId,\n    saved_message_duplicate: savedMessageDuplicate,\n  }\n}];"
       },
-      "id": "b925fb75-66dc-4d15-8450-aef712f60c75",
+      "id": "7ebe7101-d303-4a8d-89c1-e96a901256c5",
       "name": "Attach Saved Message",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -254,7 +254,7 @@
       "parameters": {
         "jsCode": "const item = $input.first().json;\nawait new Promise((resolve) => setTimeout(resolve, 8000));\nreturn [{ json: item }];"
       },
-      "id": "935f1414-f60e-4837-9f4d-150e18783988",
+      "id": "fb2a8cff-07e8-45fc-bebf-00b44a33a326",
       "name": "Wait 8s Debounce",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -287,7 +287,7 @@
           "timeout": 5000
         }
       },
-      "id": "5ca7ca4a-25f9-4892-a7e8-0903bce7d409",
+      "id": "5129a475-5e11-4106-970f-b7b5d7065810",
       "name": "Check Is Latest (RPC)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -302,7 +302,7 @@
       "parameters": {
         "jsCode": "const base = $('Wait 8s Debounce').first().json || {};\nconst rpcResult = $input.first().json;\n\nconst pickBool = (value) => value === true || value === 'true';\nconst pickId = (value) => {\n  if (value == null || value === '') return null;\n  const num = Number(value);\n  return Number.isFinite(num) && num > 0 ? num : null;\n};\n\nconst candidates = [];\nconst visit = (value) => {\n  if (value == null) return;\n\n  if (typeof value === 'string') {\n    try {\n      visit(JSON.parse(value));\n    } catch (error) {}\n    return;\n  }\n\n  if (typeof value === 'boolean') {\n    candidates.push(value);\n    return;\n  }\n\n  if (Array.isArray(value)) {\n    for (const item of value) {\n      visit(item);\n    }\n    return;\n  }\n\n  if (typeof value === 'object') {\n    candidates.push(value);\n    for (const key of ['body', 'data', 'result']) {\n      visit(value[key]);\n    }\n  }\n};\n\nvisit(rpcResult);\n\nlet isLatest = null;\nlet latestMessageId = null;\nlet checkedMessageId = pickId(base.saved_message_id);\n\nfor (const candidate of candidates) {\n  if (typeof candidate === 'boolean') {\n    isLatest = candidate;\n    break;\n  }\n\n  if (!candidate || typeof candidate !== 'object') continue;\n\n  if (latestMessageId == null) {\n    latestMessageId = pickId(candidate.latest_message_id ?? candidate.latestMessageId);\n  }\n\n  if (checkedMessageId == null) {\n    checkedMessageId = pickId(candidate.checked_message_id ?? candidate.checkedMessageId ?? candidate.message_id);\n  }\n\n  if (candidate.check_is_latest_message !== undefined) {\n    isLatest = pickBool(candidate.check_is_latest_message);\n    break;\n  }\n\n  if (candidate.result !== undefined && typeof candidate.result !== 'object') {\n    isLatest = pickBool(candidate.result);\n    break;\n  }\n}\n\nif (isLatest == null && latestMessageId != null && checkedMessageId != null) {\n  isLatest = latestMessageId === checkedMessageId;\n}\n\nconst isDuplicateSavedMessage = base.saved_message_duplicate === true;\nconst debounceReason =\n  base.saved_message_id == null\n    ? 'missing_saved_message_id'\n    : isDuplicateSavedMessage\n      ? 'duplicate_saved_message'\n      : base.is_empty\n        ? 'empty_message'\n        : isLatest == null\n          ? 'rpc_shape_unknown'\n          : isLatest === true\n            ? 'latest'\n            : 'not_latest';\n\nreturn [{\n  json: {\n    ...base,\n    should_continue: base.saved_message_id != null && isLatest === true && !base.is_empty && !isDuplicateSavedMessage,\n    debounce_reason: debounceReason,\n    rpc_is_latest: isLatest,\n    rpc_latest_message_id: latestMessageId,\n    rpc_checked_message_id: checkedMessageId,\n  }\n}];"
       },
-      "id": "bc5eac23-90d5-4610-9eb7-630e7790d15c",
+      "id": "78c7bc68-50ae-47b8-b52d-ae4e62f91344",
       "name": "Debounce Check",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -334,7 +334,7 @@
         },
         "options": {}
       },
-      "id": "633b0bc8-c464-493a-bb0a-ed8de620bce9",
+      "id": "997d3fcb-a7cf-4e53-813c-6397ef9b699d",
       "name": "Is Latest?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -367,7 +367,7 @@
           "timeout": 60000
         }
       },
-      "id": "1e542044-7c55-477c-840e-fa092847ff47",
+      "id": "8f8ad489-b423-48ee-9b31-95f2e6a26e3e",
       "name": "Fetch Full Catalog Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -382,7 +382,7 @@
       "parameters": {
         "jsCode": "const base = $('Debounce Check').first().json || {};\nconst raw = $input.first().json || {};\nconst context = raw.v17_build_turn_context || raw || {};\nif (!context.store || typeof context.store !== 'object') {\n  context.store = {};\n}\nreturn [{\n  json: {\n    ...base,\n    context,\n  }\n}];"
       },
-      "id": "bc29f6bd-8c0b-4e97-9029-ba049958bbdd",
+      "id": "313ecb20-21aa-420d-9e6c-c2cac80dad9a",
       "name": "Normalize Catalog Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -393,9 +393,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const row = $input.first().json || {};\nconst ctx = row.context || {};\nconst products = Array.isArray(ctx.candidate_products) ? ctx.candidate_products : [];\nconst fmt = (v) => {\n  const n = Number(v);\n  if (!Number.isFinite(n) || n <= 0) return null;\n  return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(n);\n};\nconst line = (p) => {\n  const name = String(p.product_name || p.title || p.model || p.product_key || 'Producto').trim();\n  const price = p.promo_price_ars ?? p.price_ars;\n  const n = p.cuotas_qty != null && Number(p.cuotas_qty) > 0 ? Math.round(Number(p.cuotas_qty)) : null;\n  const bCuota = fmt(p.bancarizada_cuota);\n  const bTot = fmt(p.bancarizada_total);\n  const mCuota = fmt(p.macro_cuota);\n  const mTot = fmt(p.macro_total);\n  const banc = !bCuota\n    ? '—'\n    : (n ? `${bCuota} × ${n}` : String(bCuota)) + (bTot ? ` · total ${bTot}` : '');\n  const macro = !mCuota\n    ? '—'\n    : (n ? `${mCuota} × ${n}` : String(mCuota)) + (mTot ? ` · total ${mTot}` : '');\n  const c = fmt(price);\n  const contado = c ? `ARS ${c}` : '—';\n  return `🔥 ${name} | ${contado} | ${banc} | ${macro}`;\n};\nconst colLegend = 'Nombre | Contado | Bancarizadas | Macro';\nconst header = `🚢 TechnoStore · catálogo completo (${products.length} ítems) 🔥\\n${colLegend}`;\nconst lineStrings = products.length ? products.map(line) : ['(Sin productos activos por ahora.)'];\nconst MAX = 3800;\nconst rawChunks = [];\nlet cur = '';\nfor (const ln of lineStrings) {\n  const next = cur ? cur + '\\n' + ln : ln;\n  if (next.length > MAX && cur) {\n    rawChunks.push(cur);\n    cur = ln;\n  } else {\n    cur = next;\n  }\n}\nif (cur) rawChunks.push(cur);\nconst totalParts = rawChunks.length;\nconst wa_messages = rawChunks.map((block, i) => ({\n  type: 'text',\n  text:\n    i === 0\n      ? `${header}\\n\\n${block}`\n      : `🚢 Parte ${i + 1}/${totalParts}\\n${colLegend}\\n\\n${block}`,\n}));\nconst botMessageText = wa_messages.map((m) => m.text).join('\\n\\n────────\\n\\n');\nconst router_output = {\n  route_key: 'catalog_broadcast',\n  confidence: 1,\n  matched_product_keys: [],\n  matched_brand: null,\n  detected_city: null,\n  detected_budget_range: null,\n  detected_payment_method: null,\n  rationale: 'v19 catálogo completo',\n};\nconst responder_output = {\n  selected_product_keys: [],\n  actions: [],\n  state_delta: { intent_key: 'catalog_list', funnel_stage: 'browsing', lead_score_delta: 1 },\n  reply_text: botMessageText,\n  raw_text: botMessageText,\n};\nconst validator_output = {\n  approved: true,\n  reply_messages: wa_messages,\n  selected_product_keys: [],\n  actions: [],\n  final_state_delta: {\n    intent_key: 'catalog_list',\n    funnel_stage: 'browsing',\n    lead_score_delta: 1,\n    selected_product_keys: [],\n    share_store_location: false,\n    tags_to_add: [],\n    tags_to_remove: [],\n    summary: 'Catálogo v19',\n  },\n  validation_errors: [],\n  validation_warnings: [],\n  fallback_reason: null,\n};\nreturn [{\n  json: {\n    ...row,\n    context: ctx,\n    router_output,\n    responder_output,\n    validator_output,\n    should_send: true,\n    bot_message_text: botMessageText,\n    wa_messages,\n    responder_provider_name: 'deterministic',\n    responder_model_name: 'v19-catalog-list',\n  },\n}];"
+        "jsCode": "const row = $input.first().json || {};\nconst ctx = row.context || {};\nconst products = Array.isArray(ctx.candidate_products) ? ctx.candidate_products : [];\nconst fmt = (v) => {\n  const n = Number(v);\n  if (!Number.isFinite(n) || n <= 0) return null;\n  return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(n);\n};\nconst line = (p) => {\n  const name = String(p.product_name || p.title || p.model || p.product_key || 'Producto').trim();\n  const price = p.promo_price_ars ?? p.price_ars;\n  const n = p.cuotas_qty != null && Number(p.cuotas_qty) > 0 ? Math.round(Number(p.cuotas_qty)) : null;\n  const bCuota = fmt(p.bancarizada_cuota);\n  const bTot = fmt(p.bancarizada_total);\n  const mCuota = fmt(p.macro_cuota);\n  const mTot = fmt(p.macro_total);\n  const banc = !bCuota\n    ? '—'\n    : (n ? `${bCuota} × ${n}` : String(bCuota)) + (bTot ? ` · total ${bTot}` : '');\n  const macro = !mCuota\n    ? '—'\n    : (n ? `${mCuota} × ${n}` : String(mCuota)) + (mTot ? ` · total ${mTot}` : '');\n  const c = fmt(price);\n  const contado = c ? `ARS ${c}` : '—';\n  return `🔥 ${name} | ${contado} | ${banc} | ${macro}`;\n};\nconst colLegend = 'Nombre | Contado | Bancarizadas | Macro';\nconst header = `🚢 TechnoStore · catálogo completo (${products.length} ítems) 🔥\\n${colLegend}`;\nconst lineStrings = products.length ? products.map(line) : ['(Sin productos activos por ahora.)'];\n// ManyChat sendContent: each text bubble must be ≤ 2000 characters (validation error otherwise).\nconst MANYCHAT_TEXT_LIMIT = 1900;\nconst prefixFirst = `${header}\\n\\n`;\nconst worstContinuationPrefix = `🚢 Parte 99/99\\n${colLegend}\\n\\n`;\nconst blocks = [];\nlet curLines = [];\nfor (const ln of lineStrings) {\n  const nextLines = curLines.length > 0 ? [...curLines, ln] : [ln];\n  const blockStr = nextLines.join('\\n');\n  const prefixLen = blocks.length === 0 ? prefixFirst.length : worstContinuationPrefix.length;\n  if (blockStr.length + prefixLen > MANYCHAT_TEXT_LIMIT && curLines.length > 0) {\n    blocks.push(curLines.join('\\n'));\n    curLines = [ln];\n  } else {\n    curLines = nextLines;\n  }\n}\nif (curLines.length > 0) blocks.push(curLines.join('\\n'));\nconst totalParts = blocks.length;\nconst wa_messages = blocks.map((block, i) => ({\n  type: 'text',\n  text:\n    i === 0\n      ? `${header}\\n\\n${block}`\n      : `🚢 Parte ${i + 1}/${totalParts}\\n${colLegend}\\n\\n${block}`,\n}));\nconst botMessageText = wa_messages.map((m) => m.text).join('\\n\\n────────\\n\\n');\nconst router_output = {\n  route_key: 'catalog_broadcast',\n  confidence: 1,\n  matched_product_keys: [],\n  matched_brand: null,\n  detected_city: null,\n  detected_budget_range: null,\n  detected_payment_method: null,\n  rationale: 'v19 catálogo completo',\n};\nconst responder_output = {\n  selected_product_keys: [],\n  actions: [],\n  state_delta: { intent_key: 'catalog_list', funnel_stage: 'browsing', lead_score_delta: 1 },\n  reply_text: botMessageText,\n  raw_text: botMessageText,\n};\nconst validator_output = {\n  approved: true,\n  reply_messages: wa_messages,\n  selected_product_keys: [],\n  actions: [],\n  final_state_delta: {\n    intent_key: 'catalog_list',\n    funnel_stage: 'browsing',\n    lead_score_delta: 1,\n    selected_product_keys: [],\n    share_store_location: false,\n    tags_to_add: [],\n    tags_to_remove: [],\n    summary: 'Catálogo v19',\n  },\n  validation_errors: [],\n  validation_warnings: [],\n  fallback_reason: null,\n};\nreturn [{\n  json: {\n    ...row,\n    context: ctx,\n    router_output,\n    responder_output,\n    validator_output,\n    should_send: true,\n    bot_message_text: botMessageText,\n    wa_messages,\n    responder_provider_name: 'deterministic',\n    responder_model_name: 'v19-catalog-list',\n  },\n}];"
       },
-      "id": "23fb4b71-944c-4f4d-9a9f-ac9dfe4f09a5",
+      "id": "c33a933a-34ef-4d5c-9243-5c20b47ff4e4",
       "name": "Build Catalog Reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -428,7 +428,7 @@
           "timeout": 5000
         }
       },
-      "id": "8b5532dd-0add-4d19-a8fc-0f82380a61fd",
+      "id": "a701b303-fc07-4294-b927-2c80765f634a",
       "name": "Claim Reply Send (RPC)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -449,7 +449,7 @@
           },
           "conditions": [
             {
-              "id": "b53ff330-cf41-4713-926e-5a62e98366ee",
+              "id": "c62e9dc7-b4b5-4c7c-897a-32cea6e070ad",
               "leftValue": "={{ $json.claim_reply_send }}",
               "rightValue": true,
               "operator": {
@@ -462,7 +462,7 @@
         },
         "options": {}
       },
-      "id": "131f1582-0681-4fd0-9bb4-ebfc7719e6d1",
+      "id": "cd15474b-2ff9-4737-ae12-79127cc60026",
       "name": "Reply Claimed?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -475,7 +475,7 @@
       "parameters": {
         "jsCode": "const data = $('Build Catalog Reply').first().json || {};\nconst messages = Array.isArray(data.wa_messages)\n  ? data.wa_messages\n  : [{ type: 'text', text: data.bot_message_text || '' }];\nconst wa = [];\nfor (const m of messages) {\n  if (m.type === 'image' && (m.image_url || m.url)) {\n    const url = m.image_url || m.url;\n    wa.push({ type: 'image', url, image_url: url });\n    continue;\n  }\n  const t = String(m.text || '').trim();\n  if (t) wa.push({ type: 'text', text: t });\n}\nreturn [{\n  json: {\n    ...data,\n    payload: {\n      subscriber_id: data.subscriber_id,\n      data: {\n        version: 'v2',\n        content: {\n          type: 'whatsapp',\n          messages: wa,\n        },\n      },\n    },\n  }\n}];"
       },
-      "id": "9bda5d5e-4c79-4f06-90ff-5a255ea73510",
+      "id": "bca0586c-1a31-410e-a0b4-ba122084c7a9",
       "name": "Prepare WhatsApp Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -497,7 +497,7 @@
           "timeout": 30000
         }
       },
-      "id": "f385cd4c-fd6c-451c-bf70-7a65907566cb",
+      "id": "d28d5dcf-d490-4d31-8123-a079b8eb6e6a",
       "name": "Send to WhatsApp",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -516,7 +516,7 @@
       "parameters": {
         "jsCode": "const data = $('Prepare WhatsApp Payload').first().json || {};\nconst sendResponse = $input.first().json || {};\nreturn [{\n  json: {\n    ...data,\n    send_result: {\n      attempted: true,\n      response: sendResponse,\n      sent_at: new Date().toISOString(),\n    },\n  }\n}];"
       },
-      "id": "fd7d3069-78ba-4102-8a37-d7983eb60486",
+      "id": "7a6dd3ab-f1f6-40cf-b326-388798ef6516",
       "name": "Build Sent State Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -529,7 +529,7 @@
       "parameters": {
         "jsCode": "const data = $('Build Catalog Reply').first().json || {};\nreturn [{\n  json: {\n    ...data,\n    should_send: false,\n    send_result: {\n      attempted: false,\n      skipped: true,\n      reason: 'reply_send_not_claimed',\n      sent_at: new Date().toISOString(),\n    },\n  }\n}];"
       },
-      "id": "3d873de2-3769-43f7-8adc-5830e6cfed94",
+      "id": "507c0f9a-dbe5-4a99-b37b-592e91f05108",
       "name": "Build Skipped State Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -542,7 +542,7 @@
       "parameters": {
         "jsCode": "const data = $input.first().json || {};\nconst parseJsonish = (value) => {\n  if (typeof value !== 'string') return value;\n  const trimmed = value.trim();\n  if (!trimmed) return null;\n  try {\n    return JSON.parse(trimmed);\n  } catch (error) {\n    return value;\n  }\n};\nconst asRecord = (value) => {\n  const parsed = parseJsonish(value);\n  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};\n};\nconst asArray = (value) => {\n  const parsed = parseJsonish(value);\n  return Array.isArray(parsed) ? parsed : [];\n};\nconst toBool = (value) => {\n  if (typeof value === 'boolean') return value;\n  const normalized = String(value ?? '').trim().toLowerCase();\n  return ['true', '1', 'yes', 'si', 'sí', 'y'].includes(normalized);\n};\nconst extractReplyText = (messages) =>\n  asArray(messages)\n    .map((message) => {\n      if (!message || typeof message !== 'object') return '';\n      return String(message.text ?? message.reply_text ?? '').trim();\n    })\n    .filter(Boolean)\n    .join('\\n\\n')\n    .trim();\n\nconst context = asRecord(data.context);\nconst router = asRecord(data.router_output);\nconst responder = asRecord(data.responder_output);\nconst validator = asRecord(data.validator_output);\nconst state = asRecord(validator.final_state_delta);\n\nconst now = new Date().toISOString();\nconst currentTags = Array.isArray(context.customer?.tags) ? context.customer.tags : [];\nconst unique = (values) => [...new Set(values.filter(Boolean))];\nconst mergedTags = unique([\n  ...currentTags,\n  ...(Array.isArray(state.tags_to_add) ? state.tags_to_add : []),\n]).filter((tag) => !(Array.isArray(state.tags_to_remove) ? state.tags_to_remove : []).includes(tag));\n\nconst currentLeadScore = Number(context.customer?.lead_score || 0);\nconst nextLeadScore = Math.max(0, Math.min(100, currentLeadScore + Number(state.lead_score_delta || 0)));\nconst selectedProductKeys = Array.isArray(validator.selected_product_keys) ? validator.selected_product_keys : [];\n\nconst updates = {\n  last_bot_interaction: now,\n  updated_at: now,\n  last_intent: state.intent_key || null,\n  funnel_stage: state.funnel_stage || null,\n  lead_score: nextLeadScore,\n  tags: mergedTags,\n};\n\nif (selectedProductKeys[0]) {\n  updates.interested_product = selectedProductKeys[0];\n}\n\nif (state.payment_method_key) {\n  updates.payment_method_last = state.payment_method_key;\n}\n\nconst brandList = unique(selectedProductKeys\n  .map((key) => {\n    const product = (Array.isArray(context.candidate_products) ? context.candidate_products : []).find((item) => item.product_key === key);\n    return product?.brand_key || null;\n  })\n  .filter(Boolean));\n\nif (brandList.length > 0) {\n  const currentBrands = Array.isArray(context.customer?.brands_mentioned) ? context.customer.brands_mentioned : [];\n  updates.brands_mentioned = unique([...brandList, ...currentBrands]).slice(0, 10);\n}\n\nconst conversationSummary = String(state.summary || router.rationale || 'Turno procesado').slice(0, 220);\nconst conversationInsights = unique([\n  'Ruta ' + String(router.route_key || 'unknown'),\n  ...selectedProductKeys.slice(0, 3).map((key) => 'Producto ' + key),\n]).slice(0, 8);\n\nconst shouldPersistBotMessage = toBool(data.should_send);\nconst sendResult = asRecord(data.send_result);\nconst botMessageText = String(\n  data.bot_message_text ||\n    extractReplyText(data.wa_messages) ||\n    extractReplyText(validator.reply_messages) ||\n    responder.reply_text ||\n    ''\n).trim();\n\nconst botMessageRow = shouldPersistBotMessage\n  ? {\n      manychat_id: data.subscriber_id,\n      customer_id: context.customer?.customer_id || null,\n      role: 'bot',\n      message: botMessageText,\n      message_type: 'text',\n      intent_detected: state.intent_key || null,\n      products_mentioned: selectedProductKeys,\n      triggered_human: false,\n      was_audio: false,\n      channel: 'manychat',\n      external_message_id: null,\n      whatsapp_phone_number_id: null,\n      applied_tags: Array.isArray(state.tags_to_add) ? state.tags_to_add : [],\n      payment_methods_detected: state.payment_method_key ? [state.payment_method_key] : [],\n      brands_detected: brandList,\n      topics_detected: [String(router.route_key || 'generic_sales')],\n      funnel_stage_after: state.funnel_stage || null,\n      conversation_summary: conversationSummary,\n      conversation_insights: conversationInsights,\n      lead_score_after: nextLeadScore,\n      workflow_version: 'v19',\n      route_key: router.route_key || 'generic_sales',\n      send_result: sendResult,\n    }\n  : {\n      skip_save: true,\n      reason: 'reply_not_sent',\n      manychat_id: data.subscriber_id,\n      workflow_version: 'v19',\n    };\n\nconst turnRow = {\n  workflow_version: 'v19',\n  provider_name: data.responder_provider_name || 'deterministic',\n  model_name: data.responder_model_name || 'deterministic',\n  manychat_id: data.subscriber_id,\n  customer_id: context.customer?.customer_id || null,\n  route_key: router.route_key || 'generic_sales',\n  user_message: data.user_message || '',\n  context_payload: context,\n  router_payload: router,\n  responder_payload: data.responder_output || {},\n  validator_payload: validator,\n  state_delta: state,\n  selected_product_keys: selectedProductKeys,\n  validation_errors: Array.isArray(validator.validation_errors) ? validator.validation_errors.map((item) => item.code || item.message).filter(Boolean) : [],\n  success: toBool(data.should_send) !== false,\n  failure_reason: null,\n  send_result: sendResult,\n};\n\nreturn [{\n  json: {\n    ...data,\n    customer_updates: updates,\n    bot_message_row: botMessageRow,\n    ai_turn_row: turnRow,\n  }\n}];"
       },
-      "id": "180fc89f-8fe7-4288-8d29-8297ab446615",
+      "id": "f94be086-5cc2-497e-b5b1-2d3b8f902a84",
       "name": "Build Update Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -579,7 +579,7 @@
           "timeout": 10000
         }
       },
-      "id": "be721b7a-1f8e-4ca8-9bb5-311315706428",
+      "id": "5dde25f2-c5e1-452a-9d97-000b948a36ee",
       "name": "Update Customer",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -591,7 +591,7 @@
       "alwaysOutputData": true
     },
     {
-      "id": "4096c434-34df-460a-ba2e-da488ea30f97",
+      "id": "d9c0bf25-b755-4770-a741-01deee8c0ea3",
       "name": "Should Save Bot Message?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -650,7 +650,7 @@
           "timeout": 5000
         }
       },
-      "id": "3bf6bb10-09cb-4df6-9674-74fc0b5b7626",
+      "id": "eaa5c13b-44de-430f-9df7-dd3d5207d68f",
       "name": "Save Bot Message",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -689,7 +689,7 @@
           "timeout": 5000
         }
       },
-      "id": "5d7c0d6b-5ff0-44ad-9aba-0b69ae2b3a43",
+      "id": "daaa70e6-d20f-4d74-96c7-3b052bcb7ebd",
       "name": "Log AI Turn",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -704,7 +704,7 @@
       "parameters": {
         "jsCode": "const base = $('Build Update Payload').first().json || {};\n\nreturn [{\n  json: {\n    ...base,\n    state_update_status: 'ok',\n  }\n}];"
       },
-      "id": "124b4edb-3b69-4656-b3a9-e0fbd14dea34",
+      "id": "59001641-7e7b-427f-8791-e7ace998c1ae",
       "name": "Return Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

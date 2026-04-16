@@ -6,6 +6,9 @@
  * - n8n 2.15+ exposes POST /api/v1/workflows/{id}/archive (and /unarchive).
  *   Ref: https://github.com/n8n-io/n8n/issues/27513
  * - There is no `n8n archive:workflow` CLI; this script uses HTTP.
+ * - Public API PUT /workflows/{id} does NOT allow extra fields (additionalProperties: false)
+ *   and marks isArchived as read-only — do not use PUT to archive. Use POST .../archive
+ *   or REST PATCH .../rest/workflows/{id} as fallback.
  *
  * Discovery: exports all workflows from the n8n container (same pattern as
  * scripts/cleanup-n8n-v18-unpublished.mjs), then filters client-side.
@@ -198,26 +201,13 @@ async function fetchHttp(auth, method, url, body) {
   return { ok: response.ok, status: response.status, text };
 }
 
-function workflowApiUrls(workflowId) {
-  const normalizedBase = N8N_API_BASE.replace(/\/$/, "");
-  const rootBase = normalizedBase.replace(/\/api\/v1$/, "");
-  const urls = normalizedBase.includes("/api/v1")
-    ? [`${normalizedBase}/workflows/${workflowId}`, `${rootBase}/rest/workflows/${workflowId}`]
-    : [`${normalizedBase}/rest/workflows/${workflowId}`, `${normalizedBase}/api/v1/workflows/${workflowId}`];
-
-  return [...new Set(urls)];
+function instanceRootUrl() {
+  return N8N_API_BASE.replace(/\/$/, "").replace(/\/api\/v1$/, "");
 }
 
 function archivePostUrls(workflowId) {
-  const normalizedBase = N8N_API_BASE.replace(/\/$/, "");
-  const rootBase = normalizedBase.replace(/\/api\/v1$/, "");
-  const bases = normalizedBase.includes("/api/v1") ? [rootBase, normalizedBase.replace(/\/api\/v1$/, "")] : [normalizedBase];
-
-  const out = [];
-  for (const b of [...new Set(bases.map((x) => x.replace(/\/$/, "")))]) {
-    out.push(`${b}/api/v1/workflows/${workflowId}/archive`);
-  }
-  return [...new Set(out)];
+  const root = instanceRootUrl();
+  return [`${root}/api/v1/workflows/${workflowId}/archive`];
 }
 
 async function tryPostArchive(auth, workflowId) {
@@ -225,13 +215,13 @@ async function tryPostArchive(auth, workflowId) {
   let lastStatus = null;
 
   for (const url of archivePostUrls(workflowId)) {
-    const res = await fetchHttp(auth, "POST", url, null);
+    const res = await fetchHttp(auth, "POST", url, {});
     if (res.ok) {
       return { method: "POST", url };
     }
 
     lastStatus = res.status;
-    errors.push(`${res.status} ${res.text.slice(0, 200)}`);
+    errors.push(`${url} -> ${res.status} ${res.text.slice(0, 240)}`);
 
     if (res.status === 401 || res.status === 403) {
       const err = new Error(`POST ${url} -> ${res.status} ${res.text}`.trim());
@@ -245,41 +235,6 @@ async function tryPostArchive(auth, workflowId) {
   throw err;
 }
 
-function workflowPatchAttempts(patch) {
-  const attempts = [patch];
-  if ("isArchived" in patch && !("archived" in patch)) {
-    attempts.push({ ...patch, archived: patch.isArchived });
-  }
-  return attempts;
-}
-
-function buildWorkflowUpdatePayload(workflow, patch) {
-  const payload = {
-    name: workflow.name,
-    nodes: workflow.nodes || [],
-    connections: workflow.connections || {},
-    settings: workflow.settings || {},
-  };
-
-  for (const key of [
-    "active",
-    "description",
-    "staticData",
-    "pinData",
-    "meta",
-    "versionId",
-    "isArchived",
-    "archived",
-  ]) {
-    if (workflow[key] !== undefined) {
-      payload[key] = workflow[key];
-    }
-  }
-
-  Object.assign(payload, patch);
-  return payload;
-}
-
 async function fetchJson(auth, method, url, body) {
   const res = await fetchHttp(auth, method, url, body);
   if (!res.ok) {
@@ -290,69 +245,46 @@ async function fetchJson(auth, method, url, body) {
   return res.text ? JSON.parse(res.text) : null;
 }
 
-async function getWorkflowForUpdate(auth, workflowId) {
+/**
+ * Internal editor API (same family as DELETE /rest/workflows/:id in cleanup script).
+ * May work when public POST /archive is unavailable or mis-routed.
+ */
+async function tryRestPatchArchive(auth, workflowId) {
+  const url = `${instanceRootUrl()}/rest/workflows/${workflowId}`;
   let lastError = null;
 
-  for (const url of workflowApiUrls(workflowId)) {
+  for (const body of [{ isArchived: true }, { archived: true }]) {
     try {
-      const workflow = await fetchJson(auth, "GET", url);
-      return { url, workflow };
+      await fetchJson(auth, "PATCH", url, body);
+      return { method: "REST PATCH", url };
     } catch (error) {
       lastError = error;
     }
   }
 
-  throw lastError || new Error(`Could not load workflow ${workflowId}`);
-}
-
-async function putWorkflow(auth, url, workflow, patch) {
-  const payload = buildWorkflowUpdatePayload(workflow, patch);
-  return fetchJson(auth, "PUT", url, payload);
-}
-
-async function patchArchiveFallback(auth, workflowId) {
-  const attempts = workflowPatchAttempts({ isArchived: true });
-  let lastError = null;
-
-  for (const path of workflowApiUrls(workflowId)) {
-    for (const body of attempts) {
-      try {
-        await fetchJson(auth, "PATCH", path, body);
-        return { method: "PATCH", url: path };
-      } catch (error) {
-        lastError = error;
-      }
-    }
-  }
-
-  const methodBlocked = String(lastError?.message || "").includes("405");
-
-  if (!methodBlocked) {
-    throw lastError || new Error(`Could not patch workflow ${workflowId}`);
-  }
-
-  const { url, workflow } = await getWorkflowForUpdate(auth, workflowId);
-
-  for (const body of attempts) {
-    try {
-      await putWorkflow(auth, url, workflow, body);
-      return { method: "PUT", url };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError || new Error(`Could not archive workflow ${workflowId}`);
+  throw lastError || new Error(`REST PATCH failed for ${workflowId}`);
 }
 
 async function archiveOne(auth, workflowId) {
+  let postErrMsg = null;
   try {
     return await tryPostArchive(auth, workflowId);
   } catch (postErr) {
-    if (postErr?.status === 401 || postErr?.status === 403) {
+    postErrMsg = postErr.message || String(postErr);
+    if (postErr.status === 401 || postErr.status === 403) {
       throw postErr;
     }
-    return await patchArchiveFallback(auth, workflowId);
+  }
+
+  try {
+    return await tryRestPatchArchive(auth, workflowId);
+  } catch (restErr) {
+    const hint =
+      "Tips: (1) n8n 2.15+ exposes POST /api/v1/workflows/{id}/archive. " +
+      "(2) Scoped API keys need permission to delete/archive workflows. " +
+      "(3) Set N8N_API_BASE_URL to the instance origin (e.g. https://n8n.technostoresalta.com) — not only /api/v1. " +
+      "(4) Public PUT cannot include isArchived/versionId/meta; this script no longer uses that path.";
+    throw new Error(`${postErrMsg}\nREST fallback: ${restErr.message || restErr}\n${hint}`);
   }
 }
 

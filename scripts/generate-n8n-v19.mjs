@@ -130,21 +130,26 @@ const line = (p) => {
 const colLegend = 'Nombre | Contado | Bancarizadas | Macro';
 const header = \`🚢 TechnoStore · catálogo completo (\${products.length} ítems) 🔥\\n\${colLegend}\`;
 const lineStrings = products.length ? products.map(line) : ['(Sin productos activos por ahora.)'];
-const MAX = 3800;
-const rawChunks = [];
-let cur = '';
+// ManyChat sendContent: each text bubble must be ≤ 2000 characters (validation error otherwise).
+const MANYCHAT_TEXT_LIMIT = 1900;
+const prefixFirst = \`\${header}\\n\\n\`;
+const worstContinuationPrefix = \`🚢 Parte 99/99\\n\${colLegend}\\n\\n\`;
+const blocks = [];
+let curLines = [];
 for (const ln of lineStrings) {
-  const next = cur ? cur + '\\n' + ln : ln;
-  if (next.length > MAX && cur) {
-    rawChunks.push(cur);
-    cur = ln;
+  const nextLines = curLines.length > 0 ? [...curLines, ln] : [ln];
+  const blockStr = nextLines.join('\\n');
+  const prefixLen = blocks.length === 0 ? prefixFirst.length : worstContinuationPrefix.length;
+  if (blockStr.length + prefixLen > MANYCHAT_TEXT_LIMIT && curLines.length > 0) {
+    blocks.push(curLines.join('\\n'));
+    curLines = [ln];
   } else {
-    cur = next;
+    curLines = nextLines;
   }
 }
-if (cur) rawChunks.push(cur);
-const totalParts = rawChunks.length;
-const wa_messages = rawChunks.map((block, i) => ({
+if (curLines.length > 0) blocks.push(curLines.join('\\n'));
+const totalParts = blocks.length;
+const wa_messages = blocks.map((block, i) => ({
   type: 'text',
   text:
     i === 0
