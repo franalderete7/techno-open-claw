@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
-source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+# shellcheck source=_common.sh
+source "$(dirname "$0")/_common.sh"
 api_call GET "/v1/settings"
+echo

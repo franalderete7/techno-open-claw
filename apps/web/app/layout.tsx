@@ -5,7 +5,6 @@ import Script from "next/script";
 import { Instrument_Sans, Newsreader } from "next/font/google";
 import type { ReactNode } from "react";
 import { getSiteMode } from "../lib/site-mode";
-import { StorefrontPageViewTracker } from "./components/storefront-page-view-tracker";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -44,15 +43,8 @@ const metaPixelId = process.env.META_PIXEL_ID?.trim() || "";
 
 const navItems = [
   ["Dashboard", "/"],
-  ["Growth", "/growth"],
-  ["Products", "/products"],
-  ["Stock", "/stock"],
-  ["Purchases", "/purchases"],
-  ["Orders", "/orders"],
   ["Customers", "/customers"],
   ["Conversations", "/conversations"],
-  ["Schema", "/schema"],
-  ["Settings", "/settings"],
 ] as const;
 
 const sans = Instrument_Sans({
@@ -106,9 +98,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 <span className="eyebrow">Open Claw</span>
                 <h1 className="wordmark">TechnoStore Ops</h1>
               </div>
-              <p className="masthead-meta">
-                Catalog, growth, stock, customers, orders and workflows for the store and storefront.
-              </p>
+              <p className="masthead-meta">Customers and WhatsApp conversations (minimal ops).</p>
             </header>
 
             <nav>
@@ -132,10 +122,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             {children}
           </main>
         ) : (
-          <main className="storefront-main">
-            <StorefrontPageViewTracker />
-            {children}
-          </main>
+          <main className="storefront-main">{children}</main>
         )}
       </body>
     </html>

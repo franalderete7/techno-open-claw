@@ -1,9 +1,6 @@
-import { getConversations, getCustomers, getDashboard, getProducts, getSettings } from "../lib/api";
+import Link from "next/link";
+import { getConversations, getCustomers, getDashboard } from "../lib/api";
 import { getSiteMode } from "../lib/site-mode";
-import { buildStorefrontProducts, buildStorefrontProfile, excludeAppleStorefrontProducts } from "../lib/storefront";
-import { DashboardSearch } from "./components/dashboard-search";
-import { SettingView } from "./components/setting-view";
-import { StorefrontCatalog } from "./components/storefront-catalog";
 
 function formatDate(value: string | null) {
   if (!value) return "No activity yet";
@@ -17,177 +14,102 @@ export default async function HomePage() {
   const siteMode = await getSiteMode();
 
   if (siteMode === "storefront") {
-    let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
-    let settings = [] as Awaited<ReturnType<typeof getSettings>>["items"];
-    let error: string | null = null;
-
-    try {
-      const [productResponse, settingsResponse] = await Promise.all([getProducts(120, { active: true }), getSettings()]);
-      products = productResponse.items;
-      settings = settingsResponse.items;
-    } catch (caught) {
-      error = caught instanceof Error ? caught.message : "Failed to load storefront";
-    }
-
-    const store = buildStorefrontProfile(settings);
-    const storefrontProducts = excludeAppleStorefrontProducts(buildStorefrontProducts(products));
-
-    return error ? (
+    return (
       <div className="page-stack">
         <section className="panel">
-          <p className="empty">{error}</p>
+          <h2 className="hero-title">TechnoStore</h2>
+          <p className="empty">
+            Storefront is disabled in this deployment. Contact the store on WhatsApp for catalog and prices.
+          </p>
         </section>
       </div>
-    ) : (
-      <StorefrontCatalog
-        store={store}
-        products={storefrontProducts}
-        eyebrow="TechnoStore Salta"
-        title="Smartphones con precio final y pago directo."
-        lead="Elegi el modelo, comparalo por RAM, memoria o precio y recibi el link de pago por WhatsApp con atencion directa."
-      />
     );
   }
 
-  let dashboard = null;
-  let products = [] as Awaited<ReturnType<typeof getProducts>>["items"];
+  let dashboard = null as Awaited<ReturnType<typeof getDashboard>> | null;
   let customers = [] as Awaited<ReturnType<typeof getCustomers>>["items"];
   let conversations = [] as Awaited<ReturnType<typeof getConversations>>["items"];
-  let settings = [] as Awaited<ReturnType<typeof getSettings>>["items"];
   let error: string | null = null;
 
   try {
-      const [dashboardResponse, productResponse, customerResponse, conversationResponse, settingsResponse] = await Promise.all([
+    const [dashboardResponse, customerResponse, conversationResponse] = await Promise.all([
       getDashboard(),
-      getProducts(18),
       getCustomers(40),
       getConversations(20),
-      getSettings(),
     ]);
-
     dashboard = dashboardResponse;
-    products = productResponse.items;
     customers = customerResponse.items;
     conversations = conversationResponse.items;
-    settings = settingsResponse.items;
   } catch (caught) {
     error = caught instanceof Error ? caught.message : "Failed to load dashboard";
   }
 
-  const storeSetting = settings.find((item) => item.key === "store");
-
   return (
     <div className="page-stack">
       <section className="page-hero">
-        <span className="eyebrow">Overview</span>
-        <h2 className="hero-title">Control room</h2>
+        <span className="eyebrow">TechnoStore Ops</span>
+        <h2 className="hero-title">Dashboard</h2>
+        <p className="masthead-meta">Customers, conversations, and WhatsApp thread history.</p>
         {error ? <p className="empty">{error}</p> : null}
       </section>
 
       {dashboard ? (
-        <section className="stats-grid">
-          <article className="stat-card">
-            <span className="stat-label">Products</span>
-            <strong className="stat-value">{dashboard.products}</strong>
-          </article>
-          <article className="stat-card">
-            <span className="stat-label">In Stock Units</span>
-            <strong className="stat-value">{dashboard.inStockUnits}</strong>
-          </article>
-          <article className="stat-card">
-            <span className="stat-label">Customers</span>
-            <strong className="stat-value">{dashboard.customers}</strong>
-          </article>
-          <article className="stat-card">
-            <span className="stat-label">Open Conversations</span>
-            <strong className="stat-value">{dashboard.openConversations}</strong>
-          </article>
-          <article className="stat-card">
-            <span className="stat-label">Orders</span>
-            <strong className="stat-value">{dashboard.orders}</strong>
-          </article>
-          <article className="stat-card">
-            <span className="stat-label">Purchases</span>
-            <strong className="stat-value">{dashboard.inventoryPurchases}</strong>
-          </article>
+        <section className="panel">
+          <div className="chip-row">
+            <span className="chip accent">{dashboard.customers} customers</span>
+            <span className="chip good">{dashboard.openConversations} open threads</span>
+            <span className="chip">{dashboard.messages} messages</span>
+          </div>
         </section>
       ) : null}
 
-      <DashboardSearch products={products} customers={customers} conversations={conversations} settings={settings} />
-
-      <section className="split-grid">
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <h3 className="panel-title">Recent Products</h3>
-            </div>
-          </div>
-
-          {products.length === 0 ? (
-            <p className="empty">No products available.</p>
-          ) : (
-            <div className="activity-list">
-              {products.map((product) => (
-                <div key={product.id} className="activity-item">
-                  <strong>
-                    {product.brand} {product.model}
-                  </strong>
-                  <div className="chip-row">
-                    <span className="chip accent mono">{product.sku}</span>
-                    <span className={`chip ${product.active ? "good" : ""}`}>
-                      {product.active ? "Active" : "Inactive"}
-                    </span>
-                    <span className={`chip ${product.stock_units_available > 0 ? "good" : "warn"}`}>
-                      {product.stock_units_available} available
-                    </span>
-                  </div>
-                  <span className="muted">{product.title}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </article>
-
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <h3 className="panel-title">Recent Conversations</h3>
-            </div>
-          </div>
-
-          {conversations.length === 0 ? (
-            <p className="empty">No conversations available.</p>
-          ) : (
-            <div className="activity-list">
-              {conversations.map((conversation) => (
-                <div key={conversation.id} className="activity-item">
-                  <strong>
-                    {[conversation.first_name, conversation.last_name].filter(Boolean).join(" ") || "Unknown contact"}
-                  </strong>
-                  <div className="chip-row">
-                    <span className="chip accent">{conversation.channel}</span>
-                    <span className={`chip ${conversation.status === "open" ? "good" : "warn"}`}>
-                      {conversation.status}
-                    </span>
-                    <span className="chip mono">{conversation.channel_thread_key}</span>
-                  </div>
-                  <span className="muted">{formatDate(conversation.last_message_at)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </article>
+      <section className="panel">
+        <div className="panel-header">
+          <h3>Recent customers</h3>
+          <Link className="link" href="/customers">
+            View all
+          </Link>
+        </div>
+        <ul className="list-plain">
+          {customers.slice(0, 6).map((customer) => (
+            <li key={customer.id} className="list-row">
+              <div>
+                <strong>
+                  {customer.first_name || customer.last_name
+                    ? `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim()
+                    : "Unnamed"}
+                </strong>
+                <div className="muted small">{customer.phone || customer.email || "No contact"}</div>
+              </div>
+              <span className="muted small">{formatDate(customer.updated_at)}</span>
+            </li>
+          ))}
+        </ul>
       </section>
 
-      <article className="panel">
+      <section className="panel">
         <div className="panel-header">
-          <div>
-            <h3 className="panel-title">Store</h3>
-          </div>
+          <h3>Recent conversations</h3>
+          <Link className="link" href="/conversations">
+            View all
+          </Link>
         </div>
-
-        {storeSetting ? <SettingView value={storeSetting.value} /> : <p className="empty">No `store` setting found.</p>}
-      </article>
+        <ul className="list-plain">
+          {conversations.slice(0, 6).map((conversation) => (
+            <li key={conversation.id} className="list-row">
+              <div>
+                <Link className="link" href={`/conversations/${conversation.id}`}>
+                  {conversation.channel_thread_key}
+                </Link>
+                <div className="muted small">
+                  {conversation.first_name || conversation.phone || "Unknown customer"}
+                </div>
+              </div>
+              <span className="muted small">{formatDate(conversation.last_message_at)}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }

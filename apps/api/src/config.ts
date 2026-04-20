@@ -96,6 +96,10 @@ const configSchema = z.object({
   META_TEST_EVENT_CODE: z.string().default(""),
   META_API_VERSION: z.string().default("v25.0"),
   META_GRAPH_API_BASE: z.string().default("https://graph.facebook.com"),
+  /** JSON object for n8n v20 bot: name, store_address, store_phone, store_hours, store_website_url */
+  TECHNO_BOT_STORE_JSON: z.string().default(""),
+  /** Absolute or relative path to markdown/text price list for v20. Empty = default repo file data/techno-pricelist-abril.md */
+  TECHNO_PRICELIST_PATH: z.string().default(""),
 });
 
 export const config = configSchema.parse(process.env);

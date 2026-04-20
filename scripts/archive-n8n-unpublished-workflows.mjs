@@ -25,7 +25,13 @@
  *   N8N_CONTAINER_NAME — optional docker container name
  *   N8N_CONTAINER_TMP_DIR — default /tmp/techno-open-claw-n8n-archive-unpublished
  *   N8N_ARCHIVE_UNPUBLISHED_SKIP_NAMES — comma-separated exact workflow names to skip
+ *   N8N_ARCHIVE_UNPUBLISHED_SKIP_NAME_SUBSTRINGS — extra comma-separated substrings; name is skipped if it includes any
+ *   N8N_ARCHIVE_UNPUBLISHED_NO_DEFAULT_SKIPS — if "1", do not apply built-in skips (see below)
+ *   N8N_ARCHIVE_UNPUBLISHED_ONLY_NAME_PREFIX — if set, only consider workflows whose name starts with this prefix (e.g. "TechnoStore - v18")
  *   N8N_ARCHIVE_SKIP_CLI — if "1", do not use docker exec + n8n import fallback (default: CLI tried after HTTP fails)
+ *
+ * Built-in skips (unless N8N_ARCHIVE_UNPUBLISHED_NO_DEFAULT_SKIPS=1): any name containing "AI Sales Agent v20"
+ * so inactive production v20 workflows are not archived with experiments.
  *
  * @see https://docs.n8n.io/api/
  */
@@ -157,6 +163,36 @@ function parseSkipNames() {
       .map((s) => s.trim())
       .filter(Boolean),
   );
+}
+
+function parseSkipSubstrings() {
+  const raw = String(process.env.N8N_ARCHIVE_UNPUBLISHED_SKIP_NAME_SUBSTRINGS || "").trim();
+  const fromEnv = raw
+    ? raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  const noDefault = String(process.env.N8N_ARCHIVE_UNPUBLISHED_NO_DEFAULT_SKIPS || "").trim() === "1";
+  const defaults = noDefault ? [] : ["AI Sales Agent v20"];
+  return [...defaults, ...fromEnv];
+}
+
+function parseOnlyPrefix() {
+  const p = String(process.env.N8N_ARCHIVE_UNPUBLISHED_ONLY_NAME_PREFIX || "").trim();
+  return p || null;
+}
+
+function shouldSkipName(name, skipNames, skipSubstrings) {
+  if (skipNames.has(name)) return { skip: true, reason: "exact name in N8N_ARCHIVE_UNPUBLISHED_SKIP_NAMES" };
+  const lower = name.toLowerCase();
+  for (const sub of skipSubstrings) {
+    if (!sub) continue;
+    if (lower.includes(sub.toLowerCase())) {
+      return { skip: true, reason: `name contains protected substring "${sub}"` };
+    }
+  }
+  return { skip: false, reason: "" };
 }
 
 function buildAuth() {
@@ -369,24 +405,72 @@ async function main() {
 
   const auth = buildAuth();
   const skipNames = parseSkipNames();
+  const skipSubstrings = parseSkipSubstrings();
+  const onlyPrefix = parseOnlyPrefix();
   const container = findN8nContainer();
   const tmpDir = mkdtempSync(join(tmpdir(), "techno-open-claw-n8n-archive-"));
 
   try {
     exportAllWorkflows(container, tmpDir);
     const records = loadWorkflowRecords(tmpDir);
-    const candidates = records.filter(
-      (r) => !r.active && !r.archived && !skipNames.has(r.name),
-    );
+    const verbose = String(process.env.N8N_ARCHIVE_UNPUBLISHED_VERBOSE || "").trim() === "1";
+    const skippedDetails = [];
+
+    const candidates = records.filter((r) => {
+      if (r.active || r.archived) return false;
+      if (onlyPrefix && !r.name.startsWith(onlyPrefix)) {
+        if (verbose) skippedDetails.push({ ...r, why: `name does not start with prefix "${onlyPrefix}"` });
+        return false;
+      }
+      const { skip, reason } = shouldSkipName(r.name, skipNames, skipSubstrings);
+      if (skip) {
+        if (verbose) skippedDetails.push({ ...r, why: reason });
+        return false;
+      }
+      return true;
+    });
+
+    const protectedSkipCount = records.filter((r) => {
+      if (r.active || r.archived) return false;
+      if (onlyPrefix && !r.name.startsWith(onlyPrefix)) return false;
+      return shouldSkipName(r.name, skipNames, skipSubstrings).skip;
+    }).length;
+
+    if (verbose && skippedDetails.length > 0) {
+      console.log(`Skipped ${skippedDetails.length} unpublished workflow(s) (prefix / protected names):`);
+      for (const s of skippedDetails) {
+        console.log(` - ${s.name} (${s.id}) — ${s.why}`);
+      }
+      console.log("");
+    }
 
     if (candidates.length === 0) {
-      console.log("No unpublished, non-archived workflows found (after skip list).");
+      console.log("No unpublished, non-archived workflows found (after skip / prefix rules).");
+      if (protectedSkipCount > 0) {
+        console.log(
+          `${protectedSkipCount} unpublished workflow(s) skipped by name rules (e.g. protected v20). ` +
+            "Set N8N_ARCHIVE_UNPUBLISHED_VERBOSE=1 to list them.",
+        );
+      }
+      if (!onlyPrefix) {
+        console.log(
+          'Tip: use N8N_ARCHIVE_UNPUBLISHED_ONLY_NAME_PREFIX to limit by workflow name prefix.',
+        );
+      }
       return;
     }
 
     console.log(`Found ${candidates.length} unpublished workflow(s) to archive:`);
     for (const r of candidates) {
       console.log(` - ${r.name} (${r.id})`);
+    }
+    if (onlyPrefix) {
+      console.log(`(filtered by name prefix: "${onlyPrefix}")`);
+    }
+    if (protectedSkipCount > 0) {
+      console.log(
+        `(Also skipped ${protectedSkipCount} unpublished workflow(s) matching protected-name rules.)`,
+      );
     }
 
     if (!APPLY) {

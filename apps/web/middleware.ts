@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-const adminOnlyPrefixes = ["/stock", "/orders", "/customers", "/conversations", "/settings", "/schema", "/admin"];
+const adminOnlyPrefixes = ["/customers", "/conversations", "/admin"];
 
 function normalizeHost(rawHost: string | null) {
   return (rawHost ?? "")

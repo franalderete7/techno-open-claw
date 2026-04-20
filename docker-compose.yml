@@ -73,8 +73,6 @@ services:
       - "${API_PORT:-4000}:4000"
     volumes:
       - ./data:/app/data
-      # Expose v18 workflow JSON to the API so conversation review can load prompts (read-only).
-      - ./n8n:/app/review-repo/n8n:ro
 
   web:
     build:

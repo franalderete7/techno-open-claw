@@ -1,0 +1,503 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "techno-sales-v18",
+        "options": {}
+      },
+      "id": "66c0c28b-4c66-fc57-4243-1c05723d4e15",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        280
+      ],
+      "webhookId": "techno-sales-v18"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw || {};\n\nconst toBool = (value) => {\n  if (typeof value === 'boolean') return value;\n  const normalized = String(value ?? '').trim().toLowerCase();\n  return ['true', '1', 'yes', 'si', 'sí', 'y'].includes(normalized);\n};\n\nconst getCustomField = (fields, key) => {\n  if (Array.isArray(fields)) {\n    const hit = fields.find((item) => item?.name === key || item?.key === key || item?.field_name === key);\n    return hit?.value ?? '';\n  }\n  if (fields && typeof fields === 'object') {\n    return fields[key] ?? '';\n  }\n  return '';\n};\n\nconst subscriberId = String(body.subscriber_id || body.id || '');\nconst message = String(body.message || body.last_input_text || '').trim();\nconst customFields = body.custom_fields || {};\nconst storefrontOrderMatch = message.match(/pedido\\s+web\\s*#?\\s*(\\d+)[^\\n]*?\\btoken\\b\\s*([a-z0-9_-]{8,64})/i) || message.match(/#(\\d+)[^\\n]*?\\btoken\\b\\s*([a-z0-9_-]{8,64})/i);\nconst storefrontOrderId = storefrontOrderMatch ? Number(storefrontOrderMatch[1]) : null;\nconst storefrontOrderToken = storefrontOrderMatch ? String(storefrontOrderMatch[2] || '').trim().toLowerCase() : '';\n\nreturn [{\n  json: {\n    subscriber_id: subscriberId,\n    first_name: body.first_name || 'amigo',\n    last_name: body.last_name || '',\n    phone: body.whatsapp_phone || body.phone || '',\n    timezone: body.timezone || '',\n    channel: 'manychat',\n    city: getCustomField(customFields, 'city'),\n    funnel_stage: getCustomField(customFields, 'funnel_stage'),\n    interested_product: getCustomField(customFields, 'interested_product'),\n    is_human_active: toBool(getCustomField(customFields, 'is_human_active')),\n    raw_message: message,\n    is_audio: message.startsWith('https://') && (message.includes('fbsbx.com') || message.includes('fbcdn.net') || message.includes('manybot-files.s3')),\n    is_empty: !message,\n    storefront_order_id: Number.isFinite(storefrontOrderId) ? storefrontOrderId : null,\n    storefront_order_token: storefrontOrderToken || '',\n  }\n}];"
+      },
+      "id": "7cea7c3c-8429-9390-ea63-1b88db75ca10",
+      "name": "Parse Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9d344106-acfc-86c5-646a-ed97086d72b5",
+              "leftValue": "={{ $json.is_audio }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0cf5b8a1-2edb-b060-57f7-9d265a6bf2c7",
+      "name": "Is Audio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -380,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.raw_message }}",
+        "options": {
+          "response": {
+            "responseFormat": "file",
+            "outputPropertyName": "data"
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "800afdf8-861a-b5f7-f7fc-d43be81ac055",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -120,
+        120
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3-turbo"
+            },
+            {
+              "name": "language",
+              "value": "es"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "96c44e0c-80a1-200a-4fe9-f63f08dbe876",
+      "name": "Groq Whisper Transcribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        120
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mw4ftZwdAxSdWFjU",
+          "name": "Groq Whisper"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const parsed = $('Parse Input').first().json;\nlet userMessage = String(parsed.raw_message || '');\nlet wasAudio = false;\n\ntry {\n  const whisper = $('Groq Whisper Transcribe').first().json;\n  if (whisper && typeof whisper === 'object' && whisper.text) {\n    userMessage = String(whisper.text).trim();\n    wasAudio = true;\n  }\n} catch (error) {\n  wasAudio = false;\n}\n\nreturn [{\n  json: {\n    ...parsed,\n    user_message: userMessage.trim() || '(vacío)',\n    was_audio: wasAudio,\n  }\n}];"
+      },
+      "id": "0d4ee406-22bf-e238-5092-2b3657970dcd",
+      "name": "Merge Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/rpc/upsert_customer",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_manychat_id: String($json.subscriber_id || \"\"), p_phone: String($json.phone || \"\"), p_whatsapp_phone: String($json.phone || \"\"), p_first_name: String($json.first_name || \"\"), p_last_name: String($json.last_name || \"\"), p_timezone: String($json.timezone || \"\") }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "37e349bc-1fd2-f6aa-930b-cdc432eae4c2",
+      "name": "Upsert Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        280
+      ],
+      "continueOnFail": false,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Merge Input').first().json || {};\nconst raw = $input.first().json;\n\nconst pickId = (value) => {\n  if (value == null || value === '') return null;\n  const num = Number(value);\n  return Number.isFinite(num) && num > 0 ? num : null;\n};\n\nconst candidates = [];\n\nif (Array.isArray(raw)) {\n  candidates.push(...raw);\n}\n\nif (raw && typeof raw === 'object') {\n  candidates.push(raw);\n\n  for (const key of ['body', 'data', 'result']) {\n    const nested = raw[key];\n    if (Array.isArray(nested)) {\n      candidates.push(...nested);\n    } else if (nested && typeof nested === 'object') {\n      candidates.push(nested);\n    }\n  }\n}\n\nlet customerId = null;\n\nfor (const candidate of candidates) {\n  if (!candidate || typeof candidate !== 'object') continue;\n  customerId = pickId(candidate.upsert_customer ?? candidate.customer_id ?? candidate.id);\n  if (customerId != null) break;\n}\n\nreturn [{\n  json: {\n    ...base,\n    customer_id: customerId,\n  }\n}];"
+      },
+      "id": "f8770212-f8bd-85a4-6c66-8e49a1f6f456",
+      "name": "Attach Customer Id",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ manychat_id: String($json.subscriber_id), customer_id: Number($json.customer_id) > 0 ? Number($json.customer_id) : null, role: \"user\", message: $json.user_message || \"(vacío)\", message_type: $json.was_audio ? \"audio\" : \"text\", was_audio: $json.was_audio || false, audio_transcription: $json.was_audio ? $json.user_message : null, intent_detected: null, products_mentioned: [], triggered_human: false, channel: \"manychat\", external_message_id: null, whatsapp_phone_number_id: null }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "423a5e24-c219-9f5a-1230-9f2351f461dc",
+      "name": "Save Incoming Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        280
+      ],
+      "continueOnFail": false,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Attach Customer Id').first().json || {};\nconst raw = $input.first().json;\n\nconst pickId = (value) => {\n  if (value == null || value === '') return null;\n  const num = Number(value);\n  return Number.isFinite(num) && num > 0 ? num : null;\n};\nconst pickBool = (value) => value === true || value === 'true';\n\nconst candidates = [];\n\nif (Array.isArray(raw)) {\n  candidates.push(...raw);\n}\n\nif (raw && typeof raw === 'object') {\n  candidates.push(raw);\n\n  for (const key of ['body', 'data', 'result']) {\n    const nested = raw[key];\n    if (Array.isArray(nested)) {\n      candidates.push(...nested);\n    } else if (nested && typeof nested === 'object') {\n      candidates.push(nested);\n    }\n  }\n}\n\nlet savedMessageId = null;\nlet savedMessageDuplicate = false;\n\nfor (const candidate of candidates) {\n  if (!candidate || typeof candidate !== 'object') continue;\n  savedMessageId = pickId(candidate.id ?? candidate.message_id ?? candidate.saved_message_id);\n  savedMessageDuplicate = pickBool(candidate.duplicate);\n  if (savedMessageId != null) break;\n}\n\nreturn [{\n  json: {\n    ...base,\n    saved_message_id: savedMessageId,\n    saved_message_duplicate: savedMessageDuplicate,\n  }\n}];"
+      },
+      "id": "84747db0-83b1-5e97-a206-0ffd7af995cc",
+      "name": "Attach Saved Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nawait new Promise((resolve) => setTimeout(resolve, 8000));\nreturn [{ json: item }];"
+      },
+      "id": "cceff924-4747-7c16-7814-9c84014ae163",
+      "name": "Wait 8s Debounce",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_API_BASE_URL }}/rest/v1/rpc/check_is_latest_message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENCLAW_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_manychat_id: $json.subscriber_id, p_message_id: $json.saved_message_id || 0 }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "c142544a-56a1-87e5-2edd-c9642018b4f8",
+      "name": "Check Is Latest (RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2060,
+        280
+      ],
+      "continueOnFail": false,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Wait 8s Debounce').first().json || {};\nconst rpcResult = $input.first().json;\n\nconst pickBool = (value) => value === true || value === 'true';\nconst pickId = (value) => {\n  if (value == null || value === '') return null;\n  const num = Number(value);\n  return Number.isFinite(num) && num > 0 ? num : null;\n};\n\nconst candidates = [];\nconst visit = (value) => {\n  if (value == null) return;\n\n  if (typeof value === 'string') {\n    try {\n      visit(JSON.parse(value));\n    } catch (error) {}\n    return;\n  }\n\n  if (typeof value === 'boolean') {\n    candidates.push(value);\n    return;\n  }\n\n  if (Array.isArray(value)) {\n    for (const item of value) {\n      visit(item);\n    }\n    return;\n  }\n\n  if (typeof value === 'object') {\n    candidates.push(value);\n    for (const key of ['body', 'data', 'result']) {\n      visit(value[key]);\n    }\n  }\n};\n\nvisit(rpcResult);\n\nlet isLatest = null;\nlet latestMessageId = null;\nlet checkedMessageId = pickId(base.saved_message_id);\n\nfor (const candidate of candidates) {\n  if (typeof candidate === 'boolean') {\n    isLatest = candidate;\n    break;\n  }\n\n  if (!candidate || typeof candidate !== 'object') continue;\n\n  if (latestMessageId == null) {\n    latestMessageId = pickId(candidate.latest_message_id ?? candidate.latestMessageId);\n  }\n\n  if (checkedMessageId == null) {\n    checkedMessageId = pickId(candidate.checked_message_id ?? candidate.checkedMessageId ?? candidate.message_id);\n  }\n\n  if (candidate.check_is_latest_message !== undefined) {\n    isLatest = pickBool(candidate.check_is_latest_message);\n    break;\n  }\n\n  if (candidate.result !== undefined && typeof candidate.result !== 'object') {\n    isLatest = pickBool(candidate.result);\n    break;\n  }\n}\n\nif (isLatest == null && latestMessageId != null && checkedMessageId != null) {\n  isLatest = latestMessageId === checkedMessageId;\n}\n\nconst isDuplicateSavedMessage = base.saved_message_duplicate === true;\nconst debounceReason =\n  base.saved_message_id == null\n    ? 'missing_saved_message_id'\n    : isDuplicateSavedMessage\n      ? 'duplicate_saved_message'\n      : base.is_empty\n        ? 'empty_message'\n        : isLatest == null\n          ? 'rpc_shape_unknown'\n          : isLatest === true\n            ? 'latest'\n            : 'not_latest';\n\nreturn [{\n  json: {\n    ...base,\n    should_continue: base.saved_message_id != null && isLatest === true && !base.is_empty && !isDuplicateSavedMessage,\n    debounce_reason: debounceReason,\n    rpc_is_latest: isLatest,\n    rpc_latest_message_id: latestMessageId,\n    rpc_checked_message_id: checkedMessageId,\n  }\n}];"
+      },
+      "id": "0d5668c3-640f-a39d-a2ab-62cdabe0f06c",
+      "name": "Debounce Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b067d32a-122a-932e-d98b-a8f2f5ca5ec0",
+              "leftValue": "={{ $json.should_continue }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3c06a2f9-26a6-c4df-db4c-979553d1906d",
+      "name": "Is Latest?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2600,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Input": {
+      "main": [
+        [
+          {
+            "node": "Is Audio?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Audio?": {
+      "main": [
+        [
+          {
+            "node": "Download Audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio": {
+      "main": [
+        [
+          {
+            "node": "Groq Whisper Transcribe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Whisper Transcribe": {
+      "main": [
+        [
+          {
+            "node": "Merge Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Input": {
+      "main": [
+        [
+          {
+            "node": "Upsert Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Customer": {
+      "main": [
+        [
+          {
+            "node": "Attach Customer Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Customer Id": {
+      "main": [
+        [
+          {
+            "node": "Save Incoming Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Incoming Message": {
+      "main": [
+        [
+          {
+            "node": "Attach Saved Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Saved Message": {
+      "main": [
+        [
+          {
+            "node": "Wait 8s Debounce",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 8s Debounce": {
+      "main": [
+        [
+          {
+            "node": "Check Is Latest (RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Is Latest (RPC)": {
+      "main": [
+        [
+          {
+            "node": "Debounce Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Debounce Check": {
+      "main": [
+        [
+          {
+            "node": "Is Latest?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Latest?": {
+      "main": [
+        [],
+        []
+      ]
+    }
+  }
+}
