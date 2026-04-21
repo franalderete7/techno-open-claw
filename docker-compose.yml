@@ -45,10 +45,16 @@ services:
         until pg_isready -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"; do
           sleep 2
         done
+        count=0
         for file in /migrations/*.sql; do
+          [ -f "$$file" ] || continue
           echo "Applying $$(basename "$$file")"
           psql -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -f "$$file"
+          count=$$((count + 1))
         done
+        if [ "$$count" -eq 0 ]; then
+          echo "No .sql files under /migrations; nothing to apply."
+        fi
 
   api:
     build:
