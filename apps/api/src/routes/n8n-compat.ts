@@ -6,27 +6,134 @@ import { query } from "../db.js";
 import { config } from "../config.js";
 
 const routesDir = dirname(fileURLToPath(import.meta.url));
-/** Repo root: .../apps/api/src/routes → four levels up */
-const repoRoot = resolve(routesDir, "../../../..");
+const PRICELIST_FILE = "techno-pricelist-abril.md";
 
-function loadPricelistText(): { text: string; source: string } {
+/** Walk directory upward looking for data/<file> (works in Docker /app and monorepo). */
+function findPricelistFile(): { abs: string; label: string } | null {
+  const tryRoots = (start: string, prefix: string) => {
+    let dir = start;
+    for (let i = 0; i < 12; i++) {
+      const abs = resolve(dir, "data", PRICELIST_FILE);
+      if (existsSync(abs)) {
+        return { abs, label: `${prefix}data/${PRICELIST_FILE}` };
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return null;
+  };
+
   const explicit = config.TECHNO_PRICELIST_PATH?.trim();
-  const defaultPath = resolve(repoRoot, "data/techno-pricelist-abril.md");
-  const tryPaths: Array<{ abs: string; label: string }> = [];
-
   if (explicit) {
     const abs = explicit.startsWith("/") ? explicit : resolve(process.cwd(), explicit);
-    tryPaths.push({ abs, label: explicit });
-  }
-  tryPaths.push({ abs: defaultPath, label: "data/techno-pricelist-abril.md" });
-
-  for (const { abs, label } of tryPaths) {
-    if (abs && existsSync(abs)) {
-      return { text: readFileSync(abs, "utf8"), source: label };
+    if (existsSync(abs)) {
+      return { abs, label: explicit };
     }
   }
 
-  return { text: "", source: "none" };
+  const fromCwd = tryRoots(process.cwd(), "cwd:");
+  if (fromCwd) return fromCwd;
+
+  const fromRoutes = tryRoots(routesDir, "near-api:");
+  if (fromRoutes) return fromRoutes;
+
+  return null;
+}
+
+function loadPricelistText(): { text: string; source: string } {
+  const found = findPricelistFile();
+  if (!found) {
+    return { text: "", source: "none" };
+  }
+  return { text: readFileSync(found.abs, "utf8"), source: found.label };
+}
+
+function asSettingsObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function pickStoreString(obj: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const v = obj[key];
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+/** Parse TECHNO_BOT_STORE_JSON — partial overrides on top of DB `settings.store`. */
+function storeOverridesFromEnv(): Record<string, unknown> {
+  const raw = config.TECHNO_BOT_STORE_JSON?.trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return asSettingsObject(parsed) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+async function buildStoreForV20(): Promise<Record<string, unknown>> {
+  const defaults: Record<string, unknown> = {
+    name: "TechnoStore",
+    store_address: null,
+    store_phone: null,
+    store_hours: null,
+    store_website_url: null,
+  };
+
+  let fromDb: Record<string, unknown> = {};
+
+  try {
+    const rows = await query<{ value: unknown }>(
+      `select value from public.settings where key = 'store' limit 1`
+    );
+    const raw = rows[0]?.value;
+    const obj = asSettingsObject(raw);
+    if (obj) {
+      fromDb = {
+        name: pickStoreString(obj, "name") ?? defaults.name,
+        store_address: pickStoreString(obj, "store_address", "address", "store_address_line", "direccion"),
+        store_phone: pickStoreString(
+          obj,
+          "store_phone",
+          "phone",
+          "whatsapp",
+          "whatsapp_phone",
+          "store_whatsapp_phone",
+          "tel"
+        ),
+        store_hours: pickStoreString(obj, "store_hours", "hours", "opening_hours", "horarios"),
+        store_website_url: pickStoreString(
+          obj,
+          "store_website_url",
+          "storefront_url",
+          "website",
+          "url",
+          "ops_host"
+        ),
+      };
+    }
+  } catch {
+    /* table missing or connection issue */
+  }
+
+  const envObj = storeOverridesFromEnv();
+
+  const merged = { ...defaults, ...fromDb };
+  for (const key of ["name", "store_address", "store_phone", "store_hours", "store_website_url"]) {
+    const v = envObj[key];
+    if (v != null && String(v).trim() !== "") {
+      merged[key] = typeof v === "string" ? v.trim() : v;
+    }
+  }
+
+  return merged;
 }
 
 type NotesState = {
@@ -191,25 +298,6 @@ function parsePositiveId(value: unknown) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function defaultStoreFromConfig(): Record<string, unknown> {
-  const raw = config.TECHNO_BOT_STORE_JSON?.trim();
-  if (!raw) {
-    return {
-      name: "TechnoStore",
-      store_address: null,
-      store_phone: null,
-      store_hours: null,
-      store_website_url: null,
-    };
-  }
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return { name: "TechnoStore", raw_store_json_invalid: true };
-  }
 }
 
 export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
@@ -574,7 +662,7 @@ export const n8nCompatRoutes: FastifyPluginAsync = async (app) => {
       last_bot_interaction: customerState.lastBotInteraction,
     };
 
-    const store = defaultStoreFromConfig();
+    const store = await buildStoreForV20();
     const pricelist = loadPricelistText();
 
     return reply.send({
